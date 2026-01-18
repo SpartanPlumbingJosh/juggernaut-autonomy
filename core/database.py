@@ -1237,3 +1237,773 @@ def get_experiment_roi(experiment_id: str) -> Dict[str, Any]:
     except Exception as e:
         print(f"Failed to get experiment ROI: {e}")
         return {}
+
+
+# ============================================================
+# SCORING MODELS FUNCTIONS (Phase 3.4)
+# ============================================================
+
+def create_model(
+    name: str,
+    model_type: str,
+    config: Dict,
+    created_by: str = "SYSTEM"
+) -> Optional[str]:
+    """
+    Create a new scoring model.
+    
+    Args:
+        name: Unique model name (e.g., 'opportunity_scorer', 'lead_qualifier')
+        model_type: Type of model ('classifier', 'regressor', 'ranker', 'rule_based')
+        config: Model configuration JSON containing:
+            - features: list of feature names
+            - weights: dict of feature weights (for rule-based)
+            - thresholds: classification thresholds
+            - algorithm: algorithm name (for ML models)
+            - hyperparameters: model hyperparameters
+        created_by: Who created the model
+    
+    Returns:
+        Model UUID
+    """
+    data = {
+        "name": name,
+        "model_type": model_type,
+        "config": config,
+        "version": 1,
+        "active": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    try:
+        return _db.insert("scoring_models", data)
+    except Exception as e:
+        print(f"Failed to create model: {e}")
+        return None
+
+
+def get_model(model_id: str = None, name: str = None, active_only: bool = False) -> Optional[Dict]:
+    """
+    Get a model by ID or name.
+    
+    Args:
+        model_id: Model UUID
+        name: Model name
+        active_only: If True, only return if model is active
+    
+    Returns:
+        Model dict or None
+    """
+    conditions = []
+    if model_id:
+        conditions.append(f"id = '{model_id}'")
+    if name:
+        conditions.append(f"name = '{name}'")
+    if active_only:
+        conditions.append("active = TRUE")
+    
+    if not conditions:
+        return None
+    
+    where = f"WHERE {' AND '.join(conditions)}"
+    sql = f"SELECT * FROM scoring_models {where} ORDER BY version DESC LIMIT 1"
+    
+    try:
+        result = _db.query(sql)
+        rows = result.get("rows", [])
+        return rows[0] if rows else None
+    except Exception as e:
+        print(f"Failed to get model: {e}")
+        return None
+
+
+def list_models(model_type: str = None, active_only: bool = False) -> List[Dict]:
+    """List all models, optionally filtered."""
+    conditions = []
+    if model_type:
+        conditions.append(f"model_type = '{model_type}'")
+    if active_only:
+        conditions.append("active = TRUE")
+    
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"SELECT * FROM scoring_models {where} ORDER BY name, version DESC"
+    
+    try:
+        return _db.query(sql).get("rows", [])
+    except Exception as e:
+        print(f"Failed to list models: {e}")
+        return []
+
+
+def create_model_version(
+    model_id: str,
+    config: Dict,
+    created_by: str = "SYSTEM"
+) -> Optional[str]:
+    """
+    Create a new version of an existing model.
+    
+    Args:
+        model_id: ID of the model to version
+        config: New configuration
+        created_by: Who created this version
+    
+    Returns:
+        New model version UUID
+    """
+    # Get current model
+    current = get_model(model_id=model_id)
+    if not current:
+        print(f"Model {model_id} not found")
+        return None
+    
+    # Create new version
+    data = {
+        "name": current["name"],
+        "model_type": current["model_type"],
+        "config": config,
+        "version": current["version"] + 1,
+        "active": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    try:
+        new_id = _db.insert("scoring_models", data)
+        log_execution(
+            worker_id="SYSTEM",
+            action="model.version_created",
+            message=f"Created version {data['version']} of model {current['name']}",
+            output_data={"model_id": new_id, "version": data["version"]}
+        )
+        return new_id
+    except Exception as e:
+        print(f"Failed to create model version: {e}")
+        return None
+
+
+def activate_model(model_id: str) -> bool:
+    """
+    Activate a model (and deactivate other versions with same name).
+    
+    Args:
+        model_id: Model UUID to activate
+    
+    Returns:
+        True if successful
+    """
+    model = get_model(model_id=model_id)
+    if not model:
+        return False
+    
+    try:
+        # Deactivate other versions
+        _db.query(f"UPDATE scoring_models SET active = FALSE WHERE name = '{model['name']}'")
+        
+        # Activate this version
+        _db.query(f"UPDATE scoring_models SET active = TRUE, updated_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = '{model_id}'")
+        
+        log_execution(
+            worker_id="SYSTEM",
+            action="model.activated",
+            message=f"Activated model {model['name']} version {model['version']}",
+            output_data={"model_id": model_id, "version": model["version"]}
+        )
+        return True
+    except Exception as e:
+        print(f"Failed to activate model: {e}")
+        return False
+
+
+def rollback_model(name: str, to_version: int = None) -> bool:
+    """
+    Rollback a model to a previous version.
+    
+    Args:
+        name: Model name
+        to_version: Version to rollback to (default: previous version)
+    
+    Returns:
+        True if successful
+    """
+    # Get current active version
+    current = get_model(name=name, active_only=True)
+    if not current:
+        print(f"No active model found for {name}")
+        return False
+    
+    # Find target version
+    if to_version:
+        sql = f"SELECT id FROM scoring_models WHERE name = '{name}' AND version = {to_version}"
+    else:
+        # Get previous version
+        sql = f"SELECT id FROM scoring_models WHERE name = '{name}' AND version < {current['version']} ORDER BY version DESC LIMIT 1"
+    
+    try:
+        result = _db.query(sql)
+        rows = result.get("rows", [])
+        if not rows:
+            print(f"No previous version found for {name}")
+            return False
+        
+        target_id = rows[0]["id"]
+        return activate_model(target_id)
+    except Exception as e:
+        print(f"Failed to rollback model: {e}")
+        return False
+
+
+# ============================================================
+# PREDICTION TRACKING FUNCTIONS
+# ============================================================
+
+def record_prediction(
+    model_id: str,
+    predicted_score: float,
+    predicted_outcome: str = None,
+    opportunity_id: str = None,
+    prediction_factors: Dict = None
+) -> Optional[str]:
+    """
+    Record a prediction made by a model.
+    
+    Args:
+        model_id: Model that made the prediction
+        predicted_score: Numeric score (0.0-1.0 for classifiers)
+        predicted_outcome: Categorical outcome (e.g., 'convert', 'churn')
+        opportunity_id: Related opportunity UUID
+        prediction_factors: JSON explaining factors that influenced prediction
+    
+    Returns:
+        Prediction outcome UUID
+    """
+    data = {
+        "model_id": model_id,
+        "predicted_score": predicted_score,
+        "predicted_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if predicted_outcome:
+        data["predicted_outcome"] = predicted_outcome
+    if opportunity_id:
+        data["opportunity_id"] = opportunity_id
+    if prediction_factors:
+        data["prediction_factors"] = prediction_factors
+    
+    try:
+        return _db.insert("prediction_outcomes", data)
+    except Exception as e:
+        print(f"Failed to record prediction: {e}")
+        return None
+
+
+def resolve_prediction(
+    prediction_id: str,
+    actual_outcome: str,
+    actual_value: float = None
+) -> bool:
+    """
+    Record the actual outcome of a prediction.
+    
+    Args:
+        prediction_id: Prediction UUID
+        actual_outcome: What actually happened
+        actual_value: Numeric actual value (for regression)
+    
+    Returns:
+        True if successful
+    """
+    # Get the prediction
+    sql = f"SELECT predicted_score, predicted_outcome FROM prediction_outcomes WHERE id = '{prediction_id}'"
+    result = _db.query(sql)
+    rows = result.get("rows", [])
+    if not rows:
+        return False
+    
+    prediction = rows[0]
+    
+    # Calculate correctness
+    correct = prediction.get("predicted_outcome") == actual_outcome if prediction.get("predicted_outcome") else None
+    error_magnitude = abs(float(prediction["predicted_score"]) - actual_value) if actual_value is not None else None
+    
+    update_sql = f"""
+        UPDATE prediction_outcomes 
+        SET actual_outcome = '{actual_outcome}',
+            actual_value = {actual_value if actual_value is not None else 'NULL'},
+            correct = {str(correct).upper() if correct is not None else 'NULL'},
+            error_magnitude = {error_magnitude if error_magnitude is not None else 'NULL'},
+            resolved_at = '{datetime.now(timezone.utc).isoformat()}'
+        WHERE id = '{prediction_id}'
+    """
+    
+    try:
+        _db.query(update_sql)
+        return True
+    except Exception as e:
+        print(f"Failed to resolve prediction: {e}")
+        return False
+
+
+def get_model_accuracy(model_id: str, days: int = 30) -> Dict[str, Any]:
+    """
+    Calculate accuracy metrics for a model.
+    
+    Args:
+        model_id: Model UUID
+        days: Days to analyze
+    
+    Returns:
+        Accuracy metrics dict
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    
+    sql = f"""
+        SELECT 
+            COUNT(*) as total_predictions,
+            COUNT(resolved_at) as resolved_predictions,
+            SUM(CASE WHEN correct = TRUE THEN 1 ELSE 0 END) as correct_count,
+            AVG(CASE WHEN correct IS NOT NULL THEN (CASE WHEN correct THEN 1.0 ELSE 0.0 END) END) as accuracy,
+            AVG(ABS(error_magnitude)) as mean_absolute_error,
+            PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ABS(error_magnitude)) as median_error
+        FROM prediction_outcomes
+        WHERE model_id = '{model_id}'
+          AND predicted_at >= '{cutoff}'
+    """
+    
+    try:
+        result = _db.query(sql)
+        row = result.get("rows", [{}])[0]
+        
+        return {
+            "model_id": model_id,
+            "period_days": days,
+            "total_predictions": int(row.get("total_predictions") or 0),
+            "resolved_predictions": int(row.get("resolved_predictions") or 0),
+            "correct_count": int(row.get("correct_count") or 0),
+            "accuracy": round(float(row.get("accuracy") or 0) * 100, 2),
+            "mean_absolute_error": round(float(row.get("mean_absolute_error") or 0), 4),
+            "median_error": round(float(row.get("median_error") or 0), 4) if row.get("median_error") else None
+        }
+    except Exception as e:
+        print(f"Failed to get model accuracy: {e}")
+        return {}
+
+
+def update_model_accuracy(model_id: str) -> bool:
+    """Update a model's accuracy based on resolved predictions."""
+    accuracy = get_model_accuracy(model_id)
+    if not accuracy:
+        return False
+    
+    sql = f"""
+        UPDATE scoring_models 
+        SET accuracy = {accuracy['accuracy']},
+            sample_count = {accuracy['resolved_predictions']},
+            updated_at = '{datetime.now(timezone.utc).isoformat()}'
+        WHERE id = '{model_id}'
+    """
+    
+    try:
+        _db.query(sql)
+        return True
+    except Exception as e:
+        print(f"Failed to update model accuracy: {e}")
+        return False
+
+
+# ============================================================
+# A/B TESTING FUNCTIONS
+# ============================================================
+
+def create_ab_test(
+    experiment_name: str,
+    model_a_id: str,
+    model_b_id: str,
+    traffic_split: float = 0.5,
+    metric_name: str = "accuracy",
+    created_by: str = "SYSTEM",
+    metadata: Dict = None
+) -> Optional[str]:
+    """
+    Create an A/B test between two models.
+    
+    Args:
+        experiment_name: Name for the experiment
+        model_a_id: Control model UUID
+        model_b_id: Challenger model UUID
+        traffic_split: Fraction of traffic to model B (0.0-1.0)
+        metric_name: Metric to optimize (accuracy, conversion, revenue)
+        created_by: Who created this test
+        metadata: Additional experiment metadata
+    
+    Returns:
+        Experiment UUID
+    """
+    data = {
+        "experiment_name": experiment_name,
+        "model_a_id": model_a_id,
+        "model_b_id": model_b_id,
+        "traffic_split": traffic_split,
+        "metric_name": metric_name,
+        "status": "running",
+        "model_a_samples": 0,
+        "model_b_samples": 0,
+        "created_by": created_by
+    }
+    
+    if metadata:
+        data["metadata"] = metadata
+    
+    try:
+        exp_id = _db.insert("model_experiments", data)
+        log_execution(
+            worker_id="SYSTEM",
+            action="ab_test.created",
+            message=f"Started A/B test: {experiment_name}",
+            output_data={"experiment_id": exp_id, "model_a": model_a_id, "model_b": model_b_id}
+        )
+        return exp_id
+    except Exception as e:
+        print(f"Failed to create A/B test: {e}")
+        return None
+
+
+def get_ab_test_model(experiment_id: str) -> Optional[str]:
+    """
+    Get which model to use for a prediction in an A/B test.
+    Uses traffic_split to randomly assign.
+    
+    Args:
+        experiment_id: Experiment UUID
+    
+    Returns:
+        Model UUID to use, or None if experiment not found/running
+    """
+    import random
+    
+    sql = f"SELECT * FROM model_experiments WHERE id = '{experiment_id}' AND status = 'running'"
+    result = _db.query(sql)
+    rows = result.get("rows", [])
+    
+    if not rows:
+        return None
+    
+    exp = rows[0]
+    
+    # Random assignment based on traffic split
+    if random.random() < float(exp["traffic_split"]):
+        model_id = exp["model_b_id"]
+        update_sql = f"UPDATE model_experiments SET model_b_samples = model_b_samples + 1 WHERE id = '{experiment_id}'"
+    else:
+        model_id = exp["model_a_id"]
+        update_sql = f"UPDATE model_experiments SET model_a_samples = model_a_samples + 1 WHERE id = '{experiment_id}'"
+    
+    try:
+        _db.query(update_sql)
+    except:
+        pass
+    
+    return model_id
+
+
+def update_ab_test_metrics(experiment_id: str) -> Dict[str, Any]:
+    """
+    Update metrics for an A/B test based on prediction outcomes.
+    
+    Args:
+        experiment_id: Experiment UUID
+    
+    Returns:
+        Updated metrics dict
+    """
+    sql = f"SELECT * FROM model_experiments WHERE id = '{experiment_id}'"
+    result = _db.query(sql)
+    rows = result.get("rows", [])
+    
+    if not rows:
+        return {}
+    
+    exp = rows[0]
+    
+    # Get accuracy for both models (only for predictions during this experiment)
+    model_a_accuracy = get_model_accuracy(exp["model_a_id"])
+    model_b_accuracy = get_model_accuracy(exp["model_b_id"])
+    
+    model_a_metric = model_a_accuracy.get("accuracy", 0)
+    model_b_metric = model_b_accuracy.get("accuracy", 0)
+    
+    # Calculate statistical significance (simple z-test approximation)
+    n_a = exp["model_a_samples"] or 1
+    n_b = exp["model_b_samples"] or 1
+    p_a = model_a_metric / 100
+    p_b = model_b_metric / 100
+    
+    pooled_se = ((p_a * (1 - p_a) / n_a) + (p_b * (1 - p_b) / n_b)) ** 0.5
+    z_score = (p_b - p_a) / pooled_se if pooled_se > 0 else 0
+    
+    # Approximate confidence level from z-score
+    confidence = min(0.99, abs(z_score) / 3)  # Simplified
+    
+    update_sql = f"""
+        UPDATE model_experiments 
+        SET model_a_metric = {model_a_metric},
+            model_b_metric = {model_b_metric},
+            confidence_level = {confidence}
+        WHERE id = '{experiment_id}'
+    """
+    
+    try:
+        _db.query(update_sql)
+    except:
+        pass
+    
+    return {
+        "experiment_id": experiment_id,
+        "model_a_samples": n_a,
+        "model_b_samples": n_b,
+        "model_a_metric": model_a_metric,
+        "model_b_metric": model_b_metric,
+        "confidence_level": round(confidence, 3),
+        "winner": "B" if model_b_metric > model_a_metric else "A" if model_a_metric > model_b_metric else "TIE"
+    }
+
+
+def conclude_ab_test(experiment_id: str, winner: str = None) -> bool:
+    """
+    Conclude an A/B test and optionally declare a winner.
+    
+    Args:
+        experiment_id: Experiment UUID
+        winner: 'A', 'B', or None to auto-determine
+    
+    Returns:
+        True if successful
+    """
+    sql = f"SELECT * FROM model_experiments WHERE id = '{experiment_id}'"
+    result = _db.query(sql)
+    rows = result.get("rows", [])
+    
+    if not rows:
+        return False
+    
+    exp = rows[0]
+    
+    # Auto-determine winner if not specified
+    if not winner:
+        metrics = update_ab_test_metrics(experiment_id)
+        if metrics.get("confidence_level", 0) >= 0.95:
+            winner = metrics.get("winner")
+        else:
+            winner = "INCONCLUSIVE"
+    
+    winner_id = None
+    if winner == "A":
+        winner_id = exp["model_a_id"]
+    elif winner == "B":
+        winner_id = exp["model_b_id"]
+    
+    update_sql = f"""
+        UPDATE model_experiments 
+        SET status = 'completed',
+            winner_id = {f"'{winner_id}'" if winner_id else "NULL"},
+            ended_at = '{datetime.now(timezone.utc).isoformat()}'
+        WHERE id = '{experiment_id}'
+    """
+    
+    try:
+        _db.query(update_sql)
+        
+        # Auto-activate winner if conclusive
+        if winner_id:
+            activate_model(winner_id)
+            log_execution(
+                worker_id="SYSTEM",
+                action="ab_test.concluded",
+                message=f"A/B test concluded. Winner: Model {winner}",
+                output_data={"experiment_id": experiment_id, "winner": winner, "winner_model_id": winner_id}
+            )
+        
+        return True
+    except Exception as e:
+        print(f"Failed to conclude A/B test: {e}")
+        return False
+
+
+def list_ab_tests(status: str = None) -> List[Dict]:
+    """List A/B tests, optionally filtered by status."""
+    where = f"WHERE status = '{status}'" if status else ""
+    sql = f"SELECT * FROM model_experiments {where} ORDER BY started_at DESC"
+    
+    try:
+        return _db.query(sql).get("rows", [])
+    except Exception as e:
+        print(f"Failed to list A/B tests: {e}")
+        return []
+
+
+# ============================================================
+# MODEL TRAINING FUNCTIONS
+# ============================================================
+
+def start_training_run(
+    model_id: str,
+    training_config: Dict,
+    training_data_query: str = None,
+    feature_columns: List[str] = None,
+    target_column: str = None,
+    created_by: str = "SYSTEM"
+) -> Optional[str]:
+    """
+    Start a model training run.
+    
+    Args:
+        model_id: Model to train
+        training_config: Training configuration (hyperparameters, etc.)
+        training_data_query: SQL query to get training data
+        feature_columns: List of feature column names
+        target_column: Target variable column name
+        created_by: Who initiated training
+    
+    Returns:
+        Training run UUID
+    """
+    model = get_model(model_id=model_id)
+    if not model:
+        return None
+    
+    data = {
+        "model_id": model_id,
+        "version": model["version"],
+        "status": "running",
+        "training_config": training_config,
+        "started_at": datetime.now(timezone.utc).isoformat(),
+        "created_by": created_by
+    }
+    
+    if training_data_query:
+        data["training_data_query"] = training_data_query
+    if feature_columns:
+        data["feature_columns"] = feature_columns
+    if target_column:
+        data["target_column"] = target_column
+    
+    try:
+        run_id = _db.insert("model_training_runs", data)
+        log_execution(
+            worker_id="SYSTEM",
+            action="training.started",
+            message=f"Started training run for model {model['name']}",
+            output_data={"run_id": run_id, "model_id": model_id}
+        )
+        return run_id
+    except Exception as e:
+        print(f"Failed to start training run: {e}")
+        return None
+
+
+def complete_training_run(
+    run_id: str,
+    train_accuracy: float,
+    test_accuracy: float = None,
+    validation_accuracy: float = None,
+    sample_count: int = None,
+    metrics: Dict = None,
+    new_config: Dict = None
+) -> bool:
+    """
+    Complete a training run with results.
+    
+    Args:
+        run_id: Training run UUID
+        train_accuracy: Training set accuracy
+        test_accuracy: Test set accuracy
+        validation_accuracy: Validation set accuracy
+        sample_count: Number of training samples
+        metrics: Additional metrics dict
+        new_config: Updated model config (weights, etc.)
+    
+    Returns:
+        True if successful
+    """
+    update_parts = [
+        "status = 'completed'",
+        f"train_accuracy = {train_accuracy}",
+        f"completed_at = '{datetime.now(timezone.utc).isoformat()}'"
+    ]
+    
+    if test_accuracy is not None:
+        update_parts.append(f"test_accuracy = {test_accuracy}")
+    if validation_accuracy is not None:
+        update_parts.append(f"validation_accuracy = {validation_accuracy}")
+    if sample_count is not None:
+        update_parts.append(f"sample_count = {sample_count}")
+    if metrics:
+        metrics_json = json.dumps(metrics).replace("'", "''")
+        update_parts.append(f"metrics = '{metrics_json}'")
+    
+    sql = f"UPDATE model_training_runs SET {', '.join(update_parts)} WHERE id = '{run_id}'"
+    
+    try:
+        _db.query(sql)
+        
+        # Get run details to update model
+        run_sql = f"SELECT model_id FROM model_training_runs WHERE id = '{run_id}'"
+        run = _db.query(run_sql).get("rows", [{}])[0]
+        
+        if run.get("model_id"):
+            # Update model with training results
+            model_update = f"""
+                UPDATE scoring_models 
+                SET accuracy = {test_accuracy or train_accuracy},
+                    sample_count = {sample_count or 0},
+                    last_trained_at = '{datetime.now(timezone.utc).isoformat()}'
+                WHERE id = '{run['model_id']}'
+            """
+            _db.query(model_update)
+            
+            # Create new version if config changed
+            if new_config:
+                create_model_version(run["model_id"], new_config)
+        
+        return True
+    except Exception as e:
+        print(f"Failed to complete training run: {e}")
+        return False
+
+
+def fail_training_run(run_id: str, error_message: str) -> bool:
+    """Mark a training run as failed."""
+    sql = f"""
+        UPDATE model_training_runs 
+        SET status = 'failed',
+            error_message = '{error_message.replace("'", "''")}',
+            completed_at = '{datetime.now(timezone.utc).isoformat()}'
+        WHERE id = '{run_id}'
+    """
+    
+    try:
+        _db.query(sql)
+        return True
+    except Exception as e:
+        print(f"Failed to fail training run: {e}")
+        return False
+
+
+def get_training_history(model_id: str = None, limit: int = 20) -> List[Dict]:
+    """Get training run history for a model or all models."""
+    where = f"WHERE model_id = '{model_id}'" if model_id else ""
+    sql = f"SELECT * FROM model_training_runs {where} ORDER BY created_at DESC LIMIT {limit}"
+    
+    try:
+        return _db.query(sql).get("rows", [])
+    except Exception as e:
+        print(f"Failed to get training history: {e}")
+        return []
+
+
+def get_model_performance() -> List[Dict]:
+    """Get performance metrics for all models using the view."""
+    try:
+        return _db.query("SELECT * FROM v_model_performance").get("rows", [])
+    except Exception as e:
+        print(f"Failed to get model performance: {e}")
+        return []
