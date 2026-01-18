@@ -338,8 +338,7 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
         WHERE status IN ('pending', 'in_progress')
         AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
         AND (next_retry_at IS NULL OR next_retry_at < NOW())
-        ORDER BY priority DESC, created_at ASC
-        LIMIT {int(limit)}
+        LIMIT {int(limit * 2)}
     """
     try:
         result = execute_sql(sql)
@@ -364,7 +363,9 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
                 created_at=row.get("created_at", ""),
                 requires_approval=row.get("requires_approval", False)
             ))
-        return tasks
+        # Sort by priority (desc) then created_at (asc) using Python's priority_map values
+        tasks.sort(key=lambda t: (-t.priority, t.created_at))
+        return tasks[:limit]
     except Exception as e:
         log_error(f"Failed to get tasks: {e}")
         return []
