@@ -1,0 +1,41 @@
+[project]
+name = "juggernaut-autonomy"
+version = "0.1.0"
+description = "Autonomous revenue generation system"
+requires-python = ">=3.11"
+
+[tool.flake8]
+max-line-length = 127
+exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
+ignore = ["E501", "W503"]
+
+[tool.black]
+line-length = 127
+target-version = ["py311"]
+exclude = '''
+/(
+    \.git
+    | __pycache__
+    | venv
+    | \.venv
+    | build
+    | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 127
+skip = [".git", "__pycache__", "venv", ".venv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
