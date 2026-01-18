@@ -284,6 +284,170 @@ def get_logs(worker_id: str = None, action: str = None, limit: int = 100) -> Lis
     return result.get("rows", [])
 
 
+# ============================================================
+# REVENUE TRACKING FUNCTIONS
+# ============================================================
+
+def record_revenue(
+    event_type: str,
+    gross_amount: float,
+    source: str,
+    description: str,
+    net_amount: float = None,
+    revenue_type: str = "one_time",
+    currency: str = "USD",
+    opportunity_id: str = None,
+    external_id: str = None,
+    attribution: Dict = None,
+    metadata: Dict = None,
+    occurred_at: str = None,
+    recorded_by: str = "ORCHESTRATOR"
+) -> Optional[str]:
+    """
+    Record a revenue event.
+    
+    Args:
+        event_type: Type of event ('sale', 'refund', 'subscription', 'payout')
+        gross_amount: Total amount before fees (positive for income, negative for refunds)
+        source: Where revenue came from ('gumroad', 'stripe', 'manual', etc.)
+        description: Human-readable description
+        net_amount: Amount after platform fees (defaults to gross_amount)
+        revenue_type: 'one_time', 'recurring', 'affiliate'
+        currency: Currency code (default USD)
+        opportunity_id: Link to opportunity that generated this revenue
+        external_id: ID in external system (e.g., Gumroad sale ID)
+        attribution: JSON with attribution data (experiment_id, source, campaign, etc.)
+        metadata: Additional JSON data
+        occurred_at: When the revenue actually occurred (ISO timestamp, defaults to now)
+        recorded_by: Who/what recorded this event
+    
+    Returns:
+        Revenue event UUID or None on failure
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    
+    data = {
+        "event_type": event_type,
+        "gross_amount": gross_amount,
+        "net_amount": net_amount if net_amount is not None else gross_amount,
+        "source": source,
+        "description": description,
+        "revenue_type": revenue_type,
+        "currency": currency,
+        "occurred_at": occurred_at or now,
+        "recorded_at": now
+    }
+    
+    if opportunity_id:
+        data["opportunity_id"] = opportunity_id
+    if external_id:
+        data["external_id"] = external_id
+    if attribution:
+        data["attribution"] = attribution
+    if metadata:
+        data["metadata"] = metadata
+    
+    try:
+        revenue_id = _db.insert("revenue_events", data)
+        
+        # Log the revenue event
+        log_execution(
+            worker_id=recorded_by,
+            action=f"revenue.{event_type}",
+            message=f"Recorded {event_type}: ${gross_amount:.2f} from {source}",
+            output_data={
+                "revenue_id": revenue_id,
+                "gross_amount": gross_amount,
+                "net_amount": data["net_amount"],
+                "source": source
+            }
+        )
+        
+        return revenue_id
+    except Exception as e:
+        print(f"Failed to record revenue: {e}")
+        return None
+
+
+def get_revenue_summary(
+    days: int = 30,
+    source: str = None,
+    revenue_type: str = None
+) -> Dict[str, Any]:
+    """
+    Get revenue summary for a time period.
+    
+    Args:
+        days: Number of days to look back (default 30)
+        source: Filter by source (optional)
+        revenue_type: Filter by revenue type (optional)
+    
+    Returns:
+        Dictionary with total_gross, total_net, event_count, by_source, by_type
+    """
+    conditions = [f"occurred_at > NOW() - INTERVAL '{days} days'"]
+    if source:
+        conditions.append(f"source = '{source}'")
+    if revenue_type:
+        conditions.append(f"revenue_type = '{revenue_type}'")
+    
+    where = f"WHERE {' AND '.join(conditions)}"
+    
+    # Total summary
+    sql = f"""
+        SELECT 
+            COALESCE(SUM(gross_amount), 0) as total_gross,
+            COALESCE(SUM(net_amount), 0) as total_net,
+            COUNT(*) as event_count
+        FROM revenue_events
+        {where}
+    """
+    result = _db.query(sql)
+    summary = result.get("rows", [{}])[0]
+    
+    # By source
+    sql_by_source = f"""
+        SELECT source, SUM(gross_amount) as gross, SUM(net_amount) as net, COUNT(*) as count
+        FROM revenue_events
+        {where}
+        GROUP BY source
+        ORDER BY gross DESC
+    """
+    result_by_source = _db.query(sql_by_source)
+    
+    # By type
+    sql_by_type = f"""
+        SELECT revenue_type, SUM(gross_amount) as gross, SUM(net_amount) as net, COUNT(*) as count
+        FROM revenue_events
+        {where}
+        GROUP BY revenue_type
+        ORDER BY gross DESC
+    """
+    result_by_type = _db.query(sql_by_type)
+    
+    return {
+        "period_days": days,
+        "total_gross": float(summary.get("total_gross", 0)),
+        "total_net": float(summary.get("total_net", 0)),
+        "event_count": int(summary.get("event_count", 0)),
+        "by_source": result_by_source.get("rows", []),
+        "by_type": result_by_type.get("rows", [])
+    }
+
+
+def get_recent_revenue(limit: int = 20, source: str = None) -> List[Dict]:
+    """Get recent revenue events."""
+    where = f"WHERE source = '{source}'" if source else ""
+    sql = f"""
+        SELECT * FROM revenue_events 
+        {where}
+        ORDER BY occurred_at DESC 
+        LIMIT {limit}
+    """
+    result = _db.query(sql)
+    return result.get("rows", [])
+
+
 if __name__ == "__main__":
     # Test database connection
     print("Testing database connection...")
@@ -298,3 +462,8 @@ if __name__ == "__main__":
         source="db_test"
     )
     print(f"Created test log: {log_id}")
+    
+    # Test revenue summary
+    print("\nTesting revenue functions...")
+    summary = get_revenue_summary(days=30)
+    print(f"Revenue summary (30 days): ${summary['total_gross']:.2f} gross, {summary['event_count']} events")
