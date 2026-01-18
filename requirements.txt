@@ -1,15 +1,16 @@
-# Core
-urllib3>=2.0.0
+# JUGGERNAUT Autonomy Engine Dependencies
+# ==========================================
+# Minimal dependencies - we use stdlib where possible
 
-# Testing
-pytest>=7.0.0
-flake8>=6.0.0
+# No external dependencies required!
+# The autonomy engine uses only Python standard library:
+# - urllib.request for HTTP (database, APIs)
+# - json for data serialization
+# - http.server for health endpoint
+# - threading for background tasks
+# - datetime, time, os, sys for basics
 
-# Development
-black>=23.0.0
-isort>=5.0.0
-mypy>=1.0.0
-
-# Optional - for future features
-# requests>=2.28.0
-# pandas>=2.0.0
+# If you need additional capabilities, uncomment:
+# psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)
+# httpx==0.27.0           # Better HTTP client (optional)
+# schedule==1.2.1         # Cron scheduling (optional)

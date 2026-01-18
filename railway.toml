@@ -1,0 +1,18 @@
+# ==============================================================================
+# JUGGERNAUT Autonomy Engine - Railway Configuration
+# ==============================================================================
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python main.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "always"
+restartPolicyMaxRetries = 3
+
+[service]
+name = "juggernaut-autonomy"
+internalPort = 8000
