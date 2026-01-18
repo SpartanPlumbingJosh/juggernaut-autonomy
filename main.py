@@ -16,10 +16,10 @@ Level 3 Requirements Implemented:
 - Workflow Planning: Executes multi-step workflows
 - Tool/API Execution: Runs registered tools
 - Persistent Task Memory: Tasks survive restarts
-- Error Recovery: DLQ, retries, escalation
+- Error Recovery: DLQ, retries with exponential backoff, escalation
 - Dry-Run Mode: Simulation without execution
 - Human-in-the-Loop: Approval workflow
-- Action Logging: Every action logged
+- Action Logging: Every action logged (with PII sanitization)
 - Permission/Scope Control: Forbidden actions enforced
 """
 
@@ -36,20 +36,37 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
+from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+# SECURITY: No default credentials - must be set via environment
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    print("FATAL: DATABASE_URL environment variable is required")
+    sys.exit(1)
+
+NEON_ENDPOINT = os.getenv(
+    "NEON_ENDPOINT",
+    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
 )
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
 WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "60"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 PORT = int(os.getenv("PORT", "8000"))
+
+# Retry configuration
+RETRY_BASE_DELAY_SECONDS = 60  # 1 minute base delay
+RETRY_MAX_DELAY_SECONDS = 3600  # 1 hour max delay
+
+# Sensitive keys to redact from logs
+SENSITIVE_KEYS = frozenset([
+    "password", "secret", "token", "api_key", "apikey", "key",
+    "authorization", "auth", "credential", "ssn", "social_security",
+    "credit_card", "card_number", "cvv", "pin", "private_key"
+])
 
 # Shutdown flag
 shutdown_requested = False
@@ -79,15 +96,71 @@ class Task:
 
 
 # ============================================================
-# DATABASE OPERATIONS
+# SECURITY UTILITIES
 # ============================================================
 
-def execute_sql(sql: str) -> Dict[str, Any]:
-    """Execute SQL via Neon HTTP API."""
+def sanitize_payload(payload: Dict, max_value_length: int = 1000) -> Dict:
+    """
+    Sanitize payload to remove sensitive information before logging.
+    
+    Args:
+        payload: Dictionary to sanitize
+        max_value_length: Maximum length for string values
+    
+    Returns:
+        Sanitized dictionary safe for logging
+    """
+    if not isinstance(payload, dict):
+        return payload
+    
+    sanitized = {}
+    for key, value in payload.items():
+        key_lower = key.lower()
+        
+        # Check if key matches sensitive patterns
+        is_sensitive = any(s in key_lower for s in SENSITIVE_KEYS)
+        
+        if is_sensitive:
+            sanitized[key] = "<REDACTED>"
+        elif isinstance(value, dict):
+            sanitized[key] = sanitize_payload(value, max_value_length)
+        elif isinstance(value, list):
+            sanitized[key] = [
+                sanitize_payload(v, max_value_length) if isinstance(v, dict) else v
+                for v in value[:100]  # Limit list length
+            ]
+        elif isinstance(value, str) and len(value) > max_value_length:
+            sanitized[key] = value[:max_value_length] + f"<TRUNCATED {len(value) - max_value_length} chars>"
+        else:
+            sanitized[key] = value
+    
+    return sanitized
+
+
+# ============================================================
+# DATABASE OPERATIONS (with parameterized queries where possible)
+# ============================================================
+
+def execute_sql(sql: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Execute SQL via Neon HTTP API.
+    
+    Note: Neon's HTTP API doesn't support parameterized queries directly,
+    so we use careful escaping. For production, consider using psycopg2
+    with proper parameter binding.
+    """
     headers = {
         "Content-Type": "application/json",
         "Neon-Connection-String": DATABASE_URL
     }
+    
+    # Apply parameters if provided (basic interpolation with escaping)
+    if params:
+        for key, value in params.items():
+            placeholder = f":{key}"
+            if placeholder in sql:
+                sql = sql.replace(placeholder, escape_value(value))
+    
     data = json.dumps({"query": sql}).encode('utf-8')
     req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
     
@@ -97,15 +170,20 @@ def execute_sql(sql: str) -> Dict[str, Any]:
             return result
     except urllib.error.HTTPError as e:
         error_body = e.read().decode('utf-8')
-        log_error(f"SQL Error: {error_body}", {"sql": sql[:200]})
+        log_error(f"SQL Error: {error_body}", {"sql_preview": sql[:100]})
         raise
     except Exception as e:
-        log_error(f"SQL Exception: {str(e)}", {"sql": sql[:200]})
+        log_error(f"SQL Exception: {str(e)}", {"sql_preview": sql[:100]})
         raise
 
 
-def escape_sql(value: Any) -> str:
-    """Escape value for SQL insertion."""
+def escape_value(value: Any) -> str:
+    """
+    Escape a value for SQL insertion.
+    
+    SECURITY NOTE: This is a basic escaping function. For production use,
+    prefer parameterized queries via psycopg2 or similar.
+    """
     if value is None:
         return "NULL"
     elif isinstance(value, bool):
@@ -113,13 +191,20 @@ def escape_sql(value: Any) -> str:
     elif isinstance(value, (int, float)):
         return str(value)
     elif isinstance(value, (dict, list)):
-        return f"'{json.dumps(value).replace(chr(39), chr(39)+chr(39))}'"
+        # JSON serialization with proper escaping
+        json_str = json.dumps(value)
+        # Escape single quotes, backslashes, and null bytes
+        escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
+        return f"'{escaped}'"
     else:
-        return f"'{str(value).replace(chr(39), chr(39)+chr(39))}'"
+        # String escaping: handle quotes, backslashes, null bytes
+        s = str(value)
+        escaped = s.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
+        return f"'{escaped}'"
 
 
 # ============================================================
-# LOGGING (Level 3: Action Logging)
+# LOGGING (Level 3: Action Logging with Sanitization)
 # ============================================================
 
 def log_action(
@@ -132,25 +217,25 @@ def log_action(
     error_data: Dict = None,
     duration_ms: int = None
 ) -> Optional[str]:
-    """Log an autonomous action to execution_logs."""
+    """Log an autonomous action to execution_logs with PII sanitization."""
     now = datetime.now(timezone.utc).isoformat()
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
-    vals = [escape_sql(WORKER_ID), escape_sql(action), escape_sql(message), 
-            escape_sql(level), escape_sql("autonomy_engine"), escape_sql(now)]
+    vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
+            escape_value(level), escape_value("autonomy_engine"), escape_value(now)]
     
     if task_id:
         cols.append("task_id")
-        vals.append(escape_sql(task_id))
+        vals.append(escape_value(task_id))
     if input_data:
         cols.append("input_data")
-        vals.append(escape_sql(input_data))
+        vals.append(escape_value(sanitize_payload(input_data)))
     if output_data:
         cols.append("output_data")
-        vals.append(escape_sql(output_data))
+        vals.append(escape_value(sanitize_payload(output_data)))
     if error_data:
         cols.append("error_data")
-        vals.append(escape_sql(error_data))
+        vals.append(escape_value(sanitize_payload(error_data)))
     if duration_ms is not None:
         cols.append("duration_ms")
         vals.append(str(duration_ms))
@@ -160,8 +245,8 @@ def log_action(
     try:
         result = execute_sql(sql)
         return result.get("rows", [{}])[0].get("id")
-    except:
-        # Don't fail if logging fails
+    except Exception:
+        # Don't fail if logging fails - print to stdout as fallback
         print(f"[{level.upper()}] {action}: {message}")
         return None
 
@@ -193,14 +278,14 @@ def log_decision(action: str, decision: str, reasoning: str, data: Dict = None):
 
 def get_forbidden_actions() -> List[str]:
     """Get list of forbidden actions for this worker."""
-    sql = f"SELECT forbidden_actions FROM worker_registry WHERE worker_id = '{WORKER_ID}'"
+    sql = f"SELECT forbidden_actions FROM worker_registry WHERE worker_id = {escape_value(WORKER_ID)}"
     try:
         result = execute_sql(sql)
         rows = result.get("rows", [])
         if rows and rows[0].get("forbidden_actions"):
             return rows[0]["forbidden_actions"]
         return []
-    except:
+    except Exception:
         return []
 
 
@@ -215,7 +300,7 @@ def is_action_allowed(action: str) -> Tuple[bool, str]:
     return True, "Action allowed"
 
 
-def check_cost_limit(action: str, estimated_cost: float) -> Tuple[bool, str]:
+def check_cost_limit(estimated_cost: float) -> Tuple[bool, str]:
     """Check if action would exceed cost limits."""
     sql = """
         SELECT 
@@ -236,7 +321,7 @@ def check_cost_limit(action: str, estimated_cost: float) -> Tuple[bool, str]:
             if spent + (estimated_cost * 100) > limit:
                 return False, f"Cost ${estimated_cost} would exceed monthly limit (${spent/100:.2f}/${limit/100:.2f})"
         return True, "Within budget"
-    except:
+    except Exception:
         return True, "Budget check unavailable"
 
 
@@ -245,15 +330,16 @@ def check_cost_limit(action: str, estimated_cost: float) -> Tuple[bool, str]:
 # ============================================================
 
 def get_pending_tasks(limit: int = 10) -> List[Task]:
-    """Get pending tasks ordered by priority."""
+    """Get pending tasks ordered by priority, respecting retry backoff."""
     sql = f"""
         SELECT id, task_type, title, description, priority, status, 
                payload, assigned_to, created_at, requires_approval
         FROM governance_tasks 
         WHERE status IN ('pending', 'in_progress')
-        AND (assigned_to IS NULL OR assigned_to = '{WORKER_ID}')
+        AND (assigned_to IS NULL OR assigned_to = {escape_value(WORKER_ID)})
+        AND (retry_after IS NULL OR retry_after < NOW())
         ORDER BY priority DESC, created_at ASC
-        LIMIT {limit}
+        LIMIT {int(limit)}
     """
     try:
         result = execute_sql(sql)
@@ -290,19 +376,20 @@ def get_due_scheduled_tasks() -> List[Dict]:
     try:
         result = execute_sql(sql)
         return result.get("rows", [])
-    except:
+    except Exception:
         return []
 
 
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
     """Update task status."""
-    cols = [f"status = '{status}'", f"updated_at = '{datetime.now(timezone.utc).isoformat()}'"]
+    now = datetime.now(timezone.utc).isoformat()
+    cols = [f"status = {escape_value(status)}", f"updated_at = {escape_value(now)}"]
     if status == "completed":
-        cols.append(f"completed_at = '{datetime.now(timezone.utc).isoformat()}'")
+        cols.append(f"completed_at = {escape_value(now)}")
     if result_data:
-        cols.append(f"result = {escape_sql(result_data)}")
+        cols.append(f"result = {escape_value(result_data)}")
     
-    sql = f"UPDATE governance_tasks SET {', '.join(cols)} WHERE id = '{task_id}'"
+    sql = f"UPDATE governance_tasks SET {', '.join(cols)} WHERE id = {escape_value(task_id)}"
     try:
         execute_sql(sql)
     except Exception as e:
@@ -311,36 +398,44 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
 
 def claim_task(task_id: str) -> bool:
     """Claim a task for this worker (atomic operation)."""
+    now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         UPDATE governance_tasks 
-        SET assigned_to = '{WORKER_ID}', 
+        SET assigned_to = {escape_value(WORKER_ID)}, 
             status = 'in_progress',
-            started_at = '{datetime.now(timezone.utc).isoformat()}'
-        WHERE id = '{task_id}' 
-        AND (assigned_to IS NULL OR assigned_to = '{WORKER_ID}')
+            started_at = {escape_value(now)}
+        WHERE id = {escape_value(task_id)}
+        AND (assigned_to IS NULL OR assigned_to = {escape_value(WORKER_ID)})
         AND status = 'pending'
         RETURNING id
     """
     try:
         result = execute_sql(sql)
         return len(result.get("rows", [])) > 0
-    except:
+    except Exception:
         return False
 
 
 # ============================================================
 # APPROVAL WORKFLOW (Level 3: Human-in-the-Loop)
+# Split into read-only check and creation functions
 # ============================================================
 
-def check_approval_required(task: Task) -> Tuple[bool, Optional[str]]:
-    """Check if task requires approval and if approved."""
+def check_approval_status(task: Task) -> Tuple[bool, Optional[str], Optional[str]]:
+    """
+    Check approval status for a task (read-only, no side effects).
+    
+    Returns:
+        (requires_approval, approval_id_or_none, status)
+        - status can be: "approved", "denied", "pending", "none"
+    """
     if not task.requires_approval:
-        return False, None
+        return False, None, "not_required"
     
     sql = f"""
         SELECT id, status, approved_by, approved_at
         FROM approvals
-        WHERE task_id = '{task.id}'
+        WHERE task_id = {escape_value(task.id)}
         ORDER BY created_at DESC
         LIMIT 1
     """
@@ -348,51 +443,91 @@ def check_approval_required(task: Task) -> Tuple[bool, Optional[str]]:
         result = execute_sql(sql)
         rows = result.get("rows", [])
         if not rows:
-            # No approval request exists, create one
-            create_approval_request(task)
-            return True, None
+            return True, None, "none"
         
         approval = rows[0]
-        if approval["status"] == "approved":
-            return False, approval["id"]
-        elif approval["status"] == "denied":
-            return True, "denied"
-        else:
-            return True, None  # Still pending
-    except:
-        return True, None
+        return True, approval["id"], approval["status"]
+    except Exception:
+        return True, None, "error"
 
 
-def create_approval_request(task: Task):
-    """Create an approval request for a task."""
+def ensure_approval_request(task: Task) -> bool:
+    """
+    Ensure an approval request exists for a task. Creates one if needed.
+    
+    Returns:
+        True if approval request was created, False if already existed
+    """
+    requires, approval_id, status = check_approval_status(task)
+    
+    if not requires or status != "none":
+        return False
+    
+    # Create approval request
+    now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO approvals (
             task_id, requested_by, request_type, request_data, status, created_at
         ) VALUES (
-            '{task.id}', '{WORKER_ID}', 'task_execution',
-            {escape_sql({"task_type": task.task_type, "title": task.title, "priority": task.priority})},
-            'pending', '{datetime.now(timezone.utc).isoformat()}'
+            {escape_value(task.id)}, {escape_value(WORKER_ID)}, 'task_execution',
+            {escape_value({"task_type": task.task_type, "title": task.title, "priority": task.priority})},
+            'pending', {escape_value(now)}
         )
     """
     try:
         execute_sql(sql)
         log_action("approval.requested", f"Approval requested for task: {task.title}", task_id=task.id)
+        return True
     except Exception as e:
         log_error(f"Failed to create approval request: {e}")
+        return False
 
 
 # ============================================================
-# ERROR RECOVERY (Level 3: Error Recovery)
+# ERROR RECOVERY (Level 3: Error Recovery with Exponential Backoff)
 # ============================================================
+
+def calculate_retry_delay(retry_count: int) -> int:
+    """Calculate exponential backoff delay in seconds."""
+    delay = RETRY_BASE_DELAY_SECONDS * (2 ** retry_count)
+    return min(delay, RETRY_MAX_DELAY_SECONDS)
+
+
+def schedule_task_retry(task_id: str, retry_count: int, error: str):
+    """Schedule a task for retry with exponential backoff."""
+    delay_seconds = calculate_retry_delay(retry_count)
+    retry_after = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
+    
+    sql = f"""
+        UPDATE governance_tasks 
+        SET retry_count = {retry_count + 1}, 
+            status = 'pending',
+            retry_after = {escape_value(retry_after)},
+            last_error = {escape_value(error)}
+        WHERE id = {escape_value(task_id)}
+    """
+    try:
+        execute_sql(sql)
+        log_action(
+            "task.retry_scheduled", 
+            f"Task will retry in {delay_seconds}s ({retry_count + 1}/3)",
+            level="warn", 
+            task_id=task_id,
+            output_data={"retry_count": retry_count + 1, "retry_after": retry_after, "delay_seconds": delay_seconds}
+        )
+    except Exception as e:
+        log_error(f"Failed to schedule retry: {e}")
+
 
 def send_to_dlq(task_id: str, error: str, attempts: int):
     """Send failed task to dead letter queue."""
+    now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO dead_letter_queue (
             task_id, error_message, attempts, worker_id, created_at
         ) VALUES (
-            '{task_id}', {escape_sql(error)}, {attempts}, '{WORKER_ID}',
-            '{datetime.now(timezone.utc).isoformat()}'
+            {escape_value(task_id)}, {escape_value(error)}, {attempts}, {escape_value(WORKER_ID)},
+            {escape_value(now)}
         )
     """
     try:
@@ -405,12 +540,13 @@ def send_to_dlq(task_id: str, error: str, attempts: int):
 
 def create_escalation(task_id: str, issue: str, level: str = "medium"):
     """Create an escalation for human review."""
+    now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO escalations (
             level, issue_type, description, task_id, status, created_at
         ) VALUES (
-            '{level}', 'task_failure', {escape_sql(issue)}, '{task_id}',
-            'open', '{datetime.now(timezone.utc).isoformat()}'
+            {escape_value(level)}, 'task_failure', {escape_value(issue)}, {escape_value(task_id)},
+            'open', {escape_value(now)}
         )
     """
     try:
@@ -430,7 +566,7 @@ def get_registered_tools() -> Dict[str, Dict]:
     try:
         result = execute_sql(sql)
         return {r["tool_name"]: r for r in result.get("rows", [])}
-    except:
+    except Exception:
         return {}
 
 
@@ -448,35 +584,53 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
     
     start_time = time.time()
     
-    # Log tool execution start
-    exec_id = log_action(f"tool.{tool_name}.start", f"Executing tool: {tool_name}", input_data=params)
+    # Log tool execution start (don't capture unused return value)
+    log_action(f"tool.{tool_name}.start", f"Executing tool: {tool_name}", input_data=params)
     
     try:
         # Record tool execution
+        now = datetime.now(timezone.utc).isoformat()
         sql = f"""
             INSERT INTO tool_executions (
                 tool_name, input_params, status, worker_id, started_at
             ) VALUES (
-                '{tool_name}', {escape_sql(params)}, 'running', '{WORKER_ID}',
-                '{datetime.now(timezone.utc).isoformat()}'
+                {escape_value(tool_name)}, {escape_value(params)}, 'running', {escape_value(WORKER_ID)},
+                {escape_value(now)}
             ) RETURNING id
         """
         result = execute_sql(sql)
         tool_exec_id = result.get("rows", [{}])[0].get("id")
         
-        # TODO: Actual tool execution logic here
-        # For now, mark as success placeholder
-        output = {"status": "executed", "tool": tool_name}
+        # Get tool from registry and execute
+        tools = get_registered_tools()
+        tool_config = tools.get(tool_name)
+        
+        if not tool_config:
+            output = {"status": "error", "error": f"Tool '{tool_name}' not found in registry"}
+        else:
+            # Dispatch based on tool type
+            tool_type = tool_config.get("tool_type", "unknown")
+            
+            if tool_type == "slack":
+                output = _execute_slack_tool(tool_name, params)
+            elif tool_type == "database":
+                output = _execute_database_tool(tool_name, params)
+            elif tool_type == "http":
+                output = _execute_http_tool(tool_name, params)
+            else:
+                # Generic execution - log and mark as executed
+                output = {"status": "executed", "tool": tool_name, "tool_type": tool_type}
         
         # Update tool execution record
         duration_ms = int((time.time() - start_time) * 1000)
+        now = datetime.now(timezone.utc).isoformat()
         sql = f"""
             UPDATE tool_executions SET
                 status = 'completed',
-                output_result = {escape_sql(output)},
-                completed_at = '{datetime.now(timezone.utc).isoformat()}',
+                output_result = {escape_value(output)},
+                completed_at = {escape_value(now)},
                 duration_ms = {duration_ms}
-            WHERE id = '{tool_exec_id}'
+            WHERE id = {escape_value(tool_exec_id)}
         """
         execute_sql(sql)
         
@@ -490,6 +644,24 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         log_action(f"tool.{tool_name}.error", f"Tool failed: {str(e)}",
                    level="error", error_data={"error": str(e)}, duration_ms=duration_ms)
         return False, str(e)
+
+
+def _execute_slack_tool(tool_name: str, params: Dict) -> Dict:
+    """Execute a Slack-related tool."""
+    # Placeholder - would integrate with Slack API
+    return {"status": "executed", "tool": tool_name, "channel": params.get("channel")}
+
+
+def _execute_database_tool(tool_name: str, params: Dict) -> Dict:
+    """Execute a database-related tool."""
+    # Placeholder - would execute safe database operations
+    return {"status": "executed", "tool": tool_name, "operation": params.get("operation")}
+
+
+def _execute_http_tool(tool_name: str, params: Dict) -> Dict:
+    """Execute an HTTP API tool."""
+    # Placeholder - would make HTTP requests
+    return {"status": "executed", "tool": tool_name, "url": params.get("url")}
 
 
 # ============================================================
@@ -509,15 +681,20 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
         return False, {"blocked": True, "reason": reason}
     
-    # Check approval
-    needs_approval, approval_status = check_approval_required(task)
-    if needs_approval:
-        if approval_status == "denied":
+    # Check approval (read-only check)
+    requires_approval, approval_id, status = check_approval_status(task)
+    if requires_approval:
+        if status == "denied":
             update_task_status(task.id, "failed", {"reason": "Approval denied"})
             return False, {"denied": True}
-        update_task_status(task.id, "waiting_approval")
-        log_action("task.waiting", f"Task waiting for approval: {task.title}", task_id=task.id)
-        return False, {"waiting_approval": True}
+        elif status == "approved":
+            pass  # Continue with execution
+        elif status in ("pending", "none"):
+            if status == "none":
+                ensure_approval_request(task)
+            update_task_status(task.id, "waiting_approval")
+            log_action("task.waiting", "Task waiting for approval, checking next", task_id=task.id)
+            return False, {"waiting_approval": True}
     
     # Dry run mode
     if dry_run or DRY_RUN:
@@ -568,15 +745,13 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         error_str = str(e)
         
         # Get retry count
-        sql = f"SELECT COALESCE(retry_count, 0) as retries FROM governance_tasks WHERE id = '{task.id}'"
-        retries = execute_sql(sql).get("rows", [{}])[0].get("retries", 0)
+        sql = f"SELECT COALESCE(retry_count, 0) as retries FROM governance_tasks WHERE id = {escape_value(task.id)}"
+        result = execute_sql(sql)
+        retries = result.get("rows", [{}])[0].get("retries", 0)
         
         if retries < 3:
-            # Retry
-            sql = f"UPDATE governance_tasks SET retry_count = {retries + 1}, status = 'pending' WHERE id = '{task.id}'"
-            execute_sql(sql)
-            log_action("task.retry", f"Task will retry ({retries + 1}/3): {error_str}", 
-                       level="warn", task_id=task.id)
+            # Schedule retry with exponential backoff
+            schedule_task_retry(task.id, retries, error_str)
         else:
             # Send to DLQ
             update_task_status(task.id, "failed", {"error": error_str})
@@ -592,18 +767,19 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
 
 def autonomy_loop():
     """The main loop that makes JUGGERNAUT autonomous."""
-    global shutdown_requested
+    # Note: shutdown_requested is only read here, no global declaration needed
     
     log_info("Autonomy loop starting", {"worker_id": WORKER_ID, "interval": LOOP_INTERVAL})
     
     # Update worker heartbeat
+    now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO worker_registry (worker_id, status, last_heartbeat, capabilities)
-        VALUES ('{WORKER_ID}', 'active', '{datetime.now(timezone.utc).isoformat()}', 
-                {escape_sql(["task_execution", "opportunity_scan", "tool_execution"])})
+        VALUES ({escape_value(WORKER_ID)}, 'active', {escape_value(now)}, 
+                {escape_value(["task_execution", "opportunity_scan", "tool_execution"])})
         ON CONFLICT (worker_id) DO UPDATE SET
             status = 'active',
-            last_heartbeat = '{datetime.now(timezone.utc).isoformat()}'
+            last_heartbeat = {escape_value(now)}
     """
     try:
         execute_sql(sql)
@@ -632,7 +808,6 @@ def autonomy_loop():
                     success, result = execute_task(task)
                     
                     if not success and result.get("waiting_approval"):
-                        log_info(f"Task waiting for approval, checking next")
                         # Try next task
                         for next_task in tasks[1:]:
                             if claim_task(next_task.id):
@@ -646,7 +821,8 @@ def autonomy_loop():
                     log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
                                  "No pending tasks, running scheduled task")
                     # Mark as run
-                    sql = f"UPDATE scheduled_tasks SET last_run = '{datetime.now(timezone.utc).isoformat()}' WHERE id = '{sched_task['id']}'"
+                    now = datetime.now(timezone.utc).isoformat()
+                    sql = f"UPDATE scheduled_tasks SET last_run = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
                     execute_sql(sql)
                 else:
                     # 3. Nothing to do - log heartbeat
@@ -655,11 +831,12 @@ def autonomy_loop():
                                    output_data={"loop": loop_count, "tasks_checked": 0})
             
             # Update heartbeat
-            sql = f"UPDATE worker_registry SET last_heartbeat = '{datetime.now(timezone.utc).isoformat()}' WHERE worker_id = '{WORKER_ID}'"
+            now = datetime.now(timezone.utc).isoformat()
+            sql = f"UPDATE worker_registry SET last_heartbeat = {escape_value(now)} WHERE worker_id = {escape_value(WORKER_ID)}"
             execute_sql(sql)
             
         except Exception as e:
-            log_error(f"Loop error: {str(e)}", {"traceback": traceback.format_exc()})
+            log_error(f"Loop error: {str(e)}", {"traceback": traceback.format_exc()[:500]})
         
         # Sleep until next iteration
         elapsed = time.time() - loop_start
@@ -672,9 +849,6 @@ def autonomy_loop():
 # ============================================================
 # HEALTH API (for Railway health checks)
 # ============================================================
-
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
 
 START_TIME = datetime.now(timezone.utc)
 
@@ -691,13 +865,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             db_ok = True
             try:
                 execute_sql("SELECT 1")
-            except:
+            except Exception:
                 db_ok = False
             
             status = "healthy" if db_ok else "degraded"
             response = {
                 "status": status,
-                "version": "1.0.0",
+                "version": "1.1.0",
                 "worker_id": WORKER_ID,
                 "uptime_seconds": int(uptime),
                 "database": "connected" if db_ok else "error",
@@ -718,6 +892,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "service": "JUGGERNAUT Autonomy Engine",
                 "status": "running",
+                "version": "1.1.0",
                 "endpoints": ["/", "/health"]
             }).encode())
             
@@ -749,7 +924,7 @@ def handle_shutdown(signum, frame):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("JUGGERNAUT AUTONOMY ENGINE")
+    print("JUGGERNAUT AUTONOMY ENGINE v1.1.0")
     print("=" * 60)
     print(f"Worker ID: {WORKER_ID}")
     print(f"Loop Interval: {LOOP_INTERVAL} seconds")
