@@ -5,10 +5,10 @@ Neon PostgreSQL via SQL over HTTP
 
 import os
 import json
-import httpx
+import urllib.request
+import urllib.error
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
-from uuid import uuid4
 
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
@@ -25,46 +25,30 @@ class Database:
         self.connection_string = connection_string or NEON_CONNECTION_STRING
         self.endpoint = NEON_ENDPOINT
     
-    def query(self, sql: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    def query(self, sql: str) -> Dict[str, Any]:
         """Execute a SQL query and return results."""
         headers = {
             "Content-Type": "application/json",
             "Neon-Connection-String": self.connection_string
         }
         
-        # Simple parameter substitution (for basic cases)
-        if params:
-            for key, value in params.items():
-                if isinstance(value, str):
-                    sql = sql.replace(f"${key}", f"'{value}'")
-                elif value is None:
-                    sql = sql.replace(f"${key}", "NULL")
-                else:
-                    sql = sql.replace(f"${key}", str(value))
+        data = json.dumps({"query": sql}).encode('utf-8')
+        req = urllib.request.Request(self.endpoint, data=data, headers=headers, method='POST')
         
-        response = httpx.post(
-            self.endpoint,
-            headers=headers,
-            json={"query": sql},
-            timeout=30.0
-        )
-        
-        result = response.json()
-        if "message" in result and "error" in result.get("severity", "").lower():
-            raise Exception(f"Database error: {result['message']}")
-        
-        return result
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                result = json.loads(response.read().decode('utf-8'))
+                if "message" in result and "error" in str(result.get("severity", "")).lower():
+                    raise Exception(f"Database error: {result['message']}")
+                return result
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode('utf-8')
+            raise Exception(f"HTTP {e.code}: {error_body}")
     
     def insert(self, table: str, data: Dict[str, Any]) -> Optional[str]:
         """Insert a row and return the ID."""
         columns = ", ".join(data.keys())
-        values = ", ".join([
-            f"'{v}'" if isinstance(v, str) else 
-            "NULL" if v is None else
-            f"'{json.dumps(v)}'" if isinstance(v, (dict, list)) else
-            str(v)
-            for v in data.values()
-        ])
+        values = ", ".join([self._format_value(v) for v in data.values()])
         
         sql = f"INSERT INTO {table} ({columns}) VALUES ({values}) RETURNING id"
         result = self.query(sql)
@@ -72,6 +56,23 @@ class Database:
         if result.get("rows"):
             return result["rows"][0].get("id")
         return None
+    
+    def _format_value(self, v: Any) -> str:
+        """Format a value for SQL insertion."""
+        if v is None:
+            return "NULL"
+        elif isinstance(v, bool):
+            return "TRUE" if v else "FALSE"
+        elif isinstance(v, (int, float)):
+            return str(v)
+        elif isinstance(v, (dict, list)):
+            # Escape single quotes in JSON
+            json_str = json.dumps(v).replace("'", "''")
+            return f"'{json_str}'"
+        else:
+            # Escape single quotes in strings
+            escaped = str(v).replace("'", "''")
+            return f"'{escaped}'"
 
 
 # Singleton instance
@@ -161,7 +162,7 @@ def create_opportunity(
     source_id: str = None,
     external_id: str = None,
     customer_name: str = None,
-    customer_contact: str = None,
+    customer_contact: Dict = None,
     metadata: Dict = None,
     assigned_to: str = None,
     created_by: str = "ORCHESTRATOR",
@@ -179,7 +180,7 @@ def create_opportunity(
         source_id: UUID of the source that generated this
         external_id: ID in external system
         customer_name: Customer/lead name if applicable
-        customer_contact: Contact info
+        customer_contact: Contact info dict
         metadata: Additional JSON data
         assigned_to: Worker assigned to pursue this
         created_by: Who created this opportunity
@@ -194,8 +195,8 @@ def create_opportunity(
         "description": description,
         "estimated_value": estimated_value,
         "confidence_score": confidence_score,
-        "status": "identified",
-        "stage": "new",
+        "status": "new",
+        "stage": "identified",
         "created_by": created_by,
         "identified_at": datetime.now(timezone.utc).isoformat(),
         "created_at": datetime.now(timezone.utc).isoformat()
@@ -241,21 +242,14 @@ def update_opportunity(
     """Update an existing opportunity."""
     set_clauses = []
     for key, value in updates.items():
-        if isinstance(value, str):
-            set_clauses.append(f"{key} = '{value}'")
-        elif value is None:
-            set_clauses.append(f"{key} = NULL")
-        elif isinstance(value, (dict, list)):
-            set_clauses.append(f"{key} = '{json.dumps(value)}'")
-        else:
-            set_clauses.append(f"{key} = {value}")
+        set_clauses.append(f"{key} = {_db._format_value(value)}")
     
     set_clauses.append(f"updated_at = '{datetime.now(timezone.utc).isoformat()}'")
     
     sql = f"UPDATE opportunities SET {', '.join(set_clauses)} WHERE id = '{opportunity_id}'"
     
     try:
-        result = _db.query(sql)
+        _db.query(sql)
         log_execution(
             worker_id=updated_by,
             action="opportunity.update",
@@ -266,6 +260,28 @@ def update_opportunity(
     except Exception as e:
         print(f"Failed to update opportunity: {e}")
         return False
+
+
+def get_opportunities(status: str = None, limit: int = 50) -> List[Dict]:
+    """Get opportunities, optionally filtered by status."""
+    where = f"WHERE status = '{status}'" if status else ""
+    sql = f"SELECT * FROM opportunities {where} ORDER BY created_at DESC LIMIT {limit}"
+    result = _db.query(sql)
+    return result.get("rows", [])
+
+
+def get_logs(worker_id: str = None, action: str = None, limit: int = 100) -> List[Dict]:
+    """Get execution logs, optionally filtered."""
+    conditions = []
+    if worker_id:
+        conditions.append(f"worker_id = '{worker_id}'")
+    if action:
+        conditions.append(f"action LIKE '{action}%'")
+    
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"SELECT * FROM execution_logs {where} ORDER BY created_at DESC LIMIT {limit}"
+    result = _db.query(sql)
+    return result.get("rows", [])
 
 
 if __name__ == "__main__":
