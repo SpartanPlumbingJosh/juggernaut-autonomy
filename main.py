@@ -425,23 +425,101 @@ def claim_task(task_id: str) -> bool:
 
 
 # ============================================================
-# APPROVAL WORKFLOW (Level 3: Human-in-the-Loop)
-# Split into read-only check and creation functions
 # ============================================================
+# APPROVAL WORKFLOW (Level 3: Human-in-the-Loop)
+# Fixed to match actual approvals table schema
+# ============================================================
+
+# High-risk action types that require human approval
+HIGH_RISK_ACTIONS = frozenset([
+    "financial.transfer",
+    "financial.payment",
+    "data.delete",
+    "data.export",
+    "deploy.production",
+    "deploy.database",
+    "api.external_paid",
+    "servicetitan.create_job",
+    "servicetitan.dispatch",
+    "servicetitan.payment",
+    "domain.purchase",
+    "domain.transfer",
+    "email.mass_send",
+    "sms.mass_send",
+])
+
+COST_APPROVAL_THRESHOLD_CENTS = 500  # $5.00
+
+
+def is_high_risk_action(
+    task_type: str,
+    payload: Dict = None,
+    estimated_cost_cents: int = 0
+) -> Tuple[bool, str, List[str]]:
+    """
+    Determine if an action requires human-in-the-loop approval.
+    
+    Returns:
+        (requires_approval, risk_level, risk_factors)
+    """
+    payload = payload or {}
+    risk_factors = []
+    risk_level = "low"
+    
+    # Check if action type is in high-risk list
+    if task_type in HIGH_RISK_ACTIONS:
+        risk_factors.append(f"Action type '{task_type}' requires approval")
+        risk_level = "high"
+    
+    # Check for financial keywords
+    financial_keywords = ["payment", "transfer", "purchase", "invoice", "charge"]
+    if any(kw in task_type.lower() for kw in financial_keywords):
+        risk_factors.append("Financial operation detected")
+        risk_level = "high" if risk_level != "critical" else risk_level
+    
+    # Check for data deletion
+    if "delete" in task_type.lower() or payload.get("action") == "delete":
+        risk_factors.append("Data deletion operation")
+        risk_level = "high"
+    
+    # Check for production deployments
+    if "deploy" in task_type.lower() and payload.get("environment") == "production":
+        risk_factors.append("Production deployment")
+        risk_level = "critical"
+    
+    # Check cost threshold
+    if estimated_cost_cents >= COST_APPROVAL_THRESHOLD_CENTS:
+        risk_factors.append(f"Cost ${estimated_cost_cents/100:.2f} exceeds threshold")
+        risk_level = "medium" if risk_level == "low" else risk_level
+    
+    requires_approval = len(risk_factors) > 0
+    return requires_approval, risk_level, risk_factors
+
 
 def check_approval_status(task: Task) -> Tuple[bool, Optional[str], Optional[str]]:
     """
     Check approval status for a task (read-only, no side effects).
     
     Returns:
-        (requires_approval, approval_id_or_none, status)
-        - status can be: "approved", "denied", "pending", "none"
+        (requires_approval, approval_id_or_none, decision)
+        - decision can be: "approved", "rejected", "pending", "none", "escalated", "timeout"
     """
-    if not task.requires_approval:
+    # First check if task type itself is high-risk
+    is_risky, risk_level, risk_factors = is_high_risk_action(
+        task.task_type, 
+        task.payload,
+        task.payload.get("estimated_cost_cents", 0) if task.payload else 0
+    )
+    
+    # Task requires approval if marked OR if detected as high-risk
+    requires = task.requires_approval or is_risky
+    
+    if not requires:
         return False, None, "not_required"
     
+    # Check if approval request exists - use correct column names
     sql = f"""
-        SELECT id, status, approved_by, approved_at
+        SELECT id, decision, decided_by, decided_at
         FROM approvals
         WHERE task_id = {escape_value(task.id)}
         ORDER BY created_at DESC
@@ -454,14 +532,21 @@ def check_approval_status(task: Task) -> Tuple[bool, Optional[str], Optional[str
             return True, None, "none"
         
         approval = rows[0]
-        return True, approval["id"], approval["status"]
-    except Exception:
+        decision = approval.get("decision", "pending")
+        # Map decision to status for backward compatibility
+        if decision == "rejected":
+            return True, approval["id"], "denied"
+        return True, approval["id"], decision
+    except Exception as e:
+        log_error(f"Error checking approval status: {e}")
         return True, None, "error"
 
 
 def ensure_approval_request(task: Task) -> bool:
     """
     Ensure an approval request exists for a task. Creates one if needed.
+    Uses correct schema columns: worker_id, action_type, action_description, 
+    action_data, risk_level, risk_factors, decision
     
     Returns:
         True if approval request was created, False if already existed
@@ -471,25 +556,137 @@ def ensure_approval_request(task: Task) -> bool:
     if not requires or status != "none":
         return False
     
-    # Create approval request
+    # Determine risk factors
+    is_risky, risk_level, risk_factors = is_high_risk_action(
+        task.task_type,
+        task.payload,
+        task.payload.get("estimated_cost_cents", 0) if task.payload else 0
+    )
+    
+    # Create approval request with correct schema columns
     now = datetime.now(timezone.utc).isoformat()
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    
+    action_data = {
+        "task_type": task.task_type,
+        "title": task.title,
+        "description": task.description,
+        "priority": task.priority,
+        "payload": sanitize_payload(task.payload) if task.payload else {}
+    }
+    
     sql = f"""
         INSERT INTO approvals (
-            task_id, requested_by, request_type, request_data, status, created_at
+            task_id, worker_id, action_type, action_description,
+            action_data, risk_level, risk_factors, decision, created_at, expires_at
         ) VALUES (
-            {escape_value(task.id)}, {escape_value(WORKER_ID)}, 'task_execution',
-            {escape_value({"task_type": task.task_type, "title": task.title, "priority": task.priority})},
-            'pending', {escape_value(now)}
+            {escape_value(task.id)},
+            {escape_value(WORKER_ID)},
+            {escape_value(task.task_type)},
+            {escape_value(f"Execute task: {task.title}")},
+            {escape_value(action_data)},
+            {escape_value(risk_level)},
+            {escape_value(risk_factors)},
+            'pending',
+            {escape_value(now)},
+            {escape_value(expires_at)}
         )
     """
     try:
         execute_sql(sql)
-        log_action("approval.requested", f"Approval requested for task: {task.title}", task_id=task.id)
+        log_action("approval.requested", 
+                   f"Approval requested for task: {task.title} (risk: {risk_level})", 
+                   task_id=task.id,
+                   output_data={"risk_level": risk_level, "risk_factors": risk_factors})
         return True
     except Exception as e:
         log_error(f"Failed to create approval request: {e}")
         return False
 
+
+def get_approved_waiting_tasks(limit: int = 10) -> List[Task]:
+    """
+    Get tasks that were waiting for approval and are now approved.
+    This enables polling for approved tasks to resume execution.
+    
+    Returns:
+        List of Task objects ready to execute
+    """
+    sql = f"""
+        SELECT DISTINCT t.id, t.task_type, t.title, t.description, 
+               t.priority, t.status, t.payload, t.assigned_worker, 
+               t.created_at, t.requires_approval
+        FROM governance_tasks t
+        JOIN approvals a ON a.task_id = t.id
+        WHERE t.status = 'waiting_approval'
+        AND a.decision = 'approved'
+        AND (t.assigned_worker IS NULL OR t.assigned_worker = {escape_value(WORKER_ID)})
+        ORDER BY t.created_at
+        LIMIT {int(limit)}
+    """
+    try:
+        result = execute_sql(sql)
+        tasks = []
+        priority_map = {"critical": 5, "high": 4, "medium": 3, "normal": 2, "low": 1, "background": 0}
+        
+        for row in result.get("rows", []):
+            priority_val = row.get("priority", "normal")
+            if isinstance(priority_val, str):
+                priority_num = priority_map.get(priority_val.lower(), 2)
+            else:
+                priority_num = int(priority_val) if priority_val else 2
+            
+            tasks.append(Task(
+                id=row["id"],
+                task_type=row.get("task_type", "unknown"),
+                title=row.get("title", ""),
+                description=row.get("description", ""),
+                priority=priority_num,
+                status=row.get("status", "waiting_approval"),
+                payload=row.get("payload") or {},
+                assigned_to=row.get("assigned_worker"),
+                created_at=row.get("created_at", ""),
+                requires_approval=row.get("requires_approval", True)
+            ))
+        
+        return tasks
+    except Exception as e:
+        log_error(f"Failed to get approved waiting tasks: {e}")
+        return []
+
+
+def check_expired_approvals():
+    """
+    Check for expired approval requests and mark them as timeout.
+    """
+    sql = """
+        UPDATE approvals
+        SET decision = 'timeout',
+            decided_at = NOW()
+        WHERE decision = 'pending'
+        AND expires_at < NOW()
+        RETURNING task_id
+    """
+    try:
+        result = execute_sql(sql)
+        expired_count = result.get("rowCount", 0)
+        if expired_count > 0:
+            log_action("approval.timeout", f"{expired_count} approval(s) timed out")
+            
+            # Update associated tasks to failed
+            for row in result.get("rows", []):
+                task_id = row.get("task_id")
+                if task_id:
+                    update_sql = f"""
+                        UPDATE governance_tasks
+                        SET status = 'failed',
+                            error_message = 'Approval request timed out'
+                        WHERE id = {escape_value(task_id)}
+                        AND status = 'waiting_approval'
+                    """
+                    execute_sql(update_sql)
+    except Exception as e:
+        log_error(f"Failed to check expired approvals: {e}")
 
 # ============================================================
 # ERROR RECOVERY (Level 3: Error Recovery with Exponential Backoff)
@@ -836,7 +1033,16 @@ def autonomy_loop():
         
         try:
             # 1. Check for pending tasks
+            # Fetch pending tasks AND approved waiting tasks
             tasks = get_pending_tasks(limit=5)
+            approved_tasks = get_approved_waiting_tasks(limit=5)
+            tasks.extend(approved_tasks)
+            # Re-sort by priority
+            tasks.sort(key=lambda t: (-t.priority, t.created_at))
+            
+            # Periodically check for expired approvals
+            if loop_count % 10 == 0:  # Every 10 loops
+                check_expired_approvals()
             
             if tasks:
                 # Try to claim and execute tasks in priority order

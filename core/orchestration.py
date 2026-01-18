@@ -1563,6 +1563,223 @@ def create_phase6_tables() -> bool:
 
 
 # ============================================================
+# PHASE 6.6: HUMAN-IN-THE-LOOP APPROVAL FLOW
+# ============================================================
+
+# High-risk action types that require human approval
+HIGH_RISK_ACTIONS = frozenset([
+    "financial.transfer",
+    "financial.payment",
+    "data.delete",
+    "data.export",
+    "deploy.production",
+    "deploy.database",
+    "api.external_paid",
+    "servicetitan.create_job",
+    "servicetitan.dispatch",
+    "servicetitan.payment",
+    "domain.purchase",
+    "domain.transfer",
+    "email.mass_send",
+    "sms.mass_send",
+])
+
+# Cost thresholds that trigger approval
+COST_APPROVAL_THRESHOLD_CENTS = 500  # $5.00
+
+
+def is_high_risk_action(
+    task_type: str,
+    payload: Dict[str, Any] = None,
+    estimated_cost_cents: int = 0
+) -> Tuple[bool, str, List[str]]:
+    """
+    Determine if an action requires human-in-the-loop approval.
+    
+    Args:
+        task_type: The type of task being executed
+        payload: Task payload with action details
+        estimated_cost_cents: Estimated cost in cents
+    
+    Returns:
+        (requires_approval, risk_level, risk_factors)
+        - risk_level: 'low', 'medium', 'high', 'critical'
+        - risk_factors: List of reasons why approval is needed
+    """
+    payload = payload or {}
+    risk_factors = []
+    risk_level = "low"
+    
+    # Check if action type is in high-risk list
+    if task_type in HIGH_RISK_ACTIONS:
+        risk_factors.append(f"Action type '{task_type}' requires approval")
+        risk_level = "high"
+    
+    # Check for financial keywords in task type
+    financial_keywords = ["payment", "transfer", "purchase", "invoice", "charge"]
+    if any(kw in task_type.lower() for kw in financial_keywords):
+        risk_factors.append("Financial operation detected")
+        risk_level = "high" if risk_level != "critical" else risk_level
+    
+    # Check for data deletion
+    if "delete" in task_type.lower() or payload.get("action") == "delete":
+        risk_factors.append("Data deletion operation")
+        risk_level = "high"
+    
+    # Check for production deployments
+    if "deploy" in task_type.lower() and payload.get("environment") == "production":
+        risk_factors.append("Production deployment")
+        risk_level = "critical"
+    
+    # Check cost threshold
+    if estimated_cost_cents >= COST_APPROVAL_THRESHOLD_CENTS:
+        risk_factors.append(f"Cost ${estimated_cost_cents/100:.2f} exceeds threshold")
+        risk_level = "medium" if risk_level == "low" else risk_level
+    
+    # Check for external API calls with side effects
+    if task_type.startswith("api.") and payload.get("method", "GET").upper() != "GET":
+        risk_factors.append("External API mutation")
+        risk_level = "medium" if risk_level == "low" else risk_level
+    
+    requires_approval = len(risk_factors) > 0
+    return requires_approval, risk_level, risk_factors
+
+
+def create_approval_request(
+    task_id: str,
+    worker_id: str,
+    action_type: str,
+    action_description: str,
+    action_data: Dict[str, Any],
+    risk_level: str,
+    risk_factors: List[str],
+    estimated_impact: str = None,
+    goal_id: str = None,
+    expires_hours: int = 24
+) -> Optional[str]:
+    """
+    Create an approval request in the approvals table.
+    
+    Args:
+        task_id: ID of the task requiring approval
+        worker_id: ID of the worker requesting approval
+        action_type: Type of action being performed
+        action_description: Human-readable description
+        action_data: Full action details as JSON
+        risk_level: 'low', 'medium', 'high', 'critical'
+        risk_factors: List of reasons for approval requirement
+        estimated_impact: Description of potential impact
+        goal_id: Optional goal ID this task belongs to
+        expires_hours: Hours until approval request expires
+    
+    Returns:
+        approval_id if created, None on failure
+    """
+    from datetime import timedelta
+    
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=expires_hours)
+    
+    # Build the INSERT statement
+    cols = [
+        "task_id", "worker_id", "action_type", "action_description",
+        "action_data", "risk_level", "risk_factors", "decision", "created_at", "expires_at"
+    ]
+    vals = [
+        _format_value(task_id),
+        _format_value(worker_id),
+        _format_value(action_type),
+        _format_value(action_description),
+        _format_value(action_data),
+        _format_value(risk_level),
+        _format_value(risk_factors),
+        "'pending'",
+        _format_value(now.isoformat()),
+        _format_value(expires_at.isoformat())
+    ]
+    
+    if estimated_impact:
+        cols.append("estimated_impact")
+        vals.append(_format_value(estimated_impact))
+    
+    if goal_id:
+        cols.append("goal_id")
+        vals.append(_format_value(goal_id))
+    
+    sql = f"""
+        INSERT INTO approvals ({', '.join(cols)})
+        VALUES ({', '.join(vals)})
+        RETURNING id
+    """
+    
+    try:
+        result = _query(sql)
+        rows = result.get("rows", [])
+        if rows:
+            approval_id = rows[0].get("id")
+            print(f"[APPROVAL] Created approval request {approval_id} for task {task_id}")
+            return approval_id
+        return None
+    except Exception as e:
+        print(f"[ERROR] Failed to create approval request: {e}")
+        return None
+
+
+def get_approval_decision(task_id: str) -> Tuple[Optional[str], str, Optional[str]]:
+    """
+    Get the approval decision for a task.
+    
+    Returns:
+        (approval_id, decision, decided_by)
+        - decision: 'pending', 'approved', 'rejected', 'escalated', 'auto_approved', 'auto_rejected', 'timeout'
+    """
+    sql = f"""
+        SELECT id, decision, decided_by, decided_at, decision_notes
+        FROM approvals
+        WHERE task_id = {_format_value(task_id)}
+        ORDER BY created_at DESC
+        LIMIT 1
+    """
+    
+    try:
+        result = _query(sql)
+        rows = result.get("rows", [])
+        if not rows:
+            return None, "none", None
+        
+        approval = rows[0]
+        return approval["id"], approval["decision"], approval.get("decided_by")
+    except Exception as e:
+        print(f"[ERROR] Failed to get approval decision: {e}")
+        return None, "error", None
+
+
+def poll_approved_tasks() -> List[Dict]:
+    """
+    Find tasks that were waiting for approval and are now approved.
+    
+    Returns:
+        List of task IDs that can now be executed
+    """
+    sql = """
+        SELECT DISTINCT t.id, t.title, t.task_type, a.decision
+        FROM governance_tasks t
+        JOIN approvals a ON a.task_id = t.id
+        WHERE t.status = 'waiting_approval'
+        AND a.decision = 'approved'
+        ORDER BY t.created_at
+        LIMIT 10
+    """
+    
+    try:
+        result = _query(sql)
+        return result.get("rows", [])
+    except Exception as e:
+        print(f"[ERROR] Failed to poll approved tasks: {e}")
+        return []
+
+
+# ============================================================
 # EXPORTS
 # ============================================================
 
@@ -1609,6 +1826,14 @@ __all__ = [
     "activate_backup_agent",
     "run_health_check",
     "auto_recover",
+    
+    # 6.6 Approval Flow (Human-in-the-Loop)
+    "is_high_risk_action",
+    "create_approval_request",
+    "get_approval_decision",
+    "poll_approved_tasks",
+    "HIGH_RISK_ACTIONS",
+    "COST_APPROVAL_THRESHOLD_CENTS",
     
     # Setup
     "create_phase6_tables"
