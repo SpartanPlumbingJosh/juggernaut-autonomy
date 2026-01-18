@@ -843,6 +843,14 @@ def autonomy_loop():
                 task_executed = False
                 
                 for task in tasks:
+                    # Check permission BEFORE claiming (Level 3: Permission enforcement)
+                    # This prevents claiming tasks that the worker is forbidden from executing
+                    allowed, reason = is_action_allowed(f"task.{task.task_type}")
+                    if not allowed:
+                        log_action("task.skipped", f"Task skipped (forbidden): {reason}", 
+                                   level="warn", task_id=task.id)
+                        continue  # Skip forbidden tasks without claiming
+                    
                     # Try to claim this task
                     if not claim_task(task.id):
                         continue  # Someone else claimed it, try next
@@ -861,7 +869,7 @@ def autonomy_loop():
                     break
                 
                 if not task_executed:
-                    # All tasks either couldn't be claimed or are waiting for approval
+                    # All tasks either couldn't be claimed, are forbidden, or are waiting for approval
                     log_action("loop.no_executable", "No executable tasks this iteration",
                                output_data={"tasks_checked": len(tasks)})
             else:
