@@ -492,6 +492,11 @@ def is_high_risk_action(
         risk_factors.append(f"Cost ${estimated_cost_cents/100:.2f} exceeds threshold")
         risk_level = "medium" if risk_level == "low" else risk_level
     
+    # Check for external API calls with side effects
+    if task_type.startswith("api.") and payload.get("method", "GET").upper() != "GET":
+        risk_factors.append("External API mutation")
+        risk_level = "medium" if risk_level == "low" else risk_level
+    
     requires_approval = len(risk_factors) > 0
     return requires_approval, risk_level, risk_factors
 
@@ -607,54 +612,37 @@ def ensure_approval_request(task: Task) -> bool:
 def get_approved_waiting_tasks(limit: int = 10) -> List[Task]:
     """
     Get tasks that were waiting for approval and are now approved.
-    This enables polling for approved tasks to resume execution.
-    
-    IMPORTANT: This function transitions approved tasks from 'waiting_approval' 
-    to 'pending' status so they can be claimed by claim_task().
+    Uses latest approval per task to avoid stale approval decisions.
+    Atomically transitions tasks from 'waiting_approval' to 'pending'.
     
     Returns:
         List of Task objects ready to execute
     """
-    # First, find approved waiting tasks
-    find_sql = f"""
-        SELECT DISTINCT t.id
-        FROM governance_tasks t
-        JOIN approvals a ON a.task_id = t.id
-        WHERE t.status = 'waiting_approval'
-        AND a.decision = 'approved'
-        AND (t.assigned_worker IS NULL OR t.assigned_worker = {escape_value(WORKER_ID)})
+    # Use CTE to get latest approval per task and atomically transition
+    sql = f"""
+        WITH latest_approvals AS (
+            SELECT DISTINCT ON (task_id) task_id, decision, created_at
+            FROM approvals
+            ORDER BY task_id, created_at DESC
+        ),
+        updated_tasks AS (
+            UPDATE governance_tasks t
+            SET status = 'pending', updated_at = NOW()
+            FROM latest_approvals a
+            WHERE t.id = a.task_id
+              AND t.status = 'waiting_approval'
+              AND a.decision = 'approved'
+              AND (t.assigned_worker IS NULL OR t.assigned_worker = {escape_value(WORKER_ID)})
+            RETURNING t.id, t.task_type, t.title, t.description,
+                      t.priority, t.status, t.payload, t.assigned_worker,
+                      t.created_at, t.requires_approval
+        )
+        SELECT * FROM updated_tasks
+        ORDER BY created_at
         LIMIT {int(limit)}
     """
     try:
-        result = execute_sql(find_sql)
-        task_ids = [row["id"] for row in result.get("rows", [])]
-        
-        if not task_ids:
-            return []
-        
-        # Transition these tasks to pending status so claim_task can work
-        # This is atomic - we update status and log the transition
-        for task_id in task_ids:
-            transition_sql = f"""
-                UPDATE governance_tasks
-                SET status = 'pending'
-                WHERE id = {escape_value(task_id)}
-                AND status = 'waiting_approval'
-            """
-            execute_sql(transition_sql)
-            log_action("approval.resumed", f"Task approved and ready for execution", task_id=task_id)
-        
-        # Now fetch the full task details
-        ids_str = ", ".join([escape_value(tid) for tid in task_ids])
-        fetch_sql = f"""
-            SELECT id, task_type, title, description, 
-                   priority, status, payload, assigned_worker, 
-                   created_at, requires_approval
-            FROM governance_tasks
-            WHERE id IN ({ids_str})
-            ORDER BY created_at
-        """
-        result = execute_sql(fetch_sql)
+        result = execute_sql(sql)
         tasks = []
         priority_map = {"critical": 5, "high": 4, "medium": 3, "normal": 2, "low": 1, "background": 0}
         
@@ -665,13 +653,17 @@ def get_approved_waiting_tasks(limit: int = 10) -> List[Task]:
             else:
                 priority_num = int(priority_val) if priority_val else 2
             
+            # Log the approval resume
+            log_action("approval.resumed", f"Task approved and resumed: {row.get('title', row['id'])}", 
+                       task_id=row["id"])
+            
             tasks.append(Task(
                 id=row["id"],
                 task_type=row.get("task_type", "unknown"),
                 title=row.get("title", ""),
                 description=row.get("description", ""),
                 priority=priority_num,
-                status=row.get("status", "pending"),  # Should now be 'pending'
+                status="pending",  # Now correctly 'pending' after CTE UPDATE
                 payload=row.get("payload") or {},
                 assigned_to=row.get("assigned_worker"),
                 created_at=row.get("created_at", ""),

@@ -1757,23 +1757,39 @@ def get_approval_decision(task_id: str) -> Tuple[Optional[str], str, Optional[st
 def poll_approved_tasks() -> List[Dict]:
     """
     Find tasks that were waiting for approval and are now approved.
+    Uses latest approval per task to avoid stale decisions.
+    Atomically transitions tasks from 'waiting_approval' to 'pending'.
     
     Returns:
-        List of task IDs that can now be executed
+        List of task dictionaries ready to execute
     """
     sql = """
-        SELECT DISTINCT t.id, t.title, t.task_type, a.decision
-        FROM governance_tasks t
-        JOIN approvals a ON a.task_id = t.id
-        WHERE t.status = 'waiting_approval'
-        AND a.decision = 'approved'
-        ORDER BY t.created_at
+        WITH latest_approvals AS (
+            SELECT DISTINCT ON (task_id) task_id, decision, created_at
+            FROM approvals
+            ORDER BY task_id, created_at DESC
+        ),
+        updated_tasks AS (
+            UPDATE governance_tasks t
+            SET status = 'pending', updated_at = NOW()
+            FROM latest_approvals a
+            WHERE t.id = a.task_id
+              AND t.status = 'waiting_approval'
+              AND a.decision = 'approved'
+            RETURNING t.id, t.title, t.task_type, a.decision, t.created_at
+        )
+        SELECT id, title, task_type, decision
+        FROM updated_tasks
+        ORDER BY created_at
         LIMIT 10
     """
     
     try:
         result = _query(sql)
-        return result.get("rows", [])
+        rows = result.get("rows", [])
+        for row in rows:
+            print(f"[APPROVAL] Task {row.get('id')} approved and ready for execution")
+        return rows
     except Exception as e:
         print(f"[ERROR] Failed to poll approved tasks: {e}")
         return []
