@@ -247,7 +247,7 @@ from .scheduler import (
 # PHASE 6: MULTI-AGENT ORCHESTRATION (from orchestration.py)
 # =============================================================================
 
-from .orchestration import (
+from .orchestration import ( (
     # Data Classes & Enums
     AgentStatus,
     TaskPriority,
@@ -258,7 +258,7 @@ from .orchestration import (
     SwarmTask,
     
     # Phase 6.0: Database Setup
-    create_orchestration_tables,
+    create_phase6_tables,
     
     # Phase 6.1: Agent Coordination
     discover_agents,
@@ -289,7 +289,7 @@ from .orchestration import (
     detect_agent_failures,
     handle_agent_failure,
     activate_backup_agent,
-    run_swarm_health_check,
+    run_health_check as run_orchestration_health_check,
     auto_recover,
 )
 
@@ -405,7 +405,7 @@ __all__ = [
     # Phase 6.0 Data Classes & Enums
     "AgentStatus", "TaskPriority", "HandoffReason", "ConflictType", "EscalationLevel",
     "AgentCard", "SwarmTask",
-    "create_orchestration_tables",
+    "create_phase6_tables",
     
     # Phase 6.1 Agent Coordination
     "discover_agents", "route_task", "get_agent_workload",
@@ -424,7 +424,7 @@ __all__ = [
     
     # Phase 6.5 Resilience
     "detect_agent_failures", "handle_agent_failure",
-    "activate_backup_agent", "run_swarm_health_check", "auto_recover",
+    "activate_backup_agent", "run_orchestration_health_check", "auto_recover",
     
     # Convenience
     "get_worker_dashboard", "get_system_status",
