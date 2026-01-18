@@ -641,9 +641,26 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
+        error_output = {"status": "error", "error": str(e)}
+        
+        # Update tool_executions record to 'failed' (don't leave it stuck as 'running')
+        try:
+            now = datetime.now(timezone.utc).isoformat()
+            sql = f"""
+                UPDATE tool_executions SET
+                    status = 'failed',
+                    output_result = {escape_value(error_output)},
+                    completed_at = {escape_value(now)},
+                    duration_ms = {duration_ms}
+                WHERE id = {escape_value(tool_exec_id)}
+            """
+            execute_sql(sql)
+        except Exception:
+            pass  # Don't fail if we can't update the record
+        
         log_action(f"tool.{tool_name}.error", f"Tool failed: {str(e)}",
                    level="error", error_data={"error": str(e)}, duration_ms=duration_ms)
-        return False, str(e)
+        return False, error_output
 
 
 def _execute_slack_tool(tool_name: str, params: Dict) -> Dict:
@@ -689,7 +706,9 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             return False, {"denied": True}
         elif status == "approved":
             pass  # Continue with execution
-        elif status in ("pending", "none"):
+        else:
+            # Handle "pending", "none", "error", or any unknown status
+            # For safety, treat all non-approved status as waiting
             if status == "none":
                 ensure_approval_request(task)
             update_task_status(task.id, "waiting_approval")
@@ -705,23 +724,28 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     try:
         # Execute based on task type
         result = {"executed": True}
+        task_succeeded = True  # Track overall success
         
         if task.task_type == "tool_execution":
             tool_name = task.payload.get("tool_name")
             tool_params = task.payload.get("params", {})
             success, output = execute_tool(tool_name, tool_params)
             result = {"success": success, "output": output}
+            task_succeeded = success
             
         elif task.task_type == "workflow":
             # Execute workflow steps
             steps = task.payload.get("steps", [])
             step_results = []
+            workflow_failed = False
             for i, step in enumerate(steps):
                 step_success, step_output = execute_tool(step.get("tool"), step.get("params", {}))
                 step_results.append({"step": i, "success": step_success, "output": step_output})
                 if not step_success and step.get("required", True):
+                    workflow_failed = True
                     break
-            result = {"steps": step_results}
+            result = {"steps": step_results, "workflow_failed": workflow_failed}
+            task_succeeded = not workflow_failed
             
         elif task.task_type == "opportunity_scan":
             result = {"scanned": True, "source": task.payload.get("source")}
@@ -732,22 +756,32 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         else:
             result = {"executed": True, "type": task.task_type}
         
-        # Mark complete
+        # Mark based on actual success
         duration_ms = int((time.time() - start_time) * 1000)
-        update_task_status(task.id, "completed", result)
-        log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
-                   output_data=result, duration_ms=duration_ms)
         
-        return True, result
+        if task_succeeded:
+            update_task_status(task.id, "completed", result)
+            log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
+                       output_data=result, duration_ms=duration_ms)
+        else:
+            update_task_status(task.id, "failed", result)
+            log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
+                       level="error", error_data=result, duration_ms=duration_ms)
+        
+        return task_succeeded, result
         
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         error_str = str(e)
         
-        # Get retry count
+        # Get retry count (may be string from DB, so cast safely)
         sql = f"SELECT COALESCE(retry_count, 0) as retries FROM governance_tasks WHERE id = {escape_value(task.id)}"
         result = execute_sql(sql)
-        retries = result.get("rows", [{}])[0].get("retries", 0)
+        retries_raw = result.get("rows", [{}])[0].get("retries", 0)
+        try:
+            retries = int(retries_raw)
+        except (ValueError, TypeError):
+            retries = 0
         
         if retries < 3:
             # Schedule retry with exponential backoff
@@ -797,22 +831,31 @@ def autonomy_loop():
             tasks = get_pending_tasks(limit=5)
             
             if tasks:
-                # Execute highest priority task
-                task = tasks[0]
+                # Try to claim and execute tasks in priority order
+                task_executed = False
                 
-                # Try to claim it
-                if claim_task(task.id):
+                for task in tasks:
+                    # Try to claim this task
+                    if not claim_task(task.id):
+                        continue  # Someone else claimed it, try next
+                    
                     log_decision("loop.execute", f"Executing task: {task.title}",
-                                 f"Highest priority ({task.priority}) of {len(tasks)} pending tasks")
+                                 f"Priority {task.priority} of {len(tasks)} pending tasks")
                     
                     success, result = execute_task(task)
                     
-                    if not success and result.get("waiting_approval"):
-                        # Try next task
-                        for next_task in tasks[1:]:
-                            if claim_task(next_task.id):
-                                execute_task(next_task)
-                                break
+                    if result.get("waiting_approval"):
+                        # Task is waiting for approval, try next task
+                        continue
+                    
+                    # Task was executed (success or failure), we're done for this loop
+                    task_executed = True
+                    break
+                
+                if not task_executed:
+                    # All tasks either couldn't be claimed or are waiting for approval
+                    log_action("loop.no_executable", "No executable tasks this iteration",
+                               output_data={"tasks_checked": len(tasks)})
             else:
                 # 2. Check scheduled tasks
                 scheduled = get_due_scheduled_tasks()
