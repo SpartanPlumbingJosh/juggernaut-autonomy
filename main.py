@@ -38,6 +38,19 @@ from dataclasses import dataclass
 from enum import Enum
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# Import task handlers
+try:
+    from core.handlers import (
+        handle_database_task,
+        handle_research_task,
+        handle_scan_task,
+        handle_test_task
+    )
+    HANDLERS_AVAILABLE = True
+except ImportError:
+    HANDLERS_AVAILABLE = False
+    print("WARNING: Task handlers not available - using fallback mode")
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -756,13 +769,72 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             task_succeeded = not workflow_failed
             
         elif task.task_type == "opportunity_scan":
-            result = {"scanned": True, "source": task.payload.get("source")}
+            # Use scan handler if available
+            if HANDLERS_AVAILABLE:
+                task_succeeded, result = handle_scan_task(task.id, task.payload, log_action)
+            else:
+                result = {"scanned": True, "source": task.payload.get("source")}
             
         elif task.task_type == "health_check":
             result = {"healthy": True, "component": task.payload.get("component")}
-            
+        
+        # === NEW HANDLERS (HIGH-03) ===
+        elif task.task_type == "database":
+            # Execute SQL from payload
+            if HANDLERS_AVAILABLE:
+                task_succeeded, result = handle_database_task(task.id, task.payload, log_action)
+            else:
+                log_action("task.handler_missing", "Database handler not available", 
+                           level="error", task_id=task.id)
+                task_succeeded = False
+                result = {"error": "Handler not available"}
+        
+        elif task.task_type == "research":
+            # Search web and summarize findings
+            if HANDLERS_AVAILABLE:
+                task_succeeded, result = handle_research_task(task.id, task.payload, log_action)
+            else:
+                log_action("task.handler_missing", "Research handler not available", 
+                           level="error", task_id=task.id)
+                task_succeeded = False
+                result = {"error": "Handler not available"}
+        
+        elif task.task_type == "scan":
+            # Run opportunity scanner
+            if HANDLERS_AVAILABLE:
+                task_succeeded, result = handle_scan_task(task.id, task.payload, log_action)
+            else:
+                log_action("task.handler_missing", "Scan handler not available", 
+                           level="error", task_id=task.id)
+                task_succeeded = False
+                result = {"error": "Handler not available"}
+        
+        elif task.task_type == "test":
+            # Run verification queries
+            if HANDLERS_AVAILABLE:
+                task_succeeded, result = handle_test_task(task.id, task.payload, log_action)
+            else:
+                log_action("task.handler_missing", "Test handler not available", 
+                           level="error", task_id=task.id)
+                task_succeeded = False
+                result = {"error": "Handler not available"}
+        
         else:
-            result = {"executed": True, "type": task.task_type}
+            # Unknown task type - do NOT auto-complete
+            # Set to waiting_approval so human can provide guidance
+            log_action(
+                "task.unhandled_type",
+                f"No handler for task_type '{task.task_type}' - setting to waiting_approval",
+                level="warn",
+                task_id=task.id,
+                output_data={"task_type": task.task_type, "payload_keys": list(task.payload.keys())}
+            )
+            update_task_status(task.id, "waiting_approval", {
+                "reason": f"No automated handler for task_type: {task.task_type}",
+                "requires_manual_handling": True
+            })
+            return False, {"waiting_approval": True, "reason": f"Unknown task_type: {task.task_type}"}
+
         
         # Mark based on actual success
         duration_ms = int((time.time() - start_time) * 1000)
@@ -1006,3 +1078,4 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
