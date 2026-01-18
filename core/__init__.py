@@ -1,7 +1,17 @@
 """
 JUGGERNAUT Core Module
-Complete Phase 1-4 exports
+Complete Phase 1-5 exports
+
+Phase 1: Core Engine (Logging, Memory, Communication)
+Phase 2: Agent Framework (Workers, Goals, Tasks, Tools, Error Recovery, Approvals, Permissions)
+Phase 3: Revenue Infrastructure (Opportunities, Revenue, Costs)
+Phase 4: Experimentation Framework (Design, Execution, Analysis, Rollback, Learnings)
+Phase 5: Proactive Systems (Scanning, Monitoring, Scheduling)
 """
+
+# =============================================================================
+# PHASE 1-3: CORE, AGENTS, REVENUE (from database.py, agents.py, tools.py, error_recovery.py)
+# =============================================================================
 
 from .database import (
     # Core
@@ -13,16 +23,6 @@ from .database import (
     cleanup_old_logs,
     get_log_summary,
     
-    # Opportunities (Phase 3.1)
-    create_opportunity,
-    update_opportunity,
-    get_opportunities,
-    
-    # Revenue (Phase 3.2)
-    record_revenue,
-    get_revenue_summary,
-    get_revenue_events,
-    
     # Memory (Phase 1.2)
     write_memory,
     read_memories,
@@ -33,6 +33,16 @@ from .database import (
     get_messages,
     acknowledge_message,
     mark_message_read,
+    
+    # Opportunities (Phase 3.1)
+    create_opportunity,
+    update_opportunity,
+    get_opportunities,
+    
+    # Revenue (Phase 3.2)
+    record_revenue,
+    get_revenue_summary,
+    get_revenue_events,
 )
 
 from .agents import (
@@ -118,6 +128,10 @@ from .error_recovery import (
     get_system_health,
 )
 
+# =============================================================================
+# PHASE 4: EXPERIMENTATION FRAMEWORK (from experiments.py)
+# =============================================================================
+
 from .experiments import (
     # Phase 4.1: Experiment Design
     create_experiment_template,
@@ -150,7 +164,7 @@ from .experiments import (
     execute_rollback,
     check_auto_rollback_triggers,
     
-    # Phase 4.5: Self-Improvement
+    # Phase 4.5: Self-Improvement (Learnings)
     record_learning,
     extract_learnings,
     get_learnings,
@@ -161,6 +175,83 @@ from .experiments import (
     log_experiment_event,
     get_experiment_dashboard,
 )
+
+# =============================================================================
+# PHASE 5: PROACTIVE SYSTEMS
+# =============================================================================
+
+# Phase 5.1: Opportunity Scanner (from proactive.py)
+from .proactive import (
+    start_scan,
+    complete_scan,
+    fail_scan,
+    get_scan_history,
+    identify_opportunity,
+    identify_opportunity_with_dedup,
+    score_opportunity,
+    bulk_score_opportunities,
+    get_top_opportunities,
+    compute_opportunity_fingerprint,
+    check_duplicate,
+    schedule_scan,
+    get_scheduled_scans,
+    scan_servicetitan_opportunities,
+    scan_angi_leads,
+    scan_market_trends,
+)
+
+# Phase 5.2: Monitoring System (from monitoring.py)
+from .monitoring import (
+    record_metric,
+    record_counter,
+    record_latency,
+    get_metrics,
+    get_metric_stats,
+    run_health_check,
+    check_all_components,
+    get_health_status,
+    detect_anomaly,
+    record_anomaly,
+    get_open_anomalies,
+    resolve_anomaly,
+    get_performance_summary,
+    check_task_queue_health,
+    get_dashboard_data,
+)
+
+# Phase 5.3: Scheduled Tasks (from scheduler.py)
+from .scheduler import (
+    parse_cron_expression,
+    calculate_next_cron_run,
+    create_scheduled_task,
+    update_scheduled_task,
+    delete_scheduled_task,
+    enable_task,
+    disable_task,
+    get_all_scheduled_tasks,
+    get_due_tasks,
+    start_task_run,
+    complete_task_run,
+    fail_task_run,
+    check_dependencies_satisfied,
+    add_dependency,
+    remove_dependency,
+    get_schedule_conflicts,
+    resolve_conflict,
+    get_schedule_report,
+    get_task_run_history,
+)
+
+# =============================================================================
+# VERSION
+# =============================================================================
+
+__version__ = "5.0.0"
+__phase__ = "Phase 5: Proactive Systems Complete"
+
+# =============================================================================
+# PUBLIC API
+# =============================================================================
 
 __all__ = [
     # Database
@@ -232,8 +323,32 @@ __all__ = [
     "record_learning", "extract_learnings", "get_learnings",
     "get_relevant_learnings", "validate_learning",
     
-    # Utilities
+    # Phase 4 Utilities
     "log_experiment_event", "get_experiment_dashboard",
+    
+    # Phase 5.1 Opportunity Scanner
+    "start_scan", "complete_scan", "fail_scan", "get_scan_history",
+    "identify_opportunity", "identify_opportunity_with_dedup",
+    "score_opportunity", "bulk_score_opportunities", "get_top_opportunities",
+    "compute_opportunity_fingerprint", "check_duplicate",
+    "schedule_scan", "get_scheduled_scans",
+    "scan_servicetitan_opportunities", "scan_angi_leads", "scan_market_trends",
+    
+    # Phase 5.2 Monitoring
+    "record_metric", "record_counter", "record_latency",
+    "get_metrics", "get_metric_stats",
+    "run_health_check", "check_all_components", "get_health_status",
+    "detect_anomaly", "record_anomaly", "get_open_anomalies", "resolve_anomaly",
+    "get_performance_summary", "check_task_queue_health", "get_dashboard_data",
+    
+    # Phase 5.3 Scheduler
+    "parse_cron_expression", "calculate_next_cron_run",
+    "create_scheduled_task", "update_scheduled_task", "delete_scheduled_task",
+    "enable_task", "disable_task", "get_all_scheduled_tasks",
+    "get_due_tasks", "start_task_run", "complete_task_run", "fail_task_run",
+    "check_dependencies_satisfied", "add_dependency", "remove_dependency",
+    "get_schedule_conflicts", "resolve_conflict",
+    "get_schedule_report", "get_task_run_history",
     
     # Convenience
     "get_worker_dashboard", "get_system_status",
