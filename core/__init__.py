@@ -1,5 +1,6 @@
 """
 JUGGERNAUT Core Module
+Complete Phase 1-2 exports
 """
 
 from .database import (
@@ -81,6 +82,42 @@ from .agents import (
     get_system_status,
 )
 
+from .tools import (
+    # Tool Interface (Phase 2.4)
+    Tool,
+    ToolResult,
+    register_tool,
+    get_tool,
+    list_tools,
+    find_tools_by_permission,
+    execute_tool,
+    get_tool_executions,
+    get_execution_stats,
+    initialize_builtin_tools,
+)
+
+from .error_recovery import (
+    # Dead Letter Queue (Phase 2.5)
+    move_to_dead_letter,
+    get_dead_letter_items,
+    resolve_dead_letter,
+    retry_dead_letter,
+    
+    # Alerting (Phase 2.5)
+    create_alert,
+    get_open_alerts,
+    acknowledge_alert,
+    resolve_alert,
+    check_repeated_failures,
+    
+    # Graceful Degradation (Phase 2.5)
+    get_fallback_worker,
+    enable_degraded_mode,
+    disable_degraded_mode,
+    circuit_breaker_open,
+    get_system_health,
+)
+
 __all__ = [
     # Database
     "query_db",
@@ -99,6 +136,15 @@ __all__ = [
     # Phase 2.3 Tasks
     "create_task", "get_task", "list_tasks", "get_pending_tasks",
     "assign_task", "start_task", "complete_task", "fail_task", "get_tasks_ready_for_retry",
+    # Phase 2.4 Tools
+    "Tool", "ToolResult", "register_tool", "get_tool", "list_tools",
+    "find_tools_by_permission", "execute_tool", "get_tool_executions", 
+    "get_execution_stats", "initialize_builtin_tools",
+    # Phase 2.5 Error Recovery
+    "move_to_dead_letter", "get_dead_letter_items", "resolve_dead_letter", "retry_dead_letter",
+    "create_alert", "get_open_alerts", "acknowledge_alert", "resolve_alert", "check_repeated_failures",
+    "get_fallback_worker", "enable_degraded_mode", "disable_degraded_mode", 
+    "circuit_breaker_open", "get_system_health",
     # Phase 2.6 Approvals
     "request_approval", "get_pending_approvals", "approve", "reject",
     "check_approval_status", "is_task_approved",
