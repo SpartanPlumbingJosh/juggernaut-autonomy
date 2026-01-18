@@ -8,6 +8,8 @@ import json
 import urllib.request
 import urllib.error
 import smtplib
+import re
+import uuid as uuid_module
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timezone, timedelta
@@ -15,6 +17,36 @@ from typing import Any, Dict, List, Optional
 
 # Import database functions from dashboard module
 from dashboard import query_db, _db
+
+
+# ============================================================
+# INPUT VALIDATION
+# ============================================================
+
+def validate_uuid(value: str) -> bool:
+    """Validate that a string is a valid UUID."""
+    try:
+        uuid_module.UUID(str(value))
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def sanitize_email(email: str) -> str:
+    """Basic email sanitization - escape single quotes."""
+    if not email:
+        return ""
+    # Validate email format
+    if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
+        return ""
+    return email.replace("'", "''")
+
+
+def sanitize_string(value: str) -> str:
+    """Sanitize a string for SQL by escaping single quotes."""
+    if not value:
+        return ""
+    return str(value).replace("'", "''")
 
 # ============================================================
 # CONFIGURATION
@@ -193,6 +225,10 @@ def send_email_notification(notification_id: str) -> bool:
     Returns:
         True if sent successfully, False otherwise
     """
+    # Validate UUID to prevent SQL injection
+    if not validate_uuid(notification_id):
+        return False
+    
     # Get notification details
     sql = f"SELECT * FROM notifications WHERE id = '{notification_id}'"
     result = query_db(sql)
@@ -463,7 +499,9 @@ def send_slack_direct(message: str, channel: str = None, emoji: str = None) -> b
         
         with urllib.request.urlopen(req, timeout=10) as response:
             return True
-    except:
+    except Exception as e:
+        # Log the error but don't expose details
+        print(f"Slack notification error: {type(e).__name__}")
         return False
 
 
@@ -481,7 +519,9 @@ def get_notification_preferences(user_id: str) -> Dict[str, Any]:
     Returns:
         Preference settings dict
     """
-    sql = f"SELECT * FROM notification_preferences WHERE user_id = '{user_id}'"
+    # Sanitize user_id to prevent SQL injection
+    safe_user_id = sanitize_string(user_id)
+    sql = f"SELECT * FROM notification_preferences WHERE user_id = '{safe_user_id}'"
     
     try:
         result = query_db(sql)
@@ -522,17 +562,22 @@ def update_notification_preferences(
     Returns:
         True if updated successfully
     """
+    # Sanitize all inputs
+    safe_user_id = sanitize_string(user_id)
+    safe_email = sanitize_email(email) if email else ""
+    safe_slack_id = sanitize_string(slack_user_id) if slack_user_id else ""
+    
     # Check if exists
-    check_sql = f"SELECT id FROM notification_preferences WHERE user_id = '{user_id}'"
+    check_sql = f"SELECT id FROM notification_preferences WHERE user_id = '{safe_user_id}'"
     check_result = query_db(check_sql)
     
     if check_result.get("rows"):
         # Update
         updates = []
         if email is not None:
-            updates.append(f"email = '{email}'")
+            updates.append(f"email = '{safe_email}'")
         if slack_user_id is not None:
-            updates.append(f"slack_user_id = '{slack_user_id}'")
+            updates.append(f"slack_user_id = '{safe_slack_id}'")
         if preferences is not None:
             prefs_json = json.dumps(preferences).replace("'", "''")
             updates.append(f"preferences = '{prefs_json}'")
@@ -541,7 +586,7 @@ def update_notification_preferences(
         update_sql = f"""
             UPDATE notification_preferences 
             SET {', '.join(updates)}
-            WHERE user_id = '{user_id}'
+            WHERE user_id = '{safe_user_id}'
         """
         query_db(update_sql)
     else:
@@ -549,7 +594,7 @@ def update_notification_preferences(
         prefs_json = json.dumps(preferences or DEFAULT_PREFERENCES).replace("'", "''")
         insert_sql = f"""
             INSERT INTO notification_preferences (user_id, email, slack_user_id, preferences)
-            VALUES ('{user_id}', '{email or ''}', '{slack_user_id or ''}', '{prefs_json}')
+            VALUES ('{safe_user_id}', '{safe_email}', '{safe_slack_id}', '{prefs_json}')
         """
         query_db(insert_sql)
     

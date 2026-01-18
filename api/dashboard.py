@@ -14,20 +14,22 @@ import hmac
 import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Union
-from functools import wraps
+import re
+import uuid
 
 # ============================================================
 # CONFIGURATION
 # ============================================================
 
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("DATABASE_URL environment variable is required")
 
-# API authentication
-API_SECRET = os.getenv("DASHBOARD_API_SECRET", "juggernaut-dev-secret-change-in-prod")
+# API authentication - require secret from environment
+API_SECRET = os.getenv("DASHBOARD_API_SECRET")
+if not API_SECRET:
+    raise ValueError("DASHBOARD_API_SECRET environment variable is required")
 API_VERSION = "v1"
 
 # Rate limiting config
@@ -36,6 +38,26 @@ RATE_LIMIT_MAX_REQUESTS = 100
 
 # In-memory rate limit store (use Redis in production)
 _rate_limits: Dict[str, List[float]] = {}
+
+
+# ============================================================
+# INPUT VALIDATION
+# ============================================================
+
+def validate_uuid(value: str) -> bool:
+    """Validate that a string is a valid UUID."""
+    try:
+        uuid.UUID(str(value))
+        return True
+    except (ValueError, AttributeError):
+        return False
+
+
+def sanitize_identifier(value: str) -> str:
+    """Sanitize an identifier (alphanumeric + underscore only)."""
+    if not value:
+        return ""
+    return re.sub(r'[^a-zA-Z0-9_-]', '', str(value))
 
 
 # ============================================================
@@ -502,6 +524,10 @@ def get_experiment_details(experiment_id: str) -> Dict[str, Any]:
     Returns:
         Detailed experiment data including variants, results, and checkpoints
     """
+    # Validate UUID to prevent SQL injection
+    if not validate_uuid(experiment_id):
+        return {"success": False, "error": "Invalid experiment_id format"}
+    
     # Get base experiment
     exp_sql = f"""
         SELECT * FROM experiments WHERE id = '{experiment_id}'
@@ -614,8 +640,9 @@ def get_agent_health() -> Dict[str, Any]:
                 try:
                     hb_time = datetime.fromisoformat(last_heartbeat.replace("Z", "+00:00"))
                     heartbeat_stale = (datetime.now(timezone.utc) - hb_time).total_seconds() > 300
-                except:
-                    pass
+                except (ValueError, TypeError):
+                    # If heartbeat can't be parsed, treat it as stale
+                    heartbeat_stale = True
             
             agents.append({
                 "worker_id": worker_id,
