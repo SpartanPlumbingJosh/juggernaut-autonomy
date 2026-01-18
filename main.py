@@ -388,6 +388,93 @@ def get_due_scheduled_tasks() -> List[Dict]:
         return []
 
 
+def execute_scheduled_task_handler(task: Dict) -> Dict:
+    """
+    Execute a scheduled task based on its task_type.
+    
+    Args:
+        task: The scheduled task dict with id, name, task_type, config
+        
+    Returns:
+        Dict with execution results
+    """
+    task_id = task.get("id")
+    task_type = task.get("task_type")
+    config = task.get("config", {}) or {}
+    
+    # Parse config if it's a string
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except json.JSONDecodeError:
+            config = {}
+    
+    start_time = time.time()
+    result = {"success": False, "task_id": task_id, "task_type": task_type}
+    
+    try:
+        if task_type == "log_retention":
+            # Execute log retention cleanup
+            retention_days = config.get("retention_days", 90)
+            
+            # Get summary before deletion
+            summary_sql = f"""
+                SELECT 
+                    COUNT(*) as total_logs,
+                    MIN(created_at) as oldest_log,
+                    MAX(created_at) as newest_log,
+                    COUNT(CASE WHEN level = 'error' THEN 1 END) as error_count
+                FROM execution_logs
+                WHERE created_at < NOW() - INTERVAL '{retention_days} days'
+            """
+            summary_result = execute_sql(summary_sql)
+            summary = summary_result.get("rows", [{}])[0] if summary_result.get("rows") else {}
+            
+            # Log summary before cleanup
+            log_action(
+                "log_retention.summary",
+                f"Pre-cleanup summary for logs older than {retention_days} days",
+                output_data=summary
+            )
+            
+            # Delete old logs
+            delete_sql = f"""
+                DELETE FROM execution_logs
+                WHERE created_at < NOW() - INTERVAL '{retention_days} days'
+            """
+            delete_result = execute_sql(delete_sql)
+            deleted_count = delete_result.get("rowCount", 0)
+            
+            result["success"] = True
+            result["deleted_count"] = deleted_count
+            result["retention_days"] = retention_days
+            result["summary"] = summary
+            
+            log_action(
+                "log_retention.complete",
+                f"Log retention cleanup completed: {deleted_count} logs deleted",
+                output_data=result
+            )
+        else:
+            # Unknown task type - log warning but don't fail
+            log_action(
+                "scheduled_task.unknown",
+                f"No handler for task_type: {task_type}",
+                level="warn",
+                output_data={"task_id": task_id, "task_type": task_type}
+            )
+            result["success"] = True
+            result["message"] = f"No handler for task_type: {task_type}"
+            
+    except Exception as e:
+        result["error"] = str(e)
+        log_error(f"Scheduled task execution failed: {e}", {"task_id": task_id, "task_type": task_type})
+    
+    result["duration_ms"] = int((time.time() - start_time) * 1000)
+    return result
+
+
+
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
     """Update task status."""
     now = datetime.now(timezone.utc).isoformat()
@@ -883,6 +970,8 @@ def autonomy_loop():
                     now = datetime.now(timezone.utc).isoformat()
                     sql = f"UPDATE scheduled_tasks SET last_run_at = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
                     execute_sql(sql)
+                    # Execute the scheduled task handler
+                    execute_scheduled_task_handler(sched_task)
                 else:
                     # 3. Nothing to do - log heartbeat
                     if loop_count % 5 == 0:  # Every 5 loops
