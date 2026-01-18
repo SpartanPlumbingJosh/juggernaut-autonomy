@@ -333,31 +333,39 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
     """Get pending tasks ordered by priority, respecting retry backoff."""
     sql = f"""
         SELECT id, task_type, title, description, priority, status, 
-               payload, assigned_to, created_at, requires_approval
+               payload, assigned_worker, created_at, requires_approval
         FROM governance_tasks 
         WHERE status IN ('pending', 'in_progress')
-        AND (assigned_to IS NULL OR assigned_to = {escape_value(WORKER_ID)})
-        AND (retry_after IS NULL OR retry_after < NOW())
-        ORDER BY priority DESC, created_at ASC
-        LIMIT {int(limit)}
+        AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
+        AND (next_retry_at IS NULL OR next_retry_at < NOW())
+        LIMIT {int(limit * 2)}
     """
     try:
         result = execute_sql(sql)
         tasks = []
+        # Map priority enum to numeric values
+        priority_map = {"critical": 5, "high": 4, "medium": 3, "normal": 2, "low": 1, "background": 0}
         for row in result.get("rows", []):
+            priority_val = row.get("priority", "normal")
+            if isinstance(priority_val, str):
+                priority_num = priority_map.get(priority_val.lower(), 2)
+            else:
+                priority_num = int(priority_val) if priority_val else 2
             tasks.append(Task(
                 id=row["id"],
                 task_type=row.get("task_type", "unknown"),
                 title=row.get("title", ""),
                 description=row.get("description", ""),
-                priority=int(row.get("priority", 0)),
+                priority=priority_num,
                 status=row.get("status", "pending"),
                 payload=row.get("payload") or {},
-                assigned_to=row.get("assigned_to"),
+                assigned_to=row.get("assigned_worker"),
                 created_at=row.get("created_at", ""),
                 requires_approval=row.get("requires_approval", False)
             ))
-        return tasks
+        # Sort by priority (desc) then created_at (asc) using Python's priority_map values
+        tasks.sort(key=lambda t: (-t.priority, t.created_at))
+        return tasks[:limit]
     except Exception as e:
         log_error(f"Failed to get tasks: {e}")
         return []
@@ -366,11 +374,11 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
 def get_due_scheduled_tasks() -> List[Dict]:
     """Get scheduled tasks that are due to run."""
     sql = """
-        SELECT id, name, task_type, cron_expression, payload, last_run, enabled
+        SELECT id, name, task_type, cron_expression, config, last_run_at, enabled
         FROM scheduled_tasks
         WHERE enabled = TRUE
-        AND (last_run IS NULL OR last_run < NOW() - INTERVAL '1 hour')
-        ORDER BY last_run ASC NULLS FIRST
+        AND (last_run_at IS NULL OR last_run_at < NOW() - INTERVAL '1 hour')
+        ORDER BY last_run_at ASC NULLS FIRST
         LIMIT 5
     """
     try:
@@ -383,7 +391,7 @@ def get_due_scheduled_tasks() -> List[Dict]:
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
     """Update task status."""
     now = datetime.now(timezone.utc).isoformat()
-    cols = [f"status = {escape_value(status)}", f"updated_at = {escape_value(now)}"]
+    cols = [f"status = {escape_value(status)}"]
     if status == "completed":
         cols.append(f"completed_at = {escape_value(now)}")
     if result_data:
@@ -401,11 +409,11 @@ def claim_task(task_id: str) -> bool:
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         UPDATE governance_tasks 
-        SET assigned_to = {escape_value(WORKER_ID)}, 
+        SET assigned_worker = {escape_value(WORKER_ID)}, 
             status = 'in_progress',
             started_at = {escape_value(now)}
         WHERE id = {escape_value(task_id)}
-        AND (assigned_to IS NULL OR assigned_to = {escape_value(WORKER_ID)})
+        AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
         AND status = 'pending'
         RETURNING id
     """
@@ -496,14 +504,14 @@ def calculate_retry_delay(retry_count: int) -> int:
 def schedule_task_retry(task_id: str, retry_count: int, error: str):
     """Schedule a task for retry with exponential backoff."""
     delay_seconds = calculate_retry_delay(retry_count)
-    retry_after = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
+    next_retry_at = (datetime.now(timezone.utc) + timedelta(seconds=delay_seconds)).isoformat()
     
     sql = f"""
         UPDATE governance_tasks 
-        SET retry_count = {retry_count + 1}, 
+        SET attempt_count = {retry_count + 1}, 
             status = 'pending',
-            retry_after = {escape_value(retry_after)},
-            last_error = {escape_value(error)}
+            next_retry_at = {escape_value(next_retry_at)},
+            error_message = {escape_value(error)}
         WHERE id = {escape_value(task_id)}
     """
     try:
@@ -513,7 +521,7 @@ def schedule_task_retry(task_id: str, retry_count: int, error: str):
             f"Task will retry in {delay_seconds}s ({retry_count + 1}/3)",
             level="warn", 
             task_id=task_id,
-            output_data={"retry_count": retry_count + 1, "retry_after": retry_after, "delay_seconds": delay_seconds}
+            output_data={"retry_count": retry_count + 1, "next_retry_at": next_retry_at, "delay_seconds": delay_seconds}
         )
     except Exception as e:
         log_error(f"Failed to schedule retry: {e}")
@@ -775,7 +783,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         error_str = str(e)
         
         # Get retry count (may be string from DB, so cast safely)
-        sql = f"SELECT COALESCE(retry_count, 0) as retries FROM governance_tasks WHERE id = {escape_value(task.id)}"
+        sql = f"SELECT COALESCE(attempt_count, 0) as retries FROM governance_tasks WHERE id = {escape_value(task.id)}"
         result = execute_sql(sql)
         retries_raw = result.get("rows", [{}])[0].get("retries", 0)
         try:
@@ -808,9 +816,9 @@ def autonomy_loop():
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
-        INSERT INTO worker_registry (worker_id, status, last_heartbeat, capabilities)
-        VALUES ({escape_value(WORKER_ID)}, 'active', {escape_value(now)}, 
-                {escape_value(["task_execution", "opportunity_scan", "tool_execution"])})
+        INSERT INTO worker_registry (worker_id, name, status, last_heartbeat, capabilities, level, max_concurrent_tasks, permissions, forbidden_actions, approval_required_for, allowed_task_types)
+        VALUES ({escape_value(WORKER_ID)}, {escape_value(f'Autonomy Engine {WORKER_ID}')}, 'active', {escape_value(now)}, 
+                {escape_value(["task_execution", "opportunity_scan", "tool_execution"])}, 'L3', 1, {escape_value({})}, {escape_value([])}, {escape_value([])}, {escape_value([])})
         ON CONFLICT (worker_id) DO UPDATE SET
             status = 'active',
             last_heartbeat = {escape_value(now)}
@@ -865,7 +873,7 @@ def autonomy_loop():
                                  "No pending tasks, running scheduled task")
                     # Mark as run
                     now = datetime.now(timezone.utc).isoformat()
-                    sql = f"UPDATE scheduled_tasks SET last_run = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
+                    sql = f"UPDATE scheduled_tasks SET last_run_at = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
                     execute_sql(sql)
                 else:
                     # 3. Nothing to do - log heartbeat
