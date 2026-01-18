@@ -609,23 +609,52 @@ def get_approved_waiting_tasks(limit: int = 10) -> List[Task]:
     Get tasks that were waiting for approval and are now approved.
     This enables polling for approved tasks to resume execution.
     
+    IMPORTANT: This function transitions approved tasks from 'waiting_approval' 
+    to 'pending' status so they can be claimed by claim_task().
+    
     Returns:
         List of Task objects ready to execute
     """
-    sql = f"""
-        SELECT DISTINCT t.id, t.task_type, t.title, t.description, 
-               t.priority, t.status, t.payload, t.assigned_worker, 
-               t.created_at, t.requires_approval
+    # First, find approved waiting tasks
+    find_sql = f"""
+        SELECT DISTINCT t.id
         FROM governance_tasks t
         JOIN approvals a ON a.task_id = t.id
         WHERE t.status = 'waiting_approval'
         AND a.decision = 'approved'
         AND (t.assigned_worker IS NULL OR t.assigned_worker = {escape_value(WORKER_ID)})
-        ORDER BY t.created_at
         LIMIT {int(limit)}
     """
     try:
-        result = execute_sql(sql)
+        result = execute_sql(find_sql)
+        task_ids = [row["id"] for row in result.get("rows", [])]
+        
+        if not task_ids:
+            return []
+        
+        # Transition these tasks to pending status so claim_task can work
+        # This is atomic - we update status and log the transition
+        for task_id in task_ids:
+            transition_sql = f"""
+                UPDATE governance_tasks
+                SET status = 'pending'
+                WHERE id = {escape_value(task_id)}
+                AND status = 'waiting_approval'
+            """
+            execute_sql(transition_sql)
+            log_action("approval.resumed", f"Task approved and ready for execution", task_id=task_id)
+        
+        # Now fetch the full task details
+        ids_str = ", ".join([escape_value(tid) for tid in task_ids])
+        fetch_sql = f"""
+            SELECT id, task_type, title, description, 
+                   priority, status, payload, assigned_worker, 
+                   created_at, requires_approval
+            FROM governance_tasks
+            WHERE id IN ({ids_str})
+            ORDER BY created_at
+        """
+        result = execute_sql(fetch_sql)
         tasks = []
         priority_map = {"critical": 5, "high": 4, "medium": 3, "normal": 2, "low": 1, "background": 0}
         
@@ -642,7 +671,7 @@ def get_approved_waiting_tasks(limit: int = 10) -> List[Task]:
                 title=row.get("title", ""),
                 description=row.get("description", ""),
                 priority=priority_num,
-                status=row.get("status", "waiting_approval"),
+                status=row.get("status", "pending"),  # Should now be 'pending'
                 payload=row.get("payload") or {},
                 assigned_to=row.get("assigned_worker"),
                 created_at=row.get("created_at", ""),
@@ -653,6 +682,7 @@ def get_approved_waiting_tasks(limit: int = 10) -> List[Task]:
     except Exception as e:
         log_error(f"Failed to get approved waiting tasks: {e}")
         return []
+
 
 
 def check_expired_approvals():
