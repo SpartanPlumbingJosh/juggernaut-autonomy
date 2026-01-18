@@ -1,12 +1,13 @@
 """
 JUGGERNAUT Core Module
-Complete Phase 1-5 exports
+Complete Phase 1-6 exports
 
 Phase 1: Core Engine (Logging, Memory, Communication)
 Phase 2: Agent Framework (Workers, Goals, Tasks, Tools, Error Recovery, Approvals, Permissions)
 Phase 3: Revenue Infrastructure (Opportunities, Revenue, Costs)
 Phase 4: Experimentation Framework (Design, Execution, Analysis, Rollback, Learnings)
 Phase 5: Proactive Systems (Scanning, Monitoring, Scheduling)
+Phase 6: Multi-Agent Orchestration (Agent Coordination, Resource Allocation, Cross-Agent Memory, Escalation, Resilience)
 """
 
 # =============================================================================
@@ -237,17 +238,67 @@ from .scheduler import (
     add_dependency,
     remove_dependency,
     get_schedule_conflicts,
-    resolve_conflict,
+    resolve_conflict as resolve_schedule_conflict,
     get_schedule_report,
     get_task_run_history,
+)
+
+# =============================================================================
+# PHASE 6: MULTI-AGENT ORCHESTRATION (from orchestration.py)
+# =============================================================================
+
+from .orchestration import (
+    # Data Classes & Enums
+    AgentStatus,
+    TaskPriority,
+    HandoffReason,
+    ConflictType,
+    EscalationLevel,
+    AgentCard,
+    SwarmTask,
+    
+    # Phase 6.0: Database Setup
+    create_orchestration_tables,
+    
+    # Phase 6.1: Agent Coordination
+    discover_agents,
+    route_task,
+    get_agent_workload,
+    balance_workload,
+    handoff_task,
+    log_coordination_event,
+    
+    # Phase 6.2: Resource Allocation
+    allocate_budget_to_goal,
+    get_resource_status,
+    resolve_conflict,
+    
+    # Phase 6.3: Cross-Agent Memory
+    write_shared_memory,
+    read_shared_memory,
+    sync_memory_to_agents,
+    garbage_collect_memory,
+    
+    # Phase 6.4: Escalation System
+    create_escalation,
+    get_open_escalations,
+    resolve_escalation,
+    check_escalation_timeouts,
+    
+    # Phase 6.5: Resilience
+    detect_agent_failures,
+    handle_agent_failure,
+    activate_backup_agent,
+    run_swarm_health_check,
+    auto_recover,
 )
 
 # =============================================================================
 # VERSION
 # =============================================================================
 
-__version__ = "5.0.0"
-__phase__ = "Phase 5: Proactive Systems Complete"
+__version__ = "6.0.0"
+__phase__ = "Phase 6: Multi-Agent Orchestration Complete"
 
 # =============================================================================
 # PUBLIC API
@@ -344,11 +395,36 @@ __all__ = [
     # Phase 5.3 Scheduler
     "parse_cron_expression", "calculate_next_cron_run",
     "create_scheduled_task", "update_scheduled_task", "delete_scheduled_task",
-    "enable_task", "disable_task", "get_all_scheduled_tasks",
-    "get_due_tasks", "start_task_run", "complete_task_run", "fail_task_run",
+    "enable_task", "disable_task",
+    "get_all_scheduled_tasks", "get_due_tasks",
+    "start_task_run", "complete_task_run", "fail_task_run",
     "check_dependencies_satisfied", "add_dependency", "remove_dependency",
-    "get_schedule_conflicts", "resolve_conflict",
+    "get_schedule_conflicts", "resolve_schedule_conflict",
     "get_schedule_report", "get_task_run_history",
+    
+    # Phase 6.0 Data Classes & Enums
+    "AgentStatus", "TaskPriority", "HandoffReason", "ConflictType", "EscalationLevel",
+    "AgentCard", "SwarmTask",
+    "create_orchestration_tables",
+    
+    # Phase 6.1 Agent Coordination
+    "discover_agents", "route_task", "get_agent_workload",
+    "balance_workload", "handoff_task", "log_coordination_event",
+    
+    # Phase 6.2 Resource Allocation
+    "allocate_budget_to_goal", "get_resource_status", "resolve_conflict",
+    
+    # Phase 6.3 Cross-Agent Memory
+    "write_shared_memory", "read_shared_memory",
+    "sync_memory_to_agents", "garbage_collect_memory",
+    
+    # Phase 6.4 Escalation System
+    "create_escalation", "get_open_escalations",
+    "resolve_escalation", "check_escalation_timeouts",
+    
+    # Phase 6.5 Resilience
+    "detect_agent_failures", "handle_agent_failure",
+    "activate_backup_agent", "run_swarm_health_check", "auto_recover",
     
     # Convenience
     "get_worker_dashboard", "get_system_status",
