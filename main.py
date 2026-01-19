@@ -83,6 +83,15 @@ except ImportError as e:
     _dashboard_import_error = str(e)
 
 
+# BRAIN-03: Brain API Endpoints
+BRAIN_API_AVAILABLE = False
+_brain_api_import_error = None
+try:
+    from api.brain_api import handle_brain_request, get_brain_status, BRAIN_AVAILABLE
+    BRAIN_API_AVAILABLE = True
+except ImportError as e:
+    _brain_api_import_error = str(e)
+
 
 # Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
 ORCHESTRATION_AVAILABLE = False
@@ -2370,6 +2379,10 @@ class HealthHandler(BaseHTTPRequestHandler):
                 "dry_run": DRY_RUN,
                 "loop_interval": LOOP_INTERVAL,
                 "dashboard_api": DASHBOARD_API_AVAILABLE,
+                "brain_api": {
+                    "available": BRAIN_API_AVAILABLE,
+                    "status": get_brain_status() if BRAIN_API_AVAILABLE else {"error": _brain_api_import_error}
+                },
                 "experiments": {
                     "available": EXPERIMENTS_AVAILABLE,
                     "dashboard": get_experiment_dashboard() if EXPERIMENTS_AVAILABLE else {}
@@ -2401,7 +2414,10 @@ class HealthHandler(BaseHTTPRequestHandler):
                     "/api/dashboard/revenue",
                     "/api/dashboard/workers",
                     "/api/dashboard/experiments",
-                    "/api/dashboard/tasks"
+                    "/api/dashboard/tasks",
+                    "/api/brain/consult",
+                    "/api/brain/history",
+                    "/api/brain/clear"
                 ]
             }).encode())
         
@@ -2422,6 +2438,26 @@ class HealthHandler(BaseHTTPRequestHandler):
             result = handle_dashboard_request(endpoint, params)
             
             self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result, default=str).encode())
+        
+        # Brain API GET endpoint (history)
+        elif path == "/api/brain/history":
+            if not BRAIN_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Brain API not available: {_brain_api_import_error}"
+                }).encode())
+                return
+            
+            status_code, result = handle_brain_request(self, "GET", self.path)
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.send_cors_headers()
             self.end_headers()
@@ -2477,6 +2513,57 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        
+        # Brain API POST endpoint (consult)
+        elif path == "/api/brain/consult":
+            if not BRAIN_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Brain API not available: {_brain_api_import_error}"
+                }).encode())
+                return
+            
+            status_code, result = handle_brain_request(self, "POST", self.path)
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result, default=str).encode())
+        
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
+    
+    def do_DELETE(self):
+        """Handle DELETE requests (for brain clear)."""
+        path = self.path.split('?')[0]
+        
+        # Brain API DELETE endpoint (clear)
+        if path == "/api/brain/clear":
+            if not BRAIN_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Brain API not available: {_brain_api_import_error}"
+                }).encode())
+                return
+            
+            status_code, result = handle_brain_request(self, "DELETE", self.path)
+            self.send_response(status_code)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result, default=str).encode())
         
         else:
             self.send_response(404)
