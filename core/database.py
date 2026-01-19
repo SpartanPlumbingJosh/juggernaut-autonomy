@@ -2035,3 +2035,196 @@ def get_model_performance() -> List[Dict]:
     except Exception as e:
         print(f"Failed to get model performance: {e}")
         return []
+
+
+# ============================================================
+# L5: ORG-WIDE LEARNINGS FUNCTIONS
+# ============================================================
+
+def record_learning(
+    summary: str,
+    category: str,
+    worker_id: str = "SYSTEM",
+    task_id: str = None,
+    goal_id: str = None,
+    details: Dict = None,
+    evidence_task_ids: List[str] = None,
+    confidence: float = 0.7
+) -> Optional[str]:
+    """
+    Record an organizational learning from task execution.
+    
+    L5 Requirement: Org-Wide Memory - Persistent, auditable memory across years.
+    
+    Args:
+        summary: Brief description of the learning
+        category: Category (e.g., 'bug', 'pattern', 'optimization', 'failure', 'success')
+        worker_id: Which worker discovered this learning
+        task_id: Associated task UUID
+        goal_id: Associated goal UUID
+        details: Additional JSON details
+        evidence_task_ids: List of task IDs that support this learning
+        confidence: Confidence score (0.0-1.0)
+    
+    Returns:
+        Learning UUID or None on failure
+    """
+    data = {
+        "summary": summary,
+        "category": category,
+        "worker_id": worker_id,
+        "confidence": confidence,
+        "applied_count": 0,
+        "is_validated": False,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if task_id:
+        data["task_id"] = task_id
+    if goal_id:
+        data["goal_id"] = goal_id
+    if details:
+        data["details"] = details
+    if evidence_task_ids:
+        data["evidence_task_ids"] = evidence_task_ids
+    
+    try:
+        learning_id = _db.insert("learnings", data)
+        
+        log_execution(
+            worker_id=worker_id,
+            action="learning.recorded",
+            message=f"Recorded learning: {summary[:100]}",
+            output_data={"learning_id": learning_id, "category": category, "confidence": confidence}
+        )
+        
+        return learning_id
+    except Exception as e:
+        print(f"Failed to record learning: {e}")
+        return None
+
+
+def search_learnings(
+    category: str = None,
+    worker_id: str = None,
+    search_text: str = None,
+    min_confidence: float = None,
+    validated_only: bool = False,
+    limit: int = 50
+) -> List[Dict]:
+    """
+    Search organizational learnings.
+    
+    L5 Requirement: Memory searchable by topic/date/worker.
+    
+    Args:
+        category: Filter by category
+        worker_id: Filter by worker who discovered it
+        search_text: Text to search in summary
+        min_confidence: Minimum confidence score
+        validated_only: Only return validated learnings
+        limit: Max learnings to return
+    
+    Returns:
+        List of learning records
+    """
+    conditions = []
+    
+    if category:
+        conditions.append(f"category = {escape_sql_value(category)}")
+    if worker_id:
+        conditions.append(f"worker_id = {escape_sql_value(worker_id)}")
+    if min_confidence is not None:
+        conditions.append(f"confidence >= {min_confidence}")
+    if validated_only:
+        conditions.append("is_validated = TRUE")
+    if search_text:
+        conditions.append(f"summary ILIKE {escape_sql_value('%' + search_text + '%')}")
+    
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"SELECT * FROM learnings {where} ORDER BY created_at DESC LIMIT {limit}"
+    
+    try:
+        result = _db.query(sql)
+        return result.get("rows", [])
+    except Exception as e:
+        print(f"Failed to search learnings: {e}")
+        return []
+
+
+def get_learning_categories() -> List[Dict]:
+    """
+    Get summary of learnings by category.
+    
+    Returns:
+        List of categories with counts and avg confidence
+    """
+    sql = """
+        SELECT 
+            category,
+            COUNT(*) as count,
+            AVG(confidence) as avg_confidence,
+            SUM(applied_count) as total_applications
+        FROM learnings
+        GROUP BY category
+        ORDER BY count DESC
+    """
+    
+    try:
+        result = _db.query(sql)
+        return result.get("rows", [])
+    except Exception as e:
+        print(f"Failed to get learning categories: {e}")
+        return []
+
+
+def apply_learning(learning_id: str) -> bool:
+    """
+    Mark a learning as applied (increment applied_count).
+    
+    Args:
+        learning_id: UUID of the learning to mark as applied
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    sql = f"""
+        UPDATE learnings 
+        SET applied_count = applied_count + 1,
+            updated_at = {escape_sql_value(datetime.now(timezone.utc).isoformat())}
+        WHERE id = {escape_sql_value(learning_id)}
+    """
+    
+    try:
+        _db.query(sql)
+        return True
+    except Exception as e:
+        print(f"Failed to apply learning: {e}")
+        return False
+
+
+def validate_learning(learning_id: str, validated_by: str) -> bool:
+    """
+    Mark a learning as validated by a human or higher authority.
+    
+    Args:
+        learning_id: UUID of the learning to validate
+        validated_by: Who validated it (worker_id or 'human')
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    sql = f"""
+        UPDATE learnings 
+        SET is_validated = TRUE,
+            validated_by = {escape_sql_value(validated_by)},
+            updated_at = {escape_sql_value(datetime.now(timezone.utc).isoformat())}
+        WHERE id = {escape_sql_value(learning_id)}
+    """
+    
+    try:
+        _db.query(sql)
+        return True
+    except Exception as e:
+        print(f"Failed to validate learning: {e}")
+        return False
