@@ -190,7 +190,7 @@ class MCPServer:
                     method,
                     url,
                     headers=headers,
-                    data=body if method == "POST" else None,
+                    data=body if method in ("POST", "PUT", "PATCH") else None,
                     timeout=aiohttp.ClientTimeout(total=timeout)
                 ) as resp:
                     content = await resp.text()
@@ -249,7 +249,7 @@ mcp_server = MCPServer()
 
 
 async def handle_sse(request: web.Request) -> web.StreamResponse:
-    """Handle SSE connections for MCP protocol."""
+    """Handle SSE connections for MCP protocol (GET requests)."""
     token = request.query.get('token')
     if token != MCP_AUTH_TOKEN:
         return web.Response(status=401, text="Unauthorized")
@@ -270,8 +270,76 @@ async def handle_sse(request: web.Request) -> web.StreamResponse:
             await resp.send(json.dumps({"type": "ping"}))
 
 
+async def handle_mcp_post(request: web.Request) -> web.Response:
+    """Handle MCP tool calls via POST to /mcp/sse endpoint."""
+    token = request.query.get('token')
+    if not token:
+        token = request.headers.get('Authorization', '').replace('Bearer ', '')
+    if token != MCP_AUTH_TOKEN:
+        return web.Response(status=401, text="Unauthorized")
+
+    try:
+        data = await request.json()
+        logger.info("MCP POST received: %s", json.dumps(data)[:500])
+
+        # Handle JSON-RPC format
+        method = data.get('method', '')
+        params = data.get('params', {})
+        request_id = data.get('id')
+
+        if method == 'tools/list':
+            # Return tool list
+            return web.json_response({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": [
+                        {"name": name, **tool}
+                        for name, tool in mcp_server.tools.items()
+                    ]
+                }
+            })
+
+        if method == 'tools/call':
+            # Execute tool call
+            tool_name = params.get('name')
+            arguments = params.get('arguments', {})
+            result = await mcp_server.handle_tool_call(tool_name, arguments)
+            return web.json_response({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {"content": [{"type": "text", "text": json.dumps(result)}]}
+            })
+
+        # Legacy format support
+        if 'name' in data:
+            tool_name = data.get('name')
+            arguments = data.get('arguments', {})
+            result = await mcp_server.handle_tool_call(tool_name, arguments)
+            return web.json_response({
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": result
+            })
+
+        return web.json_response({
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "error": {"code": -32601, "message": f"Unknown method: {method}"}
+        })
+
+    except json.JSONDecodeError:
+        return web.Response(status=400, text="Invalid JSON")
+    except Exception as e:
+        logger.exception("Error handling MCP POST")
+        return web.json_response({
+            "jsonrpc": "2.0",
+            "error": {"code": -32603, "message": str(e)}
+        }, status=500)
+
+
 async def handle_tool_call(request: web.Request) -> web.Response:
-    """Handle tool call requests."""
+    """Handle tool call requests at /mcp/tools/call."""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     if token != MCP_AUTH_TOKEN:
         return web.Response(status=401, text="Unauthorized")
@@ -311,6 +379,7 @@ def create_app() -> web.Application:
     """Create the aiohttp application."""
     app = web.Application()
     app.router.add_get('/mcp/sse', handle_sse)
+    app.router.add_post('/mcp/sse', handle_mcp_post)  # Handle POST to SSE endpoint
     app.router.add_post('/mcp/tools/call', handle_tool_call)
     app.router.add_get('/health', handle_health)
     return app
