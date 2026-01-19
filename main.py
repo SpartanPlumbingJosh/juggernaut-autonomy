@@ -38,6 +38,14 @@ from dataclasses import dataclass
 from enum import Enum
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# Slack notifications for #war-room
+from core.notifications import (
+    notify_task_completed,
+    notify_task_failed,
+    notify_engine_started,
+    notify_alert
+)
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -903,10 +911,22 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
+            notify_task_completed(
+                task_id=task.id,
+                task_title=task.title,
+                worker_id=WORKER_ID,
+                duration_secs=duration_ms // 1000
+            )
         else:
             update_task_status(task.id, "failed", result)
             log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
                        level="error", error_data=result, duration_ms=duration_ms)
+            notify_task_failed(
+                task_id=task.id,
+                task_title=task.title,
+                error_message=str(result.get("error", "Unknown error")),
+                worker_id=WORKER_ID
+            )
         
         return task_succeeded, result
         
@@ -931,6 +951,13 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "failed", {"error": error_str})
             send_to_dlq(task.id, error_str, retries)
             create_escalation(task.id, f"Task failed after {retries} retries: {error_str}")
+            notify_task_failed(
+                task_id=task.id,
+                task_title=task.title,
+                error_message=f"Failed after {retries} retries: {error_str}",
+                worker_id=WORKER_ID,
+                retry_count=retries
+            )
         
         return False, {"error": error_str, "retries": retries}
 
@@ -1122,6 +1149,9 @@ if __name__ == "__main__":
     print(f"Dry Run Mode: {DRY_RUN}")
     print(f"Health Port: {PORT}")
     print("=" * 60)
+    
+    # Notify Slack that engine is starting
+    notify_engine_started(WORKER_ID)
     
     # Register signal handlers
     signal.signal(signal.SIGTERM, handle_shutdown)
