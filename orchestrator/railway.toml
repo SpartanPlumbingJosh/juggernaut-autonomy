@@ -1,0 +1,20 @@
+# ==============================================================================
+# JUGGERNAUT Orchestrator Service - Railway Configuration
+# ==============================================================================
+# This service coordinates multi-agent task execution, handles failures,
+# and manages escalations for the JUGGERNAUT autonomy system.
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "python main.py"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "always"
+restartPolicyMaxRetries = 3
+
+[service]
+name = "juggernaut-orchestrator"
+internalPort = 8000
