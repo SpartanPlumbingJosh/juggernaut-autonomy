@@ -1575,6 +1575,190 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             log_action("task.scan_completed", f"Scan completed: {scan_type} from {source}",
                       task_id=task.id, output_data=result)
         
+        elif task.task_type == "verification":
+            # Execute verification checks from payload
+            verification_queries = task.payload.get("queries", [])
+            verification_sql = task.payload.get("sql")
+            assertions = task.payload.get("assertions", [])
+            
+            # TYPE SAFETY: Handle string input by wrapping in list
+            if isinstance(verification_queries, str):
+                verification_queries = [verification_queries]
+            
+            if verification_sql:
+                verification_queries = [verification_sql]
+            
+            if not verification_queries:
+                result = {"error": "Verification task missing 'queries' or 'sql' in payload"}
+                task_succeeded = False
+            else:
+                verification_results = []
+                all_passed = True
+                
+                for i, query in enumerate(verification_queries):
+                    try:
+                        query_result = execute_sql(query)
+                        rows = query_result.get("rows", [])
+                        row_count = query_result.get("rowCount", 0)
+                        
+                        # Check assertions if provided for this query
+                        assertion_passed = True
+                        assertion_message = None
+                        
+                        if i < len(assertions):
+                            assertion = assertions[i]
+                            expected_count = assertion.get("expected_count")
+                            min_count = assertion.get("min_count")
+                            max_count = assertion.get("max_count")
+                            expected_value = assertion.get("expected_value")
+                            
+                            if expected_count is not None and row_count != expected_count:
+                                assertion_passed = False
+                                assertion_message = f"Expected {expected_count} rows, got {row_count}"
+                            elif min_count is not None and row_count < min_count:
+                                assertion_passed = False
+                                assertion_message = f"Expected at least {min_count} rows, got {row_count}"
+                            elif max_count is not None and row_count > max_count:
+                                assertion_passed = False
+                                assertion_message = f"Expected at most {max_count} rows, got {row_count}"
+                            elif expected_value is not None and rows:
+                                # Check first row's first value
+                                first_value = list(rows[0].values())[0] if rows[0] else None
+                                if first_value != expected_value:
+                                    assertion_passed = False
+                                    assertion_message = f"Expected value {expected_value}, got {first_value}"
+                        
+                        verification_results.append({
+                            "index": i,
+                            "passed": assertion_passed,
+                            "rowCount": row_count,
+                            "assertion_message": assertion_message
+                        })
+                        
+                        if not assertion_passed:
+                            all_passed = False
+                            
+                    except Exception as ver_error:
+                        verification_results.append({
+                            "index": i,
+                            "passed": False,
+                            "error": str(ver_error)
+                        })
+                        all_passed = False
+                
+                result = {
+                    "executed": True,
+                    "verifications_run": len(verification_results),
+                    "all_passed": all_passed,
+                    "results": verification_results
+                }
+                task_succeeded = all_passed
+                log_action("task.verification_completed", 
+                          f"Ran {len(verification_results)} verifications, passed={all_passed}",
+                          task_id=task.id, output_data=result)
+        
+        elif task.task_type == "evaluation":
+            # Execute evaluation logic from payload
+            eval_type = task.payload.get("eval_type", "query")
+            eval_sql = task.payload.get("sql") or task.payload.get("query")
+            criteria = task.payload.get("criteria", {})
+            
+            if eval_type == "query" and eval_sql:
+                try:
+                    query_result = execute_sql(eval_sql)
+                    rows = query_result.get("rows", [])
+                    row_count = query_result.get("rowCount", 0)
+                    
+                    # Evaluate based on criteria
+                    score = 100  # Start with perfect score
+                    evaluation_notes = []
+                    
+                    # Check row count criteria
+                    if "min_rows" in criteria and row_count < criteria["min_rows"]:
+                        score -= 25
+                        evaluation_notes.append(f"Below minimum row count: {row_count} < {criteria['min_rows']}")
+                    if "max_rows" in criteria and row_count > criteria["max_rows"]:
+                        score -= 25
+                        evaluation_notes.append(f"Above maximum row count: {row_count} > {criteria['max_rows']}")
+                    
+                    # Check for required fields in results
+                    required_fields = criteria.get("required_fields", [])
+                    if rows and required_fields:
+                        first_row = rows[0]
+                        missing_fields = [f for f in required_fields if f not in first_row]
+                        if missing_fields:
+                            score -= 10 * len(missing_fields)
+                            evaluation_notes.append(f"Missing required fields: {missing_fields}")
+                    
+                    # Determine pass/fail based on threshold
+                    threshold = criteria.get("pass_threshold", 70)
+                    passed = score >= threshold
+                    
+                    result = {
+                        "executed": True,
+                        "eval_type": eval_type,
+                        "score": score,
+                        "passed": passed,
+                        "threshold": threshold,
+                        "row_count": row_count,
+                        "notes": evaluation_notes
+                    }
+                    task_succeeded = passed
+                    log_action("task.evaluation_completed",
+                              f"Evaluation completed: score={score}, passed={passed}",
+                              task_id=task.id, output_data=result)
+                              
+                except Exception as eval_error:
+                    result = {"error": str(eval_error), "eval_type": eval_type}
+                    task_succeeded = False
+                    log_action("task.evaluation_failed", f"Evaluation failed: {str(eval_error)}",
+                              level="error", task_id=task.id, error_data=result)
+            
+            elif eval_type == "metric":
+                # Evaluate a metric value against thresholds
+                metric_name = task.payload.get("metric_name", "unknown")
+                metric_value = task.payload.get("metric_value")
+                
+                if metric_value is None:
+                    result = {"error": "Metric evaluation requires 'metric_value' in payload"}
+                    task_succeeded = False
+                else:
+                    min_threshold = criteria.get("min_value")
+                    max_threshold = criteria.get("max_value")
+                    target_value = criteria.get("target_value")
+                    
+                    passed = True
+                    notes = []
+                    
+                    if min_threshold is not None and metric_value < min_threshold:
+                        passed = False
+                        notes.append(f"Below minimum: {metric_value} < {min_threshold}")
+                    if max_threshold is not None and metric_value > max_threshold:
+                        passed = False
+                        notes.append(f"Above maximum: {metric_value} > {max_threshold}")
+                    if target_value is not None:
+                        variance = abs(metric_value - target_value) / target_value * 100 if target_value else 0
+                        notes.append(f"Variance from target: {variance:.1f}%")
+                    
+                    result = {
+                        "executed": True,
+                        "eval_type": eval_type,
+                        "metric_name": metric_name,
+                        "metric_value": metric_value,
+                        "passed": passed,
+                        "notes": notes
+                    }
+                    task_succeeded = passed
+                    log_action("task.evaluation_completed",
+                              f"Metric evaluation: {metric_name}={metric_value}, passed={passed}",
+                              task_id=task.id, output_data=result)
+            else:
+                result = {
+                    "error": f"Unknown eval_type '{eval_type}' or missing required fields",
+                    "supported_types": ["query", "metric"]
+                }
+                task_succeeded = False
+
         else:
             # Unknown task type - requires human guidance
             # Set to waiting_approval so a human can review and provide instructions
@@ -2232,3 +2416,4 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
