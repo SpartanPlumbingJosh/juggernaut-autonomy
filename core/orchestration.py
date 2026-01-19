@@ -240,7 +240,7 @@ def discover_agents(
             try:
                 task_sql = f"""
                 SELECT COUNT(*) as cnt FROM governance_tasks
-                WHERE assigned_worker_id = {_format_value(agent['worker_id'])}
+                WHERE assigned_worker = {_format_value(agent['worker_id'])}
                   AND status = 'in_progress'
                 """
                 task_result = _query(task_sql)
@@ -335,7 +335,7 @@ def get_agent_workload(worker_id: str) -> Dict[str, Any]:
         COUNT(*) FILTER (WHERE status = 'completed' AND completed_at > NOW() - INTERVAL '1 hour') as completed_last_hour,
         COUNT(*) FILTER (WHERE status = 'failed' AND completed_at > NOW() - INTERVAL '1 hour') as failed_last_hour
     FROM governance_tasks
-    WHERE assigned_worker_id = {_format_value(worker_id)}
+    WHERE assigned_worker = {_format_value(worker_id)}
     """
     
     try:
@@ -384,7 +384,7 @@ def balance_workload(dry_run: bool = True) -> List[Dict]:
             # Count active tasks for this worker
             count_sql = f"""
             SELECT COUNT(*) as cnt FROM governance_tasks
-            WHERE assigned_worker_id = {_format_value(worker_id)}
+            WHERE assigned_worker = {_format_value(worker_id)}
               AND status = 'in_progress'
             """
             count_result = _query(count_sql)
@@ -398,7 +398,7 @@ def balance_workload(dry_run: bool = True) -> List[Dict]:
                     # Get task IDs to potentially move
                     tasks_sql = f"""
                     SELECT id FROM governance_tasks
-                    WHERE assigned_worker_id = {_format_value(worker_id)}
+                    WHERE assigned_worker = {_format_value(worker_id)}
                       AND status = 'in_progress'
                     ORDER BY priority ASC
                     LIMIT {excess}
@@ -457,7 +457,7 @@ def handoff_task(
     sql = f"""
     UPDATE governance_tasks
     SET 
-        assigned_worker_id = {_format_value(to_agent)},
+        assigned_worker = {_format_value(to_agent)},
         status = 'pending',
         started_at = NULL,
         updated_at = NOW(),
@@ -474,7 +474,7 @@ def handoff_task(
             }])}::jsonb
         )
     WHERE id = {_format_value(task_id)}
-      AND assigned_worker_id = {_format_value(from_agent)}
+      AND assigned_worker = {_format_value(from_agent)}
     """
     
     try:
@@ -1255,7 +1255,7 @@ def handle_agent_failure(worker_id: str) -> Dict[str, Any]:
     tasks_sql = f"""
     SELECT id, task_type, priority, goal_id
     FROM governance_tasks
-    WHERE assigned_worker_id = {_format_value(worker_id)}
+    WHERE assigned_worker = {_format_value(worker_id)}
       AND status IN ('pending', 'in_progress')
     """
     
@@ -1593,7 +1593,7 @@ def orchestrator_assign_task(
     sql = f"""
     UPDATE governance_tasks
     SET 
-        assigned_worker_id = {_format_value(target_worker_id)},
+        assigned_worker = {_format_value(target_worker_id)},
         status = 'assigned',
         updated_at = NOW(),
         result = jsonb_set(
@@ -1608,7 +1608,7 @@ def orchestrator_assign_task(
             }])}::jsonb
         )
     WHERE id = {_format_value(task_id)}
-    RETURNING id, title, assigned_worker_id
+    RETURNING id, title, assigned_worker
     """
     
     try:
@@ -1699,7 +1699,7 @@ def worker_report_task_status(
         updated_at = NOW(),
         result = COALESCE(result, '{{}}'::jsonb) || {_format_value(result_data)}::jsonb
     WHERE id = {_format_value(task_id)}
-      AND assigned_worker_id = {_format_value(worker_id)}
+      AND assigned_worker = {_format_value(worker_id)}
     RETURNING id, title, status
     """
     
