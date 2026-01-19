@@ -120,6 +120,19 @@ except ImportError as e:
     def handle_opportunity_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
 
 
+# MED-02: Learning Capture from Task Execution
+LEARNING_CAPTURE_AVAILABLE = False
+_learning_capture_import_error = None
+
+try:
+    from core.learning_capture import capture_task_learning
+    LEARNING_CAPTURE_AVAILABLE = True
+except ImportError as e:
+    _learning_capture_import_error = str(e)
+    # Stub function for graceful degradation
+    def capture_task_learning(*args, **kwargs): return (False, None)
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -1410,6 +1423,25 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
+            # MED-02: Capture learning from successful task
+            if LEARNING_CAPTURE_AVAILABLE:
+                try:
+                    capture_task_learning(
+                        execute_sql_func=execute_sql,
+                        escape_value_func=escape_value,
+                        log_action_func=log_action,
+                        task_id=task.id,
+                        task_type=task.task_type,
+                        task_title=task.title,
+                        task_description=task.description,
+                        success=True,
+                        result=result,
+                        duration_ms=duration_ms,
+                        worker_id=WORKER_ID,
+                    )
+                except Exception as learn_err:
+                    log_action("learning.capture_error", f"Failed to capture learning: {learn_err}",
+                               task_id=task.id, level="warning")
             # Notify Slack (best-effort, don't affect task status)
             try:
                 notify_task_completed(
@@ -1426,6 +1458,25 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "failed", result)
             log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
                        level="error", error_data=result, duration_ms=duration_ms)
+            # MED-02: Capture learning from failed task
+            if LEARNING_CAPTURE_AVAILABLE:
+                try:
+                    capture_task_learning(
+                        execute_sql_func=execute_sql,
+                        escape_value_func=escape_value,
+                        log_action_func=log_action,
+                        task_id=task.id,
+                        task_type=task.task_type,
+                        task_title=task.title,
+                        task_description=task.description,
+                        success=False,
+                        result=result,
+                        duration_ms=duration_ms,
+                        worker_id=WORKER_ID,
+                    )
+                except Exception as learn_err:
+                    log_action("learning.capture_error", f"Failed to capture learning: {learn_err}",
+                               task_id=task.id, level="warning")
             # Notify Slack (best-effort, don't affect task status)
             try:
                 notify_task_failed(
