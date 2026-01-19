@@ -2275,3 +2275,369 @@ def validate_learning(learning_id: str, validated_by: str) -> bool:
             level="error"
         )
         return False
+# ==============================================================================
+# REVENUE TRACKING FUNCTIONS
+# Add this section to the end of core/database.py
+# PR: BUILD REVENUE TRACKING (HIGH-04)
+# Worker: claude-chat-OPUS45
+# ==============================================================================
+
+def record_revenue(
+    event_type: str,
+    gross_amount: float,
+    revenue_type: str = "one_time",
+    net_amount: float = None,
+    currency: str = "USD",
+    source: str = None,
+    opportunity_id: str = None,
+    attribution: Dict = None,
+    occurred_at: str = None,
+    created_by: str = "SYSTEM"
+) -> Optional[str]:
+    """
+    Record a revenue event.
+    
+    Args:
+        event_type: Type of event ('sale', 'refund', 'recurring')
+        gross_amount: Gross revenue amount in dollars
+        revenue_type: Revenue classification ('one_time', 'recurring', 'usage')
+        net_amount: Net amount after fees/costs (defaults to gross if not specified)
+        currency: Currency code (default: 'USD')
+        source: Revenue source identifier (e.g., 'gumroad', 'stripe', 'manual')
+        opportunity_id: Related opportunity UUID
+        attribution: JSON dict with attribution details (e.g., campaign, channel)
+        occurred_at: When the transaction occurred (ISO timestamp, defaults to now)
+        created_by: Who recorded this event
+    
+    Returns:
+        Revenue event UUID or None on failure
+    
+    Example:
+        >>> record_revenue(
+        ...     event_type="sale",
+        ...     gross_amount=49.99,
+        ...     revenue_type="one_time",
+        ...     net_amount=42.50,
+        ...     source="gumroad",
+        ...     attribution={"campaign": "twitter_launch", "product": "prompt_pack"}
+        ... )
+        'a1b2c3d4-e5f6-...'
+    """
+    # Validate event_type
+    valid_event_types = ("sale", "refund", "recurring")
+    if event_type not in valid_event_types:
+        logger.error("Invalid event_type '%s'. Must be one of: %s", event_type, valid_event_types)
+        return None
+    
+    # Validate revenue_type
+    valid_revenue_types = ("one_time", "recurring", "usage")
+    if revenue_type not in valid_revenue_types:
+        logger.error("Invalid revenue_type '%s'. Must be one of: %s", revenue_type, valid_revenue_types)
+        return None
+    
+    # Default net_amount to gross_amount if not specified
+    if net_amount is None:
+        net_amount = gross_amount
+    
+    # Default occurred_at to now if not specified
+    if occurred_at is None:
+        occurred_at = datetime.now(timezone.utc).isoformat()
+    
+    data = {
+        "event_type": event_type,
+        "revenue_type": revenue_type,
+        "gross_amount": gross_amount,
+        "net_amount": net_amount,
+        "currency": currency,
+        "occurred_at": occurred_at,
+        "created_at": datetime.now(timezone.utc).isoformat()
+    }
+    
+    if source:
+        data["source"] = source
+    if opportunity_id:
+        data["opportunity_id"] = opportunity_id
+    if attribution:
+        data["attribution"] = attribution
+    
+    try:
+        revenue_id = _db.insert("revenue_events", data)
+        
+        log_execution(
+            worker_id=created_by,
+            action="revenue.recorded",
+            message=f"Recorded {event_type}: ${gross_amount:.2f} ({revenue_type})",
+            output_data={
+                "revenue_id": revenue_id,
+                "event_type": event_type,
+                "gross_amount": gross_amount,
+                "net_amount": net_amount,
+                "source": source
+            }
+        )
+        
+        return revenue_id
+    except Exception as e:
+        logger.error("Failed to record revenue: %s", e)
+        log_execution(
+            worker_id=created_by,
+            action="revenue.record_error",
+            message=f"Failed to record revenue: {e}",
+            level="error",
+            error_data={"error": str(e), "event_type": event_type, "gross_amount": gross_amount}
+        )
+        return None
+
+
+def get_revenue_summary(
+    period_type: str = "daily",
+    start_date: str = None,
+    end_date: str = None,
+    source: str = None,
+    days: int = 30
+) -> Dict[str, Any]:
+    """
+    Get revenue summary for a specified period.
+    
+    Args:
+        period_type: Aggregation period ('daily', 'weekly', 'monthly')
+        start_date: Start date in YYYY-MM-DD format (defaults to 'days' ago)
+        end_date: End date in YYYY-MM-DD format (defaults to today)
+        source: Filter by revenue source
+        days: Number of days to look back if start_date not specified (default: 30)
+    
+    Returns:
+        Dict containing:
+            - total_gross: Total gross revenue
+            - total_net: Total net revenue  
+            - event_count: Number of revenue events
+            - by_type: Revenue broken down by event_type
+            - by_source: Revenue broken down by source
+            - by_period: Revenue broken down by period
+            - avg_transaction: Average transaction amount
+            - period_start: Start of period analyzed
+            - period_end: End of period analyzed
+    
+    Example:
+        >>> get_revenue_summary(period_type="weekly", days=7)
+        {
+            'total_gross': 1250.00,
+            'total_net': 1062.50,
+            'event_count': 15,
+            'avg_transaction': 83.33,
+            'by_type': {'sale': {'count': 14, 'gross': 1300.00, 'net': 1105.00}, 
+                       'refund': {'count': 1, 'gross': -50.00, 'net': -42.50}},
+            'by_source': {'gumroad': {...}, 'stripe': {...}},
+            'by_period': [{'period': '2026-01-13', 'count': 5, 'gross': 400.00, 'net': 340.00}, ...],
+            ...
+        }
+    """
+    # Set default date range
+    if end_date is None:
+        end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if start_date is None:
+        start_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
+    
+    # Build base WHERE conditions
+    conditions = [
+        f"occurred_at >= {escape_sql_value(start_date)}",
+        f"occurred_at < {escape_sql_value(end_date + 'T23:59:59Z')}"
+    ]
+    if source:
+        conditions.append(f"source = {escape_sql_value(source)}")
+    
+    where_clause = f"WHERE {' AND '.join(conditions)}"
+    
+    # Query: Total summary
+    total_sql = f"""
+        SELECT 
+            COALESCE(SUM(gross_amount), 0) as total_gross,
+            COALESCE(SUM(net_amount), 0) as total_net,
+            COUNT(*) as event_count,
+            COALESCE(AVG(gross_amount), 0) as avg_transaction
+        FROM revenue_events
+        {where_clause}
+    """
+    
+    # Query: By event type
+    by_type_sql = f"""
+        SELECT 
+            event_type,
+            COUNT(*) as count,
+            COALESCE(SUM(gross_amount), 0) as gross,
+            COALESCE(SUM(net_amount), 0) as net
+        FROM revenue_events
+        {where_clause}
+        GROUP BY event_type
+        ORDER BY gross DESC
+    """
+    
+    # Query: By source
+    by_source_sql = f"""
+        SELECT 
+            COALESCE(source, 'unknown') as source,
+            COUNT(*) as count,
+            COALESCE(SUM(gross_amount), 0) as gross,
+            COALESCE(SUM(net_amount), 0) as net
+        FROM revenue_events
+        {where_clause}
+        GROUP BY source
+        ORDER BY gross DESC
+    """
+    
+    # Query: By period (date truncation based on period_type)
+    if period_type == "daily":
+        date_trunc = "DATE(occurred_at)"
+    elif period_type == "weekly":
+        date_trunc = "DATE_TRUNC('week', occurred_at)"
+    elif period_type == "monthly":
+        date_trunc = "DATE_TRUNC('month', occurred_at)"
+    else:
+        date_trunc = "DATE(occurred_at)"
+    
+    by_period_sql = f"""
+        SELECT 
+            {date_trunc} as period,
+            COUNT(*) as count,
+            COALESCE(SUM(gross_amount), 0) as gross,
+            COALESCE(SUM(net_amount), 0) as net
+        FROM revenue_events
+        {where_clause}
+        GROUP BY {date_trunc}
+        ORDER BY period ASC
+    """
+    
+    try:
+        # Execute all queries
+        total_result = _db.query(total_sql).get("rows", [{}])[0]
+        by_type_result = _db.query(by_type_sql).get("rows", [])
+        by_source_result = _db.query(by_source_sql).get("rows", [])
+        by_period_result = _db.query(by_period_sql).get("rows", [])
+        
+        summary = {
+            "total_gross": float(total_result.get("total_gross", 0) or 0),
+            "total_net": float(total_result.get("total_net", 0) or 0),
+            "event_count": int(total_result.get("event_count", 0) or 0),
+            "avg_transaction": round(float(total_result.get("avg_transaction", 0) or 0), 2),
+            "by_type": {
+                r["event_type"]: {
+                    "count": int(r["count"]),
+                    "gross": float(r["gross"]),
+                    "net": float(r["net"])
+                }
+                for r in by_type_result
+            },
+            "by_source": {
+                r["source"]: {
+                    "count": int(r["count"]),
+                    "gross": float(r["gross"]),
+                    "net": float(r["net"])
+                }
+                for r in by_source_result
+            },
+            "by_period": [
+                {
+                    "period": str(r["period"])[:10],  # Truncate to date only
+                    "count": int(r["count"]),
+                    "gross": float(r["gross"]),
+                    "net": float(r["net"])
+                }
+                for r in by_period_result
+            ],
+            "period_type": period_type,
+            "period_start": start_date,
+            "period_end": end_date
+        }
+        
+        return summary
+    except Exception as e:
+        logger.error("Failed to get revenue summary: %s", e)
+        return {
+            "error": str(e),
+            "total_gross": 0,
+            "total_net": 0,
+            "event_count": 0,
+            "period_start": start_date,
+            "period_end": end_date
+        }
+
+
+def get_revenue_by_opportunity(opportunity_id: str) -> Dict[str, Any]:
+    """
+    Get all revenue events for a specific opportunity.
+    
+    Args:
+        opportunity_id: Opportunity UUID
+    
+    Returns:
+        Dict with total revenue and list of events
+    """
+    sql = f"""
+        SELECT *
+        FROM revenue_events
+        WHERE opportunity_id = {escape_sql_value(opportunity_id)}
+        ORDER BY occurred_at DESC
+    """
+    
+    total_sql = f"""
+        SELECT 
+            COALESCE(SUM(gross_amount), 0) as total_gross,
+            COALESCE(SUM(net_amount), 0) as total_net,
+            COUNT(*) as event_count
+        FROM revenue_events
+        WHERE opportunity_id = {escape_sql_value(opportunity_id)}
+    """
+    
+    try:
+        events = _db.query(sql).get("rows", [])
+        totals = _db.query(total_sql).get("rows", [{}])[0]
+        
+        return {
+            "opportunity_id": opportunity_id,
+            "total_gross": float(totals.get("total_gross", 0) or 0),
+            "total_net": float(totals.get("total_net", 0) or 0),
+            "event_count": int(totals.get("event_count", 0) or 0),
+            "events": events
+        }
+    except Exception as e:
+        logger.error("Failed to get revenue for opportunity %s: %s", opportunity_id, e)
+        return {
+            "opportunity_id": opportunity_id,
+            "error": str(e),
+            "total_gross": 0,
+            "total_net": 0,
+            "event_count": 0,
+            "events": []
+        }
+
+
+def get_recent_revenue(limit: int = 20, event_type: str = None) -> List[Dict]:
+    """
+    Get recent revenue events.
+    
+    Args:
+        limit: Max number of events to return (default: 20)
+        event_type: Filter by event type ('sale', 'refund', 'recurring')
+    
+    Returns:
+        List of recent revenue events
+    """
+    conditions = []
+    if event_type:
+        conditions.append(f"event_type = {escape_sql_value(event_type)}")
+    
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    
+    sql = f"""
+        SELECT *
+        FROM revenue_events
+        {where_clause}
+        ORDER BY occurred_at DESC
+        LIMIT {limit}
+    """
+    
+    try:
+        return _db.query(sql).get("rows", [])
+    except Exception as e:
+        logger.error("Failed to get recent revenue: %s", e)
+        return []
