@@ -21,6 +21,57 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from dataclasses import dataclass, field
 import uuid
+import logging
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
+# ============================================================
+# CONFLICT MANAGER INTEGRATION (HIGH-07)
+# ============================================================
+
+# Import conflict manager with graceful degradation
+CONFLICT_MANAGER_AVAILABLE = False
+_conflict_manager_import_error = None
+
+try:
+    from core.conflict_manager import (
+        ensure_tables_exist as ensure_conflict_tables,
+        acquire_lock,
+        release_lock,
+        ConflictResolution,
+    )
+    CONFLICT_MANAGER_AVAILABLE = True
+except ImportError as e:
+    _conflict_manager_import_error = str(e)
+    # Stub functions for graceful degradation
+    class ConflictResolution:
+        """Stub enum for when conflict_manager is unavailable."""
+        GRANTED = "granted"
+        DENIED = "denied"
+        QUEUED = "queued"
+        ESCALATED = "escalated"
+    
+    def ensure_conflict_tables() -> bool:
+        """Stub: conflict_manager module not available."""
+        return False
+    
+    def acquire_lock(*args, **kwargs):
+        """Stub: always grants lock when conflict_manager unavailable."""
+        return ConflictResolution.GRANTED, None, None
+    
+    def release_lock(*args, **kwargs) -> bool:
+        """Stub: conflict_manager module not available."""
+        return True
+
+# Initialize conflict management tables on module load
+if CONFLICT_MANAGER_AVAILABLE:
+    try:
+        ensure_conflict_tables()
+        logger.info("Conflict management tables initialized")
+    except Exception as e:
+        logger.warning("Failed to initialize conflict tables: %s", str(e))
+
 
 
 # Database configuration (same as agents.py)
@@ -1579,6 +1630,9 @@ def orchestrator_assign_task(
     This is the core L5 function that enables ORCHESTRATOR to delegate
     tasks to specialized workers (EXECUTOR, ANALYST, STRATEGIST, etc.).
     
+    Uses conflict_manager to acquire resource locks before assignment
+    to prevent race conditions with other workers. (HIGH-07)
+    
     Args:
         task_id: UUID of the task to assign
         target_worker_id: Worker ID to assign to (e.g., 'EXECUTOR', 'ANALYST')
@@ -1588,6 +1642,58 @@ def orchestrator_assign_task(
         Dict with success status, task_id, worker_id, and log_id
     """
     assignment_time = datetime.now(timezone.utc).isoformat()
+    
+    # HIGH-07: Acquire lock before task assignment to prevent conflicts
+    if CONFLICT_MANAGER_AVAILABLE:
+        try:
+            # Priority 2 for task assignments (HIGH priority)
+            resolution, lock, conflict = acquire_lock(
+                resource_type="task",
+                resource_id=task_id,
+                worker_id=target_worker_id,
+                priority=2,
+                metadata={"reason": reason, "assignment_time": assignment_time}
+            )
+            
+            # Handle lock acquisition result
+            if hasattr(resolution, 'value'):
+                resolution_value = resolution.value
+            else:
+                resolution_value = str(resolution)
+            
+            if resolution_value == "denied":
+                logger.warning(
+                    "Lock denied for task %s - another worker holds it", task_id
+                )
+                return {
+                    "success": False,
+                    "task_id": task_id,
+                    "worker_id": target_worker_id,
+                    "error": "Resource locked by another worker",
+                    "conflict": conflict.id if conflict else None
+                }
+            elif resolution_value == "queued":
+                logger.info("Task %s queued - waiting for lock", task_id)
+                return {
+                    "success": False,
+                    "task_id": task_id,
+                    "worker_id": target_worker_id,
+                    "error": "Queued - resource busy",
+                    "queued": True
+                }
+            elif resolution_value == "escalated":
+                logger.warning("Task %s conflict escalated", task_id)
+                return {
+                    "success": False,
+                    "task_id": task_id,
+                    "worker_id": target_worker_id,
+                    "error": "Conflict escalated for review"
+                }
+            # GRANTED - proceed with assignment
+            logger.info("Lock acquired for task %s by %s", task_id, target_worker_id)
+        except Exception as lock_err:
+            logger.error("Lock acquisition failed: %s", str(lock_err))
+            # Continue without lock if conflict_manager fails (graceful degradation)
     
     # Update the task assignment
     sql = f"""
@@ -1624,7 +1730,8 @@ def orchestrator_assign_task(
                     "task_title": task_info.get("title"),
                     "target_worker": target_worker_id,
                     "reason": reason,
-                    "assigned_at": assignment_time
+                    "assigned_at": assignment_time,
+                    "lock_acquired": CONFLICT_MANAGER_AVAILABLE
                 }
             )
             
@@ -1636,6 +1743,12 @@ def orchestrator_assign_task(
                 "message": f"ORCHESTRATOR assigned task to {target_worker_id}"
             }
     except Exception as e:
+        # Release lock on failure if we acquired one
+        if CONFLICT_MANAGER_AVAILABLE:
+            try:
+                release_lock("task", task_id, target_worker_id)
+            except Exception:
+                pass
         print(f"Failed to assign task: {e}")
     
     return {
@@ -1644,7 +1757,6 @@ def orchestrator_assign_task(
         "worker_id": target_worker_id,
         "error": "Assignment failed"
     }
-
 
 def worker_report_task_status(
     worker_id: str,
@@ -1746,6 +1858,15 @@ def worker_report_task_status(
                     "reported_at": report_time
                 }
             )
+            
+            # HIGH-07: Release lock on task completion or failure
+            if status in ("completed", "failed") and CONFLICT_MANAGER_AVAILABLE:
+                try:
+                    lock_released = release_lock("task", task_id, worker_id)
+                    if lock_released:
+                        logger.info("Lock released for task %s by %s", task_id, worker_id)
+                except Exception as release_err:
+                    logger.warning("Failed to release lock for task %s: %s", task_id, str(release_err))
             
             return {
                 "success": True,
