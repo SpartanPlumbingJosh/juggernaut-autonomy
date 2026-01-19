@@ -911,22 +911,30 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
-            notify_task_completed(
-                task_id=task.id,
-                task_title=task.title,
-                worker_id=WORKER_ID,
-                duration_secs=duration_ms // 1000
-            )
+            try:
+                notify_task_completed(
+                    task_id=task.id,
+                    task_title=task.title,
+                    worker_id=WORKER_ID,
+                    duration_secs=duration_ms // 1000
+                )
+            except Exception as notify_err:
+                log_action("notification.failed", f"Failed to send completion notification: {notify_err}",
+                           task_id=task.id, level="warning")
         else:
             update_task_status(task.id, "failed", result)
             log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
                        level="error", error_data=result, duration_ms=duration_ms)
-            notify_task_failed(
-                task_id=task.id,
-                task_title=task.title,
-                error_message=str(result.get("error", "Unknown error")),
-                worker_id=WORKER_ID
-            )
+            try:
+                notify_task_failed(
+                    task_id=task.id,
+                    task_title=task.title,
+                    error_message=str(result.get("error", "Unknown error")),
+                    worker_id=WORKER_ID
+                )
+            except Exception as notify_err:
+                log_action("notification.failed", f"Failed to send failure notification: {notify_err}",
+                           task_id=task.id, level="warning")
         
         return task_succeeded, result
         
@@ -951,13 +959,17 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "failed", {"error": error_str})
             send_to_dlq(task.id, error_str, retries)
             create_escalation(task.id, f"Task failed after {retries} retries: {error_str}")
-            notify_task_failed(
-                task_id=task.id,
-                task_title=task.title,
-                error_message=f"Failed after {retries} retries: {error_str}",
-                worker_id=WORKER_ID,
-                retry_count=retries
-            )
+            try:
+                notify_task_failed(
+                    task_id=task.id,
+                    task_title=task.title,
+                    error_message=f"Failed after {retries} retries: {error_str}",
+                    worker_id=WORKER_ID,
+                    retry_count=retries
+                )
+            except Exception as notify_err:
+                log_action("notification.failed", f"Failed to send DLQ notification: {notify_err}",
+                           task_id=task.id, level="warning")
         
         return False, {"error": error_str, "retries": retries}
 
