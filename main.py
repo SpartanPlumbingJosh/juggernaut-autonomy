@@ -910,7 +910,8 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                       f"Task blocked: {len(incomplete)} dependencies incomplete",
                       level="info", task_id=task.id,
                       output_data={"incomplete_deps": incomplete[:5]})
-            update_task_status(task.id, "blocked", {"waiting_on": incomplete})
+            # Don't change status - leave as pending so it gets reconsidered
+            # once dependencies complete
             return False, {"blocked_by_deps": True, "incomplete": incomplete}
     
     # Check approval (read-only check)
