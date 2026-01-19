@@ -38,6 +38,13 @@ from dataclasses import dataclass
 from enum import Enum
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# Slack notifications for #war-room
+from core.notifications import (
+    notify_task_completed,
+    notify_task_failed,
+    notify_engine_started
+)
+
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
 EXPERIMENTS_AVAILABLE = False
 _experiments_import_error = None
@@ -932,10 +939,25 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
+            # Notify Slack
+            notify_task_completed(
+                task_id=task.id,
+                task_title=task.title,
+                worker_id=WORKER_ID,
+                duration_secs=duration_ms // 1000,
+                details=result.get("summary") if isinstance(result, dict) else None
+            )
         else:
             update_task_status(task.id, "failed", result)
             log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
                        level="error", error_data=result, duration_ms=duration_ms)
+            # Notify Slack
+            notify_task_failed(
+                task_id=task.id,
+                task_title=task.title,
+                error_message=result.get("error", "Unknown error") if isinstance(result, dict) else str(result),
+                worker_id=WORKER_ID
+            )
         
         return task_succeeded, result
         
@@ -960,6 +982,14 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "failed", {"error": error_str})
             send_to_dlq(task.id, error_str, retries)
             create_escalation(task.id, f"Task failed after {retries} retries: {error_str}")
+            # Notify Slack of permanent failure
+            notify_task_failed(
+                task_id=task.id,
+                task_title=task.title,
+                error_message=f"Permanently failed after {retries} retries: {error_str}",
+                worker_id=WORKER_ID,
+                retry_count=retries
+            )
         
         return False, {"error": error_str, "retries": retries}
 
@@ -1169,6 +1199,9 @@ if __name__ == "__main__":
     # Start health server in background thread
     health_thread = threading.Thread(target=run_health_server, daemon=True)
     health_thread.start()
+    
+    # Notify Slack that engine is starting
+    notify_engine_started(WORKER_ID)
     
     # Run the autonomy loop (blocks forever)
     try:
