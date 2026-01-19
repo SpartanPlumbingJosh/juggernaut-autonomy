@@ -251,14 +251,32 @@ def log_action(
     input_data: Dict = None,
     output_data: Dict = None,
     error_data: Dict = None,
-    duration_ms: int = None
+    duration_ms: int = None,
+    source: str = "autonomy_engine"
 ) -> Optional[str]:
-    """Log an autonomous action to execution_logs with PII sanitization."""
+    """Log an autonomous action to execution_logs with PII sanitization.
+    
+    L2 Compliance: References & Sourcing - tracks where each action originated.
+    
+    Args:
+        action: Action identifier (e.g., 'task.execute', 'decision.schedule')
+        message: Human-readable description of the action
+        level: Log level ('info', 'warn', 'error')
+        task_id: Optional task UUID this action relates to
+        input_data: Optional input payload (will be sanitized)
+        output_data: Optional output payload (will be sanitized)
+        error_data: Optional error details (will be sanitized)
+        duration_ms: Optional execution time in milliseconds
+        source: Where this action originated (e.g., 'task_executor', 'scheduler')
+    
+    Returns:
+        The log entry UUID if successful, None otherwise
+    """
     now = datetime.now(timezone.utc).isoformat()
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
-            escape_value(level), escape_value("autonomy_engine"), escape_value(now)]
+            escape_value(level), escape_value(source), escape_value(now)]
     
     if task_id:
         cols.append("task_id")
@@ -287,23 +305,37 @@ def log_action(
         return None
 
 
-def log_info(message: str, data: Dict = None):
-    log_action("system.info", message, "info", output_data=data)
+def log_info(message: str, data: Dict = None, source: str = "system"):
+    """Log an informational message with source tracking."""
+    log_action("system.info", message, "info", output_data=data, source=source)
     print(f"[INFO] {message}")
 
 
-def log_error(message: str, data: Dict = None):
-    log_action("system.error", message, "error", error_data=data)
+def log_error(message: str, data: Dict = None, source: str = "system"):
+    """Log an error message with source tracking."""
+    log_action("system.error", message, "error", error_data=data, source=source)
     print(f"[ERROR] {message}")
 
 
-def log_decision(action: str, decision: str, reasoning: str, data: Dict = None):
-    """Log an autonomous decision (Level 3: Traceable Decisions)."""
+def log_decision(action: str, decision: str, reasoning: str, data: Dict = None, source: str = "decision_engine"):
+    """Log an autonomous decision with source tracking (L2/L3 Compliance).
+    
+    L2 Compliance: References & Sourcing - cites where information comes from.
+    L3 Compliance: Traceable Decisions - logs decision with reasoning.
+    
+    Args:
+        action: Decision type (e.g., 'task.execute', 'loop.schedule')
+        decision: What was decided
+        reasoning: Why this decision was made
+        data: Additional context data
+        source: Where this decision originated (e.g., 'task_executor', 'scheduler')
+    """
     log_action(
         f"decision.{action}",
         f"{decision}: {reasoning}",
         "info",
-        output_data={"decision": decision, "reasoning": reasoning, **(data or {})}
+        output_data={"decision": decision, "reasoning": reasoning, "source": source, **(data or {})},
+        source=source
     )
     print(f"[DECISION] {action}: {decision}")
 
@@ -520,10 +552,11 @@ def ensure_approval_request(task: Task) -> bool:
     """
     try:
         execute_sql(sql)
-        log_action("approval.requested", f"Approval requested for task: {task.title}", task_id=task.id)
+        log_action("approval.requested", f"Approval requested for task: {task.title}", task_id=task.id,
+                   source="approval_system")
         return True
     except Exception as e:
-        log_error(f"Failed to create approval request: {e}")
+        log_error(f"Failed to create approval request: {e}", source="approval_system")
         return False
 
 
@@ -557,10 +590,11 @@ def schedule_task_retry(task_id: str, retry_count: int, error: str):
             f"Task will retry in {delay_seconds}s ({retry_count + 1}/3)",
             level="warn", 
             task_id=task_id,
-            output_data={"retry_count": retry_count + 1, "next_retry_at": next_retry_at, "delay_seconds": delay_seconds}
+            output_data={"retry_count": retry_count + 1, "next_retry_at": next_retry_at, "delay_seconds": delay_seconds},
+            source="error_recovery"
         )
     except Exception as e:
-        log_error(f"Failed to schedule retry: {e}")
+        log_error(f"Failed to schedule retry: {e}", source="error_recovery")
 
 
 def send_to_dlq(task_id: str, error: str, attempts: int):
@@ -623,13 +657,14 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
     
     if dry_run or DRY_RUN:
         log_action(f"tool.{tool_name}.dry_run", f"DRY RUN: Would execute {tool_name}", 
-                   input_data=params, output_data={"dry_run": True})
+                   input_data=params, output_data={"dry_run": True}, source="tool_executor")
         return True, {"dry_run": True, "tool": tool_name, "params": params}
     
     start_time = time.time()
     
     # Log tool execution start (don't capture unused return value)
-    log_action(f"tool.{tool_name}.start", f"Executing tool: {tool_name}", input_data=params)
+    log_action(f"tool.{tool_name}.start", f"Executing tool: {tool_name}", input_data=params,
+               source="tool_executor")
     
     try:
         # Record tool execution
@@ -679,7 +714,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         execute_sql(sql)
         
         log_action(f"tool.{tool_name}.complete", f"Tool completed: {tool_name}",
-                   output_data=output, duration_ms=duration_ms)
+                   output_data=output, duration_ms=duration_ms, source="tool_executor")
         
         return True, output
         
@@ -703,7 +738,8 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
             pass  # Don't fail if we can't update the record
         
         log_action(f"tool.{tool_name}.error", f"Tool failed: {str(e)}",
-                   level="error", error_data={"error": str(e)}, duration_ms=duration_ms)
+                   level="error", error_data={"error": str(e)}, duration_ms=duration_ms,
+                   source="tool_executor")
         return False, error_output
 
 
@@ -734,12 +770,13 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     start_time = time.time()
     
     log_decision("task.execute", task.title, f"Priority {task.priority}, type {task.task_type}",
-                 {"task_id": task.id})
+                 {"task_id": task.id}, source="task_executor")
     
     # Check permission
     allowed, reason = is_action_allowed(f"task.{task.task_type}")
     if not allowed:
-        log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
+        log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id,
+                   source="permission_checker")
         return False, {"blocked": True, "reason": reason}
     
     # Check approval (read-only check)
@@ -1065,7 +1102,8 @@ def autonomy_loop():
                         continue  # Someone else claimed it, try next
                     
                     log_decision("loop.execute", f"Executing task: {task.title}",
-                                 f"Priority {task.priority} of {len(tasks)} pending tasks")
+                                 f"Priority {task.priority} of {len(tasks)} pending tasks",
+                                 source="main_loop_scheduler")
                     
                     success, result = execute_task(task)
                     
@@ -1080,14 +1118,15 @@ def autonomy_loop():
                 if not task_executed:
                     # All tasks either couldn't be claimed, are forbidden, or are waiting for approval
                     log_action("loop.no_executable", "No executable tasks this iteration",
-                               output_data={"tasks_checked": len(tasks)})
+                               output_data={"tasks_checked": len(tasks)}, source="main_loop_scheduler")
             else:
                 # 2. Check scheduled tasks
                 scheduled = get_due_scheduled_tasks()
                 if scheduled:
                     sched_task = scheduled[0]
                     log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
-                                 "No pending tasks, running scheduled task")
+                                 "No pending tasks, running scheduled task",
+                                 source="scheduled_task_runner")
                     # Mark as run
                     now = datetime.now(timezone.utc).isoformat()
                     sql = f"UPDATE scheduled_tasks SET last_run_at = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
@@ -1096,7 +1135,8 @@ def autonomy_loop():
                     # 3. Nothing to do - log heartbeat
                     if loop_count % 5 == 0:  # Every 5 loops
                         log_action("loop.heartbeat", f"Loop {loop_count}: No work found",
-                                   output_data={"loop": loop_count, "tasks_checked": 0})
+                                   output_data={"loop": loop_count, "tasks_checked": 0},
+                                   source="heartbeat_monitor")
             
             # Update heartbeat
             now = datetime.now(timezone.utc).isoformat()
