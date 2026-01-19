@@ -278,6 +278,7 @@ from .orchestration import (
     balance_workload,
     handoff_task,
     log_coordination_event,
+    update_worker_heartbeat,
     
     # Phase 6.2: Resource Allocation
     allocate_budget_to_goal,
