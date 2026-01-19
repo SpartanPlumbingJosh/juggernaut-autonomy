@@ -38,6 +38,7 @@ from core.orchestration import (
     detect_agent_failures,
     handle_agent_failure,
     auto_recover,
+    run_daily_budget_allocation,
 )
 from core.alerting import (
     create_alert,
@@ -327,9 +328,15 @@ def watchdog_loop() -> None:
     
     last_health_time = 0.0
     last_recovery_time = 0.0
+    last_budget_allocation_date: Optional[str] = None
+    
+    # Daily budget allocation constants
+    DAILY_BUDGET_ALLOCATION_HOUR = 6  # Run at 6 AM UTC
+    DAILY_BUDGET_POOL_CENTS = 10000   # $100 daily pool
     
     while running:
         current_time = time.time()
+        current_dt = datetime.now(timezone.utc)
         
         try:
             # Send heartbeat every iteration
@@ -347,6 +354,26 @@ def watchdog_loop() -> None:
                 logger.debug("Running recovery cycle...")
                 run_recovery_cycle()
                 last_recovery_time = current_time
+            
+            # Run daily budget allocation once per day
+            today_str = current_dt.strftime("%Y-%m-%d")
+            if (last_budget_allocation_date != today_str and 
+                current_dt.hour >= DAILY_BUDGET_ALLOCATION_HOUR):
+                logger.info("Running daily budget allocation...")
+                try:
+                    results = run_daily_budget_allocation(
+                        daily_pool_cents=DAILY_BUDGET_POOL_CENTS
+                    )
+                    if not results.get("skipped"):
+                        logger.info(
+                            "Daily budget allocation: %d/%d goals, %d cents",
+                            results.get("allocated_count", 0),
+                            results.get("goals_count", 0),
+                            results.get("total_allocated_cents", 0)
+                        )
+                    last_budget_allocation_date = today_str
+                except Exception as e:
+                    logger.error("Daily budget allocation failed: %s", str(e))
             
         except Exception as e:
             logger.error(f"Error in watchdog loop: {e}")

@@ -589,38 +589,190 @@ def allocate_budget_to_goal(goal_id: str, budget_cents: int, source: str = "dail
     """
     Allocate budget to a goal for its tasks.
     
+    Records the allocation in both the goals table (max_cost_cents) and
+    the cost_events table for tracking.
+    
     Args:
         goal_id: Goal to allocate budget to
         budget_cents: Amount in cents to allocate
-        source: Source of budget allocation
+        source: Source of budget allocation (e.g., 'daily_pool', 'manual')
     
     Returns:
         True if allocation successful
     """
-    sql = f"""
+    allocation_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    # First, record the allocation in cost_events table
+    cost_event_sql = f"""
+    INSERT INTO cost_events (
+        id, cost_type, category, description, amount_cents,
+        currency, source, goal_id, occurred_at, recorded_at, recorded_by
+    ) VALUES (
+        {_format_value(allocation_id)},
+        'budget_allocation',
+        'allocation',
+        {_format_value(f'Budget allocation to goal from {source}')},
+        {budget_cents},
+        'USD',
+        {_format_value(source)},
+        {_format_value(goal_id)},
+        NOW(),
+        NOW(),
+        'orchestrator'
+    )
+    """
+    
+    # Then update the goal's max_cost_cents
+    goal_update_sql = f"""
     UPDATE goals
     SET 
         max_cost_cents = COALESCE(max_cost_cents, 0) + {budget_cents},
-        updated_at = NOW(),
-        metadata = jsonb_set(
-            COALESCE(metadata, '{{}}'),
-            '{{budget_allocations}}',
-            COALESCE(metadata->'budget_allocations', '[]'::jsonb) || 
-            {_format_value([{
-                "amount_cents": budget_cents,
-                "source": source,
-                "allocated_at": datetime.now(timezone.utc).isoformat()
-            }])}::jsonb
-        )
+        updated_at = NOW()
     WHERE id = {_format_value(goal_id)}
     """
     
     try:
-        result = _query(sql)
-        return result.get("rowCount", 0) > 0
+        # Insert cost event
+        _query(cost_event_sql)
+        
+        # Update goal
+        result = _query(goal_update_sql)
+        
+        if result.get("rowCount", 0) > 0:
+            logger.info(
+                "Allocated %d cents to goal %s from %s (event: %s)",
+                budget_cents, goal_id, source, allocation_id
+            )
+            return True
+        else:
+            logger.warning("Goal %s not found for budget allocation", goal_id)
+            return False
+            
     except Exception as e:
-        print(f"Failed to allocate budget: {e}")
+        logger.error("Failed to allocate budget: %s", str(e))
         return False
+
+
+def run_daily_budget_allocation(daily_pool_cents: int = 10000) -> Dict[str, Any]:
+    """
+    Run daily budget allocation to distribute budget to active goals.
+    
+    This function should be called once per day by the orchestrator.
+    It distributes a daily budget pool across active goals based on their
+    priority and deadline proximity.
+    
+    Args:
+        daily_pool_cents: Total daily budget pool in cents (default $100)
+    
+    Returns:
+        Dict with allocation results including:
+        - goals_count: Number of active goals
+        - allocated_count: Number of goals that received allocation
+        - total_allocated_cents: Total amount allocated
+        - allocations: List of individual allocations
+    """
+    results = {
+        "goals_count": 0,
+        "allocated_count": 0,
+        "total_allocated_cents": 0,
+        "allocations": [],
+        "errors": []
+    }
+    
+    # Check if we already ran today
+    check_sql = """
+    SELECT COUNT(*) as cnt 
+    FROM cost_events 
+    WHERE cost_type = 'budget_allocation' 
+      AND source = 'daily_pool'
+      AND DATE(occurred_at) = CURRENT_DATE
+    """
+    
+    try:
+        check_result = _query(check_sql)
+        if check_result.get("rows") and check_result["rows"][0].get("cnt", 0) > 0:
+            logger.info("Daily budget allocation already ran today, skipping")
+            results["skipped"] = True
+            results["reason"] = "Already ran today"
+            return results
+    except Exception as e:
+        logger.warning("Could not check if daily allocation ran: %s", str(e))
+    
+    # Get active goals ordered by deadline proximity
+    goals_sql = """
+    SELECT 
+        id, title, 
+        COALESCE(max_cost_cents, 0) as current_budget,
+        deadline,
+        CASE 
+            WHEN deadline IS NOT NULL THEN 
+                EXTRACT(EPOCH FROM (deadline - NOW())) / 86400
+            ELSE 365
+        END as days_until_deadline
+    FROM goals
+    WHERE status IN ('active', 'in_progress')
+    ORDER BY 
+        CASE WHEN deadline IS NOT NULL THEN 0 ELSE 1 END,
+        deadline ASC
+    """
+    
+    try:
+        goals_result = _query(goals_sql)
+        goals = goals_result.get("rows", [])
+        results["goals_count"] = len(goals)
+        
+        if not goals:
+            logger.info("No active goals found for budget allocation")
+            return results
+        
+        # Calculate allocation per goal (equal distribution)
+        # Goals with closer deadlines could get more in a future enhancement
+        allocation_per_goal = daily_pool_cents // len(goals)
+        remainder = daily_pool_cents % len(goals)
+        
+        for i, goal in enumerate(goals):
+            goal_id = goal.get("id")
+            goal_title = goal.get("title", "Unknown")
+            
+            # First goal gets the remainder
+            amount = allocation_per_goal + (remainder if i == 0 else 0)
+            
+            if amount > 0:
+                success = allocate_budget_to_goal(
+                    goal_id=goal_id,
+                    budget_cents=amount,
+                    source="daily_pool"
+                )
+                
+                if success:
+                    results["allocated_count"] += 1
+                    results["total_allocated_cents"] += amount
+                    results["allocations"].append({
+                        "goal_id": goal_id,
+                        "goal_title": goal_title,
+                        "amount_cents": amount
+                    })
+                else:
+                    results["errors"].append({
+                        "goal_id": goal_id,
+                        "error": "Allocation failed"
+                    })
+        
+        logger.info(
+            "Daily budget allocation complete: %d/%d goals, %d cents total",
+            results["allocated_count"],
+            results["goals_count"],
+            results["total_allocated_cents"]
+        )
+        
+        return results
+        
+    except Exception as e:
+        logger.error("Failed to run daily budget allocation: %s", str(e))
+        results["errors"].append({"error": str(e)})
+        return results
+
 
 
 def get_resource_status() -> Dict[str, Any]:
@@ -2461,3 +2613,4 @@ __all__ = [
     # Setup
     "create_phase6_tables"
 ]
+
