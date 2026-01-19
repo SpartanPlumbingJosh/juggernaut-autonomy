@@ -1,134 +1,151 @@
-"""
-Stale Task Cleanup Module
-=========================
+"""Stale Task Cleanup Module
 
-Finds tasks stuck in_progress for too long and resets them.
-With multiple Claude chats working as workers, tasks get abandoned
-when chats end. This module provides auto-cleanup.
+Automatically detects and resets tasks that have been stuck in 'in_progress'
+status for too long, making them available for other workers to pick up.
 """
 
-import os
 import json
+import logging
+import os
+import urllib.parse
 import urllib.request
-import urllib.error
-from datetime import datetime, timezone
-from typing import Dict, Any, Tuple, List
+from typing import Any
 
 # Configuration
-DATABASE_URL = os.getenv("DATABASE_URL")
-NEON_ENDPOINT = os.getenv(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+DEFAULT_STALE_THRESHOLD_MINUTES = 30
+NEON_ENDPOINT = os.getenv("NEON_ENDPOINT", "")
+NEON_CONNECTION_STRING = os.getenv(
+    "DATABASE_URL",
+    ""
 )
 
-# Default: 30 minutes threshold for stale tasks
-STALE_THRESHOLD_MINUTES = int(os.getenv("STALE_THRESHOLD_MINUTES", "30"))
+# Logger setup
+logger = logging.getLogger(__name__)
 
 
-def execute_sql(sql: str) -> Dict[str, Any]:
-    """Execute SQL via Neon HTTP API."""
-    if not DATABASE_URL:
-        raise ValueError("DATABASE_URL environment variable is required")
+def execute_sql(sql: str) -> dict[str, Any]:
+    """Execute SQL against Neon database via HTTP API.
+    
+    Args:
+        sql: SQL query to execute
+        
+    Returns:
+        Dictionary with query results including 'rows' and 'rowCount'
+        
+    Raises:
+        ValueError: If NEON_ENDPOINT is not configured or has invalid scheme
+        Exception: If database query fails
+    """
+    if not NEON_ENDPOINT:
+        raise ValueError(
+            "NEON_ENDPOINT environment variable is not set. "
+            "Please configure it with your Neon database HTTP endpoint."
+        )
+    
+    # Validate URL scheme is HTTPS
+    parsed = urllib.parse.urlparse(NEON_ENDPOINT)
+    if parsed.scheme != "https":
+        raise ValueError(
+            f"NEON_ENDPOINT must use HTTPS scheme, got: {parsed.scheme}. "
+            "Refusing to connect over insecure protocol."
+        )
+    
+    if not NEON_CONNECTION_STRING:
+        raise ValueError(
+            "DATABASE_URL environment variable is not set. "
+            "Please configure it with your Neon connection string."
+        )
     
     headers = {
         "Content-Type": "application/json",
-        "Neon-Connection-String": DATABASE_URL
+        "Neon-Connection-String": NEON_CONNECTION_STRING
     }
     
-    data = json.dumps({"query": sql}).encode('utf-8')
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
+    data = json.dumps({"query": sql}).encode("utf-8")
+    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers)
     
     with urllib.request.urlopen(req, timeout=30) as response:
-        return json.loads(response.read().decode('utf-8'))
+        result = json.loads(response.read().decode("utf-8"))
+        return result
 
 
-def reset_stale_tasks(threshold_minutes: int = None) -> Tuple[int, List[Dict]]:
-    """
-    Find and reset tasks that have been stuck in 'in_progress' too long.
+def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[dict[str, Any]]]:
+    """Find and reset tasks stuck in 'in_progress' status.
+    
+    Uses a single atomic UPDATE with RETURNING to avoid race conditions.
     
     Args:
         threshold_minutes: Minutes after which a task is considered stale.
-                          Defaults to STALE_THRESHOLD_MINUTES (30 min).
+                          Defaults to STALE_THRESHOLD_MINUTES env var or 30.
     
     Returns:
-        Tuple of (count_reset, list_of_reset_tasks)
-        
-    Behavior:
-        1. Finds tasks with status='in_progress' and started_at > X minutes ago
-        2. Resets them to status='pending'
-        3. Clears assigned_worker so any worker can claim
-        4. Adds metadata with stale_reset timestamp for tracing
+        Tuple of (count of reset tasks, list of reset task details)
     """
     if threshold_minutes is None:
-        threshold_minutes = STALE_THRESHOLD_MINUTES
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Step 1: Find stale tasks (for logging/reporting)
-    find_sql = f"""
-    SELECT id, title, assigned_worker, started_at
-    FROM governance_tasks
-    WHERE status = 'in_progress'
-      AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes'
-    """
-    
-    try:
-        find_result = execute_sql(find_sql)
-        stale_tasks = find_result.get("rows", [])
-    except Exception as e:
-        print(f"[STALE_CLEANUP] Error finding stale tasks: {e}")
-        return 0, []
-    
-    if not stale_tasks:
-        return 0, []
-    
-    # Step 2: Reset stale tasks
-    # Using jsonb_set to preserve existing metadata and add stale_reset info
-    reset_sql = f"""
-    UPDATE governance_tasks
-    SET 
-        status = 'pending',
-        assigned_worker = NULL,
-        started_at = NULL,
-        metadata = COALESCE(metadata, '{{}}'::jsonb) || jsonb_build_object(
-            'stale_reset_at', '{now}',
-            'stale_reset_reason', 'Task stuck in_progress > {threshold_minutes} minutes'
+        threshold_minutes = int(
+            os.getenv("STALE_THRESHOLD_MINUTES", str(DEFAULT_STALE_THRESHOLD_MINUTES))
         )
-    WHERE status = 'in_progress'
-      AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes'
-    RETURNING id, title
+    
+    # Single atomic UPDATE with RETURNING to avoid TOCTOU race
+    reset_sql = f"""
+        UPDATE governance_tasks
+        SET 
+            status = 'pending',
+            assigned_worker = NULL,
+            started_at = NULL,
+            metadata = COALESCE(metadata, '{{}}'::jsonb) || jsonb_build_object(
+                'stale_reset_at', NOW()::text,
+                'stale_reset_reason', 'Task exceeded {threshold_minutes} minute threshold'
+            )
+        WHERE status = 'in_progress'
+          AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes'
+        RETURNING id, title, task_type, assigned_worker, started_at;
     """
     
     try:
-        reset_result = execute_sql(reset_sql)
-        reset_count = reset_result.get("rowCount", 0)
-        reset_tasks = reset_result.get("rows", [])
+        result = execute_sql(reset_sql)
+        reset_tasks = result.get("rows", [])
+        reset_count = result.get("rowCount", len(reset_tasks))
         
         if reset_count > 0:
-            print(f"[STALE_CLEANUP] Reset {reset_count} stale task(s):")
+            logger.info(f"Reset {reset_count} stale tasks: {[t.get('id') for t in reset_tasks]}")
             for task in reset_tasks:
-                print(f"  - {task.get('id')}:  {task.get('title')}")
-        
+                logger.info(
+                    f"  - {task.get('id')}: {task.get('title')} "
+                    f"(was assigned to {task.get('assigned_worker')})"
+                )
+        else:
+            logger.debug("No stale tasks found to reset")
+            
         return reset_count, reset_tasks
         
     except Exception as e:
-        print(f"[STALE_CLEANUP] Error resetting stale tasks: {e}")
-        return 0, []
+        logger.error(f"Failed to reset stale tasks: {e}", exc_info=True)
+        raise
 
 
-def get_stale_task_count(threshold_minutes: int = None) -> int:
-    """
-    Get count of currently stale tasks (without resetting them).
-    Useful for monitoring/dashboards.
+def get_stale_task_count(threshold_minutes: int | None = None) -> int:
+    """Get count of currently stale tasks without resetting them.
+    
+    Useful for monitoring/alerting on stale task buildup.
+    
+    Args:
+        threshold_minutes: Minutes after which a task is considered stale.
+                          Defaults to STALE_THRESHOLD_MINUTES env var or 30.
+    
+    Returns:
+        Number of stale tasks, or -1 if query fails (error is logged)
     """
     if threshold_minutes is None:
-        threshold_minutes = STALE_THRESHOLD_MINUTES
+        threshold_minutes = int(
+            os.getenv("STALE_THRESHOLD_MINUTES", str(DEFAULT_STALE_THRESHOLD_MINUTES))
+        )
     
     count_sql = f"""
-    SELECT COUNT(*) as stale_count
-    FROM governance_tasks
-    WHERE status = 'in_progress'
-      AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes'
+        SELECT COUNT(*) as stale_count
+        FROM governance_tasks
+        WHERE status = 'in_progress'
+          AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes';
     """
     
     try:
@@ -137,19 +154,29 @@ def get_stale_task_count(threshold_minutes: int = None) -> int:
         if rows:
             return int(rows[0].get("stale_count", 0))
         return 0
-    except Exception:
-        return 0
+    except Exception as e:
+        logger.error(
+            f"Failed to get stale task count: {e}",
+            exc_info=True
+        )
+        return -1  # Sentinel value indicating error
 
 
 if __name__ == "__main__":
-    # Test the stale task cleanup directly
-    print("Stale Task Cleanup Test")
-    print("=" * 40)
+    # Enable logging for CLI usage
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     
-    # Check how many stale tasks exist
-    stale_count = get_stale_task_count()
-    print(f"Current stale tasks:  {stale_count}")
+    print("Checking for stale tasks...")
+    count = get_stale_task_count()
+    if count == -1:
+        print("Error checking stale task count - see logs")
+    else:
+        print(f"Found {count} stale task(s)")
     
-    # Reset them
-    reset_count, reset_tasks = reset_stale_tasks()
-    print(f"Reset {reset_count} stale task(s)")
+    if count > 0:
+        print("Resetting stale tasks...")
+        reset_count, reset_tasks = reset_stale_tasks()
+        print(f"Reset {reset_count} task(s)")
