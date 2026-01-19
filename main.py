@@ -292,12 +292,12 @@ def log_info(message: str, data: Dict = None):
     print(f"[INFO] {message}")
 
 
-def log_error(message: str, data: Dict = None):
+def log_error(message: str, data: Optional[Dict[str, Any]] = None):
     log_action("system.error", message, "error", error_data=data)
     print(f"[ERROR] {message}")
 
 
-def log_decision(action: str, decision: str, reasoning: str, data: Dict = None, confidence: float = 1.0):
+def log_decision(action: str, decision: str, reasoning: str, data: Optional[Dict[str, Any]] = None, confidence: float = 1.0):
     """Log an autonomous decision (Level 3: Traceable Decisions).
     
     Args:
@@ -394,7 +394,8 @@ def assess_task_risk(task: Task) -> Tuple[float, str, List[str]]:
         sql_query = task.payload.get("sql") or task.payload.get("query") or ""
         if sql_query:
             sql_upper = sql_query.upper().strip()
-            first_token = sql_upper.split()[0] if sql_upper.split() else ""
+            tokens = sql_upper.split()
+            first_token = tokens[0] if tokens else ""
             
             # Read-only queries are safer
             if first_token in {"SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE"}:
@@ -448,6 +449,10 @@ def should_require_approval_for_risk(risk_score: float, risk_level: str) -> bool
     """Determine if a task should require approval based on risk level.
     
     Returns True for both 'high' (0.6-0.8) and 'critical' (>=0.8) risk tasks.
+    
+    Defense-in-depth: We check both the categorical risk_level AND the numeric
+    risk_score threshold. This ensures approval is required even if there's a
+    discrepancy between the level classification and the raw score.
     """
     return risk_level in ("high", "critical") or risk_score >= RISK_THRESHOLDS["medium"]
 
@@ -899,6 +904,8 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                   f"Task '{task.title}' requires approval due to {risk_level.upper()} risk ({risk_score:.0%})",
                   level="warn", task_id=task.id,
                   output_data={"risk_score": risk_score, "risk_level": risk_level, "risk_factors": risk_factors})
+        # Create an approval record so standard workflow can pick it up
+        ensure_approval_request(task)
         update_task_status(task.id, "waiting_approval", {
             "reason": f"High risk task ({risk_level}: {risk_score:.0%})",
             "risk_factors": risk_factors
