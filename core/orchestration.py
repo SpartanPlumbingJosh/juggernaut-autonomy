@@ -2067,10 +2067,341 @@ def get_orchestrator_dashboard() -> Dict[str, Any]:
 # EXPORTS
 # ============================================================
 
+# ============================================================
+# PHASE 6.6: GOAL DECOMPOSITION (L5 CAPABILITY)
+# ============================================================
+
+
+def decompose_goal(
+    goal_id: str,
+    sub_goals: List[Dict[str, Any]],
+    created_by: str = "ORCHESTRATOR"
+) -> Dict[str, Any]:
+    """
+    Decompose a high-level goal into sub-goals.
+    
+    Args:
+        goal_id: Parent goal ID to decompose
+        sub_goals: List of sub-goal definitions, each with:
+            - title: Sub-goal title (required)
+            - description: Sub-goal description
+            - success_criteria: JSON object of success criteria
+            - deadline: Optional deadline
+            - max_cost_cents: Optional budget
+        created_by: Who is creating the sub-goals
+    
+    Returns:
+        Dict with success status, created sub-goal IDs, and hierarchy level
+    
+    Example:
+        >>> decompose_goal("root-goal-id", [
+        ...     {"title": "Phase 1", "description": "Initial setup"},
+        ...     {"title": "Phase 2", "description": "Scale up"}
+        ... ])
+    """
+    created_ids = []
+    
+    try:
+        # Verify parent goal exists
+        parent = _query(f"""
+            SELECT id, title, status FROM goals WHERE id = {_format_value(goal_id)}
+        """)
+        
+        if not parent.get("rows"):
+            return {"success": False, "error": f"Parent goal {goal_id} not found"}
+        
+        parent_goal = parent["rows"][0]
+        
+        for sub_goal in sub_goals:
+            sub_id = str(uuid.uuid4())
+            title = sub_goal.get("title", "Untitled Sub-goal")
+            description = sub_goal.get("description", "")
+            success_criteria = sub_goal.get("success_criteria", {})
+            deadline = sub_goal.get("deadline")
+            max_cost = sub_goal.get("max_cost_cents", 0)
+            
+            _query(f"""
+                INSERT INTO goals (
+                    id, parent_goal_id, title, description, success_criteria,
+                    created_by, status, progress, max_cost_cents, deadline
+                ) VALUES (
+                    {_format_value(sub_id)},
+                    {_format_value(goal_id)},
+                    {_format_value(title)},
+                    {_format_value(description)},
+                    {_format_value(success_criteria)},
+                    {_format_value(created_by)},
+                    'pending',
+                    0,
+                    {max_cost},
+                    {_format_value(deadline) if deadline else 'NULL'}
+                )
+            """)
+            
+            created_ids.append(sub_id)
+            logger.info("Created sub-goal '%s' under parent '%s'", title, parent_goal["title"])
+        
+        log_coordination_event(
+            event_type="goal.decomposed",
+            initiator=created_by,
+            description=f"Decomposed goal '{parent_goal['title']}' into {len(created_ids)} sub-goals"
+        )
+        
+        return {
+            "success": True,
+            "parent_goal_id": goal_id,
+            "parent_title": parent_goal["title"],
+            "sub_goal_ids": created_ids,
+            "count": len(created_ids)
+        }
+        
+    except Exception as e:
+        logger.error("Failed to decompose goal %s: %s", goal_id, str(e))
+        return {"success": False, "error": str(e)}
+
+
+def decompose_goal_to_tasks(
+    goal_id: str,
+    tasks: List[Dict[str, Any]],
+    created_by: str = "ORCHESTRATOR"
+) -> Dict[str, Any]:
+    """
+    Break a goal into executable tasks.
+    
+    Args:
+        goal_id: Goal to create tasks for
+        tasks: List of task definitions, each with:
+            - title: Task title (required)
+            - description: Task description
+            - task_type: Type of task (code, research, verification, etc.)
+            - priority: low, medium, high, critical
+            - payload: Task payload/parameters
+            - parent_task_id: Optional parent task for sub-tasks
+        created_by: Who is creating the tasks
+    
+    Returns:
+        Dict with success status and created task IDs
+    
+    Example:
+        >>> decompose_goal_to_tasks("goal-id", [
+        ...     {"title": "Research competitors", "task_type": "research"},
+        ...     {"title": "Build prototype", "task_type": "code"}
+        ... ])
+    """
+    created_ids = []
+    
+    try:
+        # Verify goal exists
+        goal = _query(f"""
+            SELECT id, title FROM goals WHERE id = {_format_value(goal_id)}
+        """)
+        
+        if not goal.get("rows"):
+            return {"success": False, "error": f"Goal {goal_id} not found"}
+        
+        goal_info = goal["rows"][0]
+        
+        for task_def in tasks:
+            task_id = str(uuid.uuid4())
+            title = task_def.get("title", "Untitled Task")
+            description = task_def.get("description", "")
+            task_type = task_def.get("task_type", "unknown")
+            priority = task_def.get("priority", "medium")
+            payload = task_def.get("payload", {})
+            parent_task_id = task_def.get("parent_task_id")
+            
+            _query(f"""
+                INSERT INTO governance_tasks (
+                    id, goal_id, parent_task_id, title, description,
+                    task_type, priority, status, payload, created_by
+                ) VALUES (
+                    {_format_value(task_id)},
+                    {_format_value(goal_id)},
+                    {_format_value(parent_task_id) if parent_task_id else 'NULL'},
+                    {_format_value(title)},
+                    {_format_value(description)},
+                    {_format_value(task_type)},
+                    {_format_value(priority)},
+                    'pending',
+                    {_format_value(payload)},
+                    {_format_value(created_by)}
+                )
+            """)
+            
+            created_ids.append(task_id)
+            logger.info("Created task '%s' for goal '%s'", title, goal_info["title"])
+        
+        log_coordination_event(
+            event_type="goal.tasks_created",
+            initiator=created_by,
+            description=f"Created {len(created_ids)} tasks for goal '{goal_info['title']}'"
+        )
+        
+        return {
+            "success": True,
+            "goal_id": goal_id,
+            "goal_title": goal_info["title"],
+            "task_ids": created_ids,
+            "count": len(created_ids)
+        }
+        
+    except Exception as e:
+        logger.error("Failed to create tasks for goal %s: %s", goal_id, str(e))
+        return {"success": False, "error": str(e)}
+
+
+def get_goal_hierarchy(root_goal_id: Optional[str] = None, max_depth: int = 10) -> Dict[str, Any]:
+    """
+    Get the full goal hierarchy as a tree structure.
+    
+    Args:
+        root_goal_id: Starting goal ID (None for all top-level goals)
+        max_depth: Maximum depth to traverse
+    
+    Returns:
+        Dict with the goal tree structure including tasks at each level
+    
+    Example:
+        >>> get_goal_hierarchy()
+        {
+            "success": True,
+            "tree": [
+                {
+                    "id": "...",
+                    "title": "Root Goal",
+                    "level": 1,
+                    "children": [...],
+                    "tasks": [...]
+                }
+            ]
+        }
+    """
+    try:
+        # Use recursive CTE to get full hierarchy
+        where_clause = ""
+        if root_goal_id:
+            where_clause = f"WHERE id = {_format_value(root_goal_id)}"
+        else:
+            where_clause = "WHERE parent_goal_id IS NULL"
+        
+        result = _query(f"""
+            WITH RECURSIVE goal_tree AS (
+                SELECT 
+                    id, parent_goal_id, title, description, status, progress,
+                    1 as level,
+                    ARRAY[id] as path
+                FROM goals
+                {where_clause}
+                
+                UNION ALL
+                
+                SELECT 
+                    g.id, g.parent_goal_id, g.title, g.description, g.status, g.progress,
+                    gt.level + 1,
+                    gt.path || g.id
+                FROM goals g
+                JOIN goal_tree gt ON g.parent_goal_id = gt.id
+                WHERE gt.level < {max_depth}
+            )
+            SELECT 
+                gt.id, gt.parent_goal_id, gt.title, gt.description, 
+                gt.status, gt.progress, gt.level,
+                (SELECT COUNT(*) FROM governance_tasks t WHERE t.goal_id = gt.id) as task_count
+            FROM goal_tree gt
+            ORDER BY gt.level, gt.title
+        """)
+        
+        rows = result.get("rows", [])
+        
+        # Build tree structure
+        nodes = {}
+        roots = []
+        
+        for row in rows:
+            node = {
+                "id": row["id"],
+                "parent_goal_id": row["parent_goal_id"],
+                "title": row["title"],
+                "description": row["description"],
+                "status": row["status"],
+                "progress": float(row["progress"]) if row["progress"] else 0,
+                "level": row["level"],
+                "task_count": int(row["task_count"]),
+                "children": []
+            }
+            nodes[row["id"]] = node
+            
+            if row["parent_goal_id"] is None or (root_goal_id and row["id"] == root_goal_id):
+                roots.append(node)
+            elif row["parent_goal_id"] in nodes:
+                nodes[row["parent_goal_id"]]["children"].append(node)
+        
+        # Get statistics
+        max_level = max(r["level"] for r in rows) if rows else 0
+        total_goals = len(rows)
+        
+        return {
+            "success": True,
+            "tree": roots,
+            "statistics": {
+                "total_goals": total_goals,
+                "max_depth": max_level,
+                "goals_by_level": {
+                    level: sum(1 for r in rows if r["level"] == level)
+                    for level in range(1, max_level + 1)
+                }
+            }
+        }
+        
+    except Exception as e:
+        logger.error("Failed to get goal hierarchy: %s", str(e))
+        return {"success": False, "error": str(e)}
+
+
+def link_task_to_goal(task_id: str, goal_id: str) -> Dict[str, Any]:
+    """
+    Link an existing task to a goal.
+    
+    Args:
+        task_id: Task to link
+        goal_id: Goal to link to
+    
+    Returns:
+        Dict with success status
+    """
+    try:
+        result = _query(f"""
+            UPDATE governance_tasks
+            SET goal_id = {_format_value(goal_id)},
+                updated_at = NOW()
+            WHERE id = {_format_value(task_id)}
+            RETURNING id, title
+        """)
+        
+        if not result.get("rows"):
+            return {"success": False, "error": "Task not found"}
+        
+        task = result["rows"][0]
+        logger.info("Linked task '%s' to goal %s", task["title"], goal_id)
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "task_title": task["title"],
+            "goal_id": goal_id
+        }
+        
+    except Exception as e:
+        logger.error("Failed to link task to goal: %s", str(e))
+        return {"success": False, "error": str(e)}
+
+
+
+
 __all__ = [
     # Enums
     "AgentStatus",
-    "TaskPriority", 
+    "TaskPriority",
     "HandoffReason",
     "ConflictType",
     "EscalationLevel",
@@ -2117,6 +2448,12 @@ __all__ = [
     "orchestrator_parallel_execute",
     "get_worker_activity_log",
     "get_orchestrator_dashboard",
+    
+    # 6.6 Goal Decomposition (L5)
+    "decompose_goal",
+    "decompose_goal_to_tasks",
+    "get_goal_hierarchy",
+    "link_task_to_goal",
     
     # Setup
     "create_phase6_tables"
