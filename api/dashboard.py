@@ -992,6 +992,101 @@ def get_system_alerts(
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+def get_tasks(
+    status: str = None,
+    priority: str = None,
+    assigned_worker: str = None,
+    limit: int = 50
+) -> Dict[str, Any]:
+    """
+    Get tasks from the governance_tasks table.
+
+    Args:
+        status: Filter by status (pending, in_progress, completed, failed).
+        priority: Filter by priority (critical, high, medium, low).
+        assigned_worker: Filter by assigned worker.
+        limit: Maximum number of tasks to return.
+
+    Returns:
+        Dictionary containing task counts and task list.
+    """
+    conditions = []
+    if status:
+        sanitized_status = sanitize_identifier(status)
+        conditions.append(f"status = '{sanitized_status}'")
+    if priority:
+        sanitized_priority = sanitize_identifier(priority)
+        conditions.append(f"priority = '{sanitized_priority}'")
+    if assigned_worker:
+        sanitized_worker = sanitize_identifier(assigned_worker)
+        conditions.append(f"assigned_worker = '{sanitized_worker}'")
+
+    where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+
+    # Get tasks
+    tasks_sql = f"""
+        SELECT
+            id,
+            title,
+            description,
+            task_type,
+            priority,
+            status,
+            assigned_worker,
+            created_at,
+            started_at,
+            completed_at
+        FROM governance_tasks
+        {where_clause}
+        ORDER BY
+            CASE priority
+                WHEN 'critical' THEN 0
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3
+                ELSE 4
+            END,
+            created_at DESC
+        LIMIT {limit}
+    """
+
+    # Get counts by status
+    counts_sql = """
+        SELECT
+            status,
+            COUNT(*) as count
+        FROM governance_tasks
+        GROUP BY status
+    """
+
+    try:
+        tasks_result = query_db(tasks_sql)
+        tasks = tasks_result.get("rows", [])
+
+        counts_result = query_db(counts_sql)
+        status_counts = {}
+        total = 0
+        for row in counts_result.get("rows", []):
+            status_name = row.get("status", "unknown")
+            count = int(row.get("count", 0) or 0)
+            status_counts[status_name] = count
+            total += count
+
+        return {
+            "success": True,
+            "total": total,
+            "by_status": status_counts,
+            "pending": status_counts.get("pending", 0),
+            "in_progress": status_counts.get("in_progress", 0),
+            "completed": status_counts.get("completed", 0),
+            "failed": status_counts.get("failed", 0),
+            "count": len(tasks),
+            "tasks": tasks
+        }
+    except Exception as exc:
+        logger.exception("Failed to fetch tasks: %s", exc)
+        return {"success": False, "error": str(exc)}
+
 
 
 # ============================================================
@@ -1009,7 +1104,8 @@ DASHBOARD_FUNCTIONS = {
     "goal_progress": get_goal_progress,
     "profit_loss": get_profit_loss,
     "pending_approvals": get_pending_approvals,
-    "system_alerts": get_system_alerts
+    "system_alerts": get_system_alerts,
+    "tasks": get_tasks
 }
 
 
