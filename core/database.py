@@ -77,6 +77,34 @@ class Database:
 _db = Database()
 
 
+def escape_sql_value(v: Any) -> str:
+    """
+    Escape a value for safe SQL interpolation.
+    
+    Use this function for all user-provided values in WHERE clauses
+    and other SQL statements to prevent SQL injection.
+    
+    Args:
+        v: Value to escape (string, int, float, bool, dict, list, or None)
+    
+    Returns:
+        SQL-safe string representation of the value
+    """
+    if v is None:
+        return "NULL"
+    elif isinstance(v, bool):
+        return "TRUE" if v else "FALSE"
+    elif isinstance(v, (int, float)):
+        return str(v)
+    elif isinstance(v, (dict, list)):
+        json_str = json.dumps(v).replace("'", "''")
+        return f"'{json_str}'"
+    else:
+        escaped = str(v).replace("'", "''")
+        return f"'{escaped}'"
+
+
+
 def query_db(sql: str) -> Dict[str, Any]:
     """Execute raw SQL query."""
     return _db.query(sql)
@@ -175,11 +203,11 @@ def get_logs(
     """
     conditions = []
     if worker_id:
-        conditions.append(f"worker_id = '{worker_id}'")
+        conditions.append(f"worker_id = {escape_sql_value(worker_id)}")
     if action:
-        conditions.append(f"action LIKE '{action}%'")
+        conditions.append(f"action LIKE {escape_sql_value(action + '%')}")
     if level:
-        conditions.append(f"level = '{level}'")
+        conditions.append(f"level = {escape_sql_value(level)}")
     
     where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     sql = f"SELECT * FROM execution_logs {where} ORDER BY created_at DESC LIMIT {limit}"
@@ -198,7 +226,7 @@ def cleanup_old_logs(days_to_keep: int = 30) -> int:
         Number of logs deleted
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days_to_keep)).isoformat()
-    sql = f"DELETE FROM execution_logs WHERE created_at < '{cutoff}' AND level NOT IN ('error', 'critical')"
+    sql = f"DELETE FROM execution_logs WHERE created_at < {escape_sql_value(cutoff)} AND level NOT IN ('error', 'critical')"
     
     try:
         result = _db.query(sql)
@@ -231,7 +259,7 @@ def get_log_summary(days: int = 7) -> Dict[str, Any]:
     level_sql = f"""
         SELECT level, COUNT(*) as count 
         FROM execution_logs 
-        WHERE created_at >= '{cutoff}' 
+        WHERE created_at >= {escape_sql_value(cutoff)} 
         GROUP BY level
     """
     
@@ -239,7 +267,7 @@ def get_log_summary(days: int = 7) -> Dict[str, Any]:
     worker_sql = f"""
         SELECT worker_id, COUNT(*) as count 
         FROM execution_logs 
-        WHERE created_at >= '{cutoff}' 
+        WHERE created_at >= {escape_sql_value(cutoff)} 
         GROUP BY worker_id
         ORDER BY count DESC
         LIMIT 10
@@ -249,7 +277,7 @@ def get_log_summary(days: int = 7) -> Dict[str, Any]:
     action_sql = f"""
         SELECT action, COUNT(*) as count 
         FROM execution_logs 
-        WHERE created_at >= '{cutoff}' 
+        WHERE created_at >= {escape_sql_value(cutoff)} 
         GROUP BY action
         ORDER BY count DESC
         LIMIT 10
@@ -367,7 +395,7 @@ def update_opportunity(
     
     set_clauses.append(f"updated_at = '{datetime.now(timezone.utc).isoformat()}'")
     
-    sql = f"UPDATE opportunities SET {', '.join(set_clauses)} WHERE id = '{opportunity_id}'"
+    sql = f"UPDATE opportunities SET {', '.join(set_clauses)} WHERE id = {escape_sql_value(opportunity_id)}"
     
     try:
         _db.query(sql)
@@ -385,7 +413,7 @@ def update_opportunity(
 
 def get_opportunities(status: str = None, limit: int = 50) -> List[Dict]:
     """Get opportunities, optionally filtered by status."""
-    where = f"WHERE status = '{status}'" if status else ""
+    where = f"WHERE status = {escape_sql_value(status)}" if status else ""
     sql = f"SELECT * FROM opportunities {where} ORDER BY created_at DESC LIMIT {limit}"
     result = _db.query(sql)
     return result.get("rows", [])
@@ -494,7 +522,7 @@ def get_revenue_summary(days: int = 30) -> Dict[str, Any]:
             COALESCE(SUM(net_amount), 0) as net_total,
             COUNT(*) as event_count
         FROM revenue_events 
-        WHERE occurred_at >= '{cutoff}'
+        WHERE occurred_at >= {escape_sql_value(cutoff)}
         AND event_type != 'refund'
     """
     
@@ -502,7 +530,7 @@ def get_revenue_summary(days: int = 30) -> Dict[str, Any]:
     source_sql = f"""
         SELECT source, SUM(gross_amount) as total 
         FROM revenue_events 
-        WHERE occurred_at >= '{cutoff}'
+        WHERE occurred_at >= {escape_sql_value(cutoff)}
         AND event_type != 'refund'
         GROUP BY source
         ORDER BY total DESC
@@ -512,7 +540,7 @@ def get_revenue_summary(days: int = 30) -> Dict[str, Any]:
     type_sql = f"""
         SELECT revenue_type, SUM(gross_amount) as total 
         FROM revenue_events 
-        WHERE occurred_at >= '{cutoff}'
+        WHERE occurred_at >= {escape_sql_value(cutoff)}
         AND event_type != 'refund'
         GROUP BY revenue_type
     """
@@ -554,12 +582,12 @@ def get_revenue_events(
         List of revenue events
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
-    conditions = [f"occurred_at >= '{cutoff}'"]
+    conditions = [f"occurred_at >= {escape_sql_value(cutoff)}"]
     
     if source:
-        conditions.append(f"source = '{source}'")
+        conditions.append(f"source = {escape_sql_value(source)}")
     if event_type:
-        conditions.append(f"event_type = '{event_type}'")
+        conditions.append(f"event_type = {escape_sql_value(event_type)}")
     
     where = f"WHERE {' AND '.join(conditions)}"
     sql = f"SELECT * FROM revenue_events {where} ORDER BY occurred_at DESC LIMIT {limit}"
@@ -640,9 +668,9 @@ def read_memories(
     conditions = ["(expires_at IS NULL OR expires_at > NOW())"]
     
     if category:
-        conditions.append(f"category = '{category}'")
+        conditions.append(f"category = {escape_sql_value(category)}")
     if worker_id:
-        conditions.append(f"worker_id = '{worker_id}'")
+        conditions.append(f"worker_id = {escape_sql_value(worker_id)}")
     if min_importance is not None:
         conditions.append(f"importance >= {min_importance}")
     if search_text:
@@ -657,7 +685,7 @@ def read_memories(
 
 def update_memory_importance(memory_id: str, new_importance: float) -> bool:
     """Update a memory's importance score."""
-    sql = f"UPDATE memories SET importance = {new_importance}, updated_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = '{memory_id}'"
+    sql = f"UPDATE memories SET importance = {new_importance}, updated_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = {escape_sql_value(memory_id)}"
     try:
         _db.query(sql)
         return True
@@ -733,7 +761,7 @@ def get_messages(
     """
     sql = f"""
         SELECT * FROM communications 
-        WHERE (to_worker = '{to_worker}' OR to_worker = 'ALL')
+        WHERE (to_worker = {escape_sql_value(to_worker)} OR to_worker = 'ALL')
         AND status = '{status}'
         ORDER BY 
             CASE priority 
@@ -756,7 +784,7 @@ def acknowledge_message(message_id: str, worker_id: str) -> bool:
         SET status = 'acknowledged', 
             acknowledged_at = '{datetime.now(timezone.utc).isoformat()}',
             acknowledged_by = '{worker_id}'
-        WHERE id = '{message_id}'
+        WHERE id = {escape_sql_value(message_id)}
     """
     try:
         _db.query(sql)
@@ -768,7 +796,7 @@ def acknowledge_message(message_id: str, worker_id: str) -> bool:
 
 def mark_message_read(message_id: str) -> bool:
     """Mark a message as read."""
-    sql = f"UPDATE communications SET status = 'read', read_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = '{message_id}'"
+    sql = f"UPDATE communications SET status = 'read', read_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = {escape_sql_value(message_id)}"
     try:
         _db.query(sql)
         return True
@@ -951,11 +979,11 @@ def get_cost_summary(
     """
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
-    conditions = [f"occurred_at >= '{cutoff}'"]
+    conditions = [f"occurred_at >= {escape_sql_value(cutoff)}"]
     if cost_type:
-        conditions.append(f"cost_type = '{cost_type}'")
+        conditions.append(f"cost_type = {escape_sql_value(cost_type)}")
     if category:
-        conditions.append(f"category = '{category}'")
+        conditions.append(f"category = {escape_sql_value(category)}")
     
     where = f"WHERE {' AND '.join(conditions)}"
     
@@ -1003,11 +1031,11 @@ def get_cost_events(
     """Get recent cost events."""
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     
-    conditions = [f"occurred_at >= '{cutoff}'"]
+    conditions = [f"occurred_at >= {escape_sql_value(cutoff)}"]
     if cost_type:
-        conditions.append(f"cost_type = '{cost_type}'")
+        conditions.append(f"cost_type = {escape_sql_value(cost_type)}")
     if category:
-        conditions.append(f"category = '{category}'")
+        conditions.append(f"category = {escape_sql_value(category)}")
     
     where = f"WHERE {' AND '.join(conditions)}"
     sql = f"SELECT * FROM cost_events {where} ORDER BY occurred_at DESC LIMIT {limit}"
@@ -1086,11 +1114,11 @@ def check_budget_status() -> List[Dict]:
     
     for budget in budgets:
         # Build query for this budget's costs
-        conditions = [f"occurred_at >= '{month_start}'"]
+        conditions = [f"occurred_at >= {escape_sql_value(month_start)}"]
         if budget.get("cost_type"):
-            conditions.append(f"cost_type = '{budget['cost_type']}'")
+            conditions.append(f"cost_type = {escape_sql_value(budget['cost_type'])}")
         if budget.get("category"):
-            conditions.append(f"category = '{budget['category']}'")
+            conditions.append(f"category = {escape_sql_value(budget['category'])}")
         
         where = f"WHERE {' AND '.join(conditions)}"
         
@@ -1102,7 +1130,7 @@ def check_budget_status() -> List[Dict]:
         daily_total = 0
         if budget.get("daily_limit_cents"):
             daily_conditions = conditions.copy()
-            daily_conditions[0] = f"occurred_at >= '{today_start}'"
+            daily_conditions[0] = f"occurred_at >= {escape_sql_value(today_start)}"
             daily_where = f"WHERE {' AND '.join(daily_conditions)}"
             daily_sql = f"SELECT COALESCE(SUM(amount_cents), 0) as total FROM cost_events {daily_where}"
             daily_total = int(_db.query(daily_sql).get("rows", [{}])[0].get("total") or 0)
@@ -1150,14 +1178,14 @@ def get_profit_loss(days: int = 30) -> Dict[str, Any]:
         SELECT COALESCE(SUM(gross_amount), 0) as gross, 
                COALESCE(SUM(COALESCE(net_amount, gross_amount)), 0) as net
         FROM revenue_events 
-        WHERE occurred_at >= '{cutoff}'
+        WHERE occurred_at >= {escape_sql_value(cutoff)}
     """
     
     # Get costs
     cost_sql = f"""
         SELECT COALESCE(SUM(amount_cents), 0) as total
         FROM cost_events 
-        WHERE occurred_at >= '{cutoff}'
+        WHERE occurred_at >= {escape_sql_value(cutoff)}
     """
     
     try:
@@ -1204,7 +1232,7 @@ def get_experiment_roi(experiment_id: str) -> Dict[str, Any]:
     rev_sql = f"""
         SELECT COALESCE(SUM(gross_amount), 0) as gross
         FROM revenue_events 
-        WHERE attribution->>'experiment' = '{experiment_id}'
+        WHERE attribution->>'experiment' = {escape_sql_value(experiment_id)}
            OR metadata->>'experiment_id' = '{experiment_id}'
     """
     
@@ -1212,7 +1240,7 @@ def get_experiment_roi(experiment_id: str) -> Dict[str, Any]:
     cost_sql = f"""
         SELECT COALESCE(SUM(amount_cents), 0) as total
         FROM cost_events 
-        WHERE experiment_id = '{experiment_id}'
+        WHERE experiment_id = {escape_sql_value(experiment_id)}
            OR attribution->>'experiment' = '{experiment_id}'
     """
     
@@ -1296,9 +1324,9 @@ def get_model(model_id: str = None, name: str = None, active_only: bool = False)
     """
     conditions = []
     if model_id:
-        conditions.append(f"id = '{model_id}'")
+        conditions.append(f"id = {escape_sql_value(model_id)}")
     if name:
-        conditions.append(f"name = '{name}'")
+        conditions.append(f"name = {escape_sql_value(name)}")
     if active_only:
         conditions.append("active = TRUE")
     
@@ -1321,7 +1349,7 @@ def list_models(model_type: str = None, active_only: bool = False) -> List[Dict]
     """List all models, optionally filtered."""
     conditions = []
     if model_type:
-        conditions.append(f"model_type = '{model_type}'")
+        conditions.append(f"model_type = {escape_sql_value(model_type)}")
     if active_only:
         conditions.append("active = TRUE")
     
@@ -1397,10 +1425,10 @@ def activate_model(model_id: str) -> bool:
     
     try:
         # Deactivate other versions
-        _db.query(f"UPDATE scoring_models SET active = FALSE WHERE name = '{model['name']}'")
+        _db.query(f"UPDATE scoring_models SET active = FALSE WHERE name = {escape_sql_value(model['name'])}")
         
         # Activate this version
-        _db.query(f"UPDATE scoring_models SET active = TRUE, updated_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = '{model_id}'")
+        _db.query(f"UPDATE scoring_models SET active = TRUE, updated_at = '{datetime.now(timezone.utc).isoformat()}' WHERE id = {escape_sql_value(model_id)}")
         
         log_execution(
             worker_id="SYSTEM",
@@ -1433,10 +1461,10 @@ def rollback_model(name: str, to_version: int = None) -> bool:
     
     # Find target version
     if to_version:
-        sql = f"SELECT id FROM scoring_models WHERE name = '{name}' AND version = {to_version}"
+        sql = f"SELECT id FROM scoring_models WHERE name = {escape_sql_value(name)} AND version = {to_version}"
     else:
         # Get previous version
-        sql = f"SELECT id FROM scoring_models WHERE name = '{name}' AND version < {current['version']} ORDER BY version DESC LIMIT 1"
+        sql = f"SELECT id FROM scoring_models WHERE name = {escape_sql_value(name)} AND version < {current['version']} ORDER BY version DESC LIMIT 1"
     
     try:
         result = _db.query(sql)
@@ -1513,7 +1541,7 @@ def resolve_prediction(
         True if successful
     """
     # Get the prediction
-    sql = f"SELECT predicted_score, predicted_outcome FROM prediction_outcomes WHERE id = '{prediction_id}'"
+    sql = f"SELECT predicted_score, predicted_outcome FROM prediction_outcomes WHERE id = {escape_sql_value(prediction_id)}"
     result = _db.query(sql)
     rows = result.get("rows", [])
     if not rows:
@@ -1532,7 +1560,7 @@ def resolve_prediction(
             correct = {str(correct).upper() if correct is not None else 'NULL'},
             error_magnitude = {error_magnitude if error_magnitude is not None else 'NULL'},
             resolved_at = '{datetime.now(timezone.utc).isoformat()}'
-        WHERE id = '{prediction_id}'
+        WHERE id = {escape_sql_value(prediction_id)}
     """
     
     try:
@@ -1565,7 +1593,7 @@ def get_model_accuracy(model_id: str, days: int = 30) -> Dict[str, Any]:
             AVG(ABS(error_magnitude)) as mean_absolute_error,
             PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY ABS(error_magnitude)) as median_error
         FROM prediction_outcomes
-        WHERE model_id = '{model_id}'
+        WHERE model_id = {escape_sql_value(model_id)}
           AND predicted_at >= '{cutoff}'
     """
     
@@ -1599,7 +1627,7 @@ def update_model_accuracy(model_id: str) -> bool:
         SET accuracy = {accuracy['accuracy']},
             sample_count = {accuracy['resolved_predictions']},
             updated_at = '{datetime.now(timezone.utc).isoformat()}'
-        WHERE id = '{model_id}'
+        WHERE id = {escape_sql_value(model_id)}
     """
     
     try:
@@ -1680,7 +1708,7 @@ def get_ab_test_model(experiment_id: str) -> Optional[str]:
     """
     import random
     
-    sql = f"SELECT * FROM model_experiments WHERE id = '{experiment_id}' AND status = 'running'"
+    sql = f"SELECT * FROM model_experiments WHERE id = {escape_sql_value(experiment_id)} AND status = 'running'"
     result = _db.query(sql)
     rows = result.get("rows", [])
     
@@ -1692,10 +1720,10 @@ def get_ab_test_model(experiment_id: str) -> Optional[str]:
     # Random assignment based on traffic split
     if random.random() < float(exp["traffic_split"]):
         model_id = exp["model_b_id"]
-        update_sql = f"UPDATE model_experiments SET model_b_samples = model_b_samples + 1 WHERE id = '{experiment_id}'"
+        update_sql = f"UPDATE model_experiments SET model_b_samples = model_b_samples + 1 WHERE id = {escape_sql_value(experiment_id)}"
     else:
         model_id = exp["model_a_id"]
-        update_sql = f"UPDATE model_experiments SET model_a_samples = model_a_samples + 1 WHERE id = '{experiment_id}'"
+        update_sql = f"UPDATE model_experiments SET model_a_samples = model_a_samples + 1 WHERE id = {escape_sql_value(experiment_id)}"
     
     try:
         _db.query(update_sql)
@@ -1715,7 +1743,7 @@ def update_ab_test_metrics(experiment_id: str) -> Dict[str, Any]:
     Returns:
         Updated metrics dict
     """
-    sql = f"SELECT * FROM model_experiments WHERE id = '{experiment_id}'"
+    sql = f"SELECT * FROM model_experiments WHERE id = {escape_sql_value(experiment_id)}"
     result = _db.query(sql)
     rows = result.get("rows", [])
     
@@ -1748,7 +1776,7 @@ def update_ab_test_metrics(experiment_id: str) -> Dict[str, Any]:
         SET model_a_metric = {model_a_metric},
             model_b_metric = {model_b_metric},
             confidence_level = {confidence}
-        WHERE id = '{experiment_id}'
+        WHERE id = {escape_sql_value(experiment_id)}
     """
     
     try:
@@ -1778,7 +1806,7 @@ def conclude_ab_test(experiment_id: str, winner: str = None) -> bool:
     Returns:
         True if successful
     """
-    sql = f"SELECT * FROM model_experiments WHERE id = '{experiment_id}'"
+    sql = f"SELECT * FROM model_experiments WHERE id = {escape_sql_value(experiment_id)}"
     result = _db.query(sql)
     rows = result.get("rows", [])
     
@@ -1806,7 +1834,7 @@ def conclude_ab_test(experiment_id: str, winner: str = None) -> bool:
         SET status = 'completed',
             winner_id = {f"'{winner_id}'" if winner_id else "NULL"},
             ended_at = '{datetime.now(timezone.utc).isoformat()}'
-        WHERE id = '{experiment_id}'
+        WHERE id = {escape_sql_value(experiment_id)}
     """
     
     try:
@@ -1830,7 +1858,7 @@ def conclude_ab_test(experiment_id: str, winner: str = None) -> bool:
 
 def list_ab_tests(status: str = None) -> List[Dict]:
     """List A/B tests, optionally filtered by status."""
-    where = f"WHERE status = '{status}'" if status else ""
+    where = f"WHERE status = {escape_sql_value(status)}" if status else ""
     sql = f"SELECT * FROM model_experiments {where} ORDER BY started_at DESC"
     
     try:
@@ -1938,15 +1966,15 @@ def complete_training_run(
         update_parts.append(f"sample_count = {sample_count}")
     if metrics:
         metrics_json = json.dumps(metrics).replace("'", "''")
-        update_parts.append(f"metrics = '{metrics_json}'")
+        update_parts.append(f"metrics = {escape_sql_value(metrics_json)}")
     
-    sql = f"UPDATE model_training_runs SET {', '.join(update_parts)} WHERE id = '{run_id}'"
+    sql = f"UPDATE model_training_runs SET {', '.join(update_parts)} WHERE id = {escape_sql_value(run_id)}"
     
     try:
         _db.query(sql)
         
         # Get run details to update model
-        run_sql = f"SELECT model_id FROM model_training_runs WHERE id = '{run_id}'"
+        run_sql = f"SELECT model_id FROM model_training_runs WHERE id = {escape_sql_value(run_id)}"
         run = _db.query(run_sql).get("rows", [{}])[0]
         
         if run.get("model_id"):
@@ -1956,7 +1984,7 @@ def complete_training_run(
                 SET accuracy = {test_accuracy or train_accuracy},
                     sample_count = {sample_count or 0},
                     last_trained_at = '{datetime.now(timezone.utc).isoformat()}'
-                WHERE id = '{run['model_id']}'
+                WHERE id = {escape_sql_value(run['model_id'])}
             """
             _db.query(model_update)
             
@@ -1977,7 +2005,7 @@ def fail_training_run(run_id: str, error_message: str) -> bool:
         SET status = 'failed',
             error_message = '{error_message.replace("'", "''")}',
             completed_at = '{datetime.now(timezone.utc).isoformat()}'
-        WHERE id = '{run_id}'
+        WHERE id = {escape_sql_value(run_id)}
     """
     
     try:
@@ -1990,7 +2018,7 @@ def fail_training_run(run_id: str, error_message: str) -> bool:
 
 def get_training_history(model_id: str = None, limit: int = 20) -> List[Dict]:
     """Get training run history for a model or all models."""
-    where = f"WHERE model_id = '{model_id}'" if model_id else ""
+    where = f"WHERE model_id = {escape_sql_value(model_id)}" if model_id else ""
     sql = f"SELECT * FROM model_training_runs {where} ORDER BY created_at DESC LIMIT {limit}"
     
     try:
