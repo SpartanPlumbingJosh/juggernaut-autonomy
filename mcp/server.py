@@ -1,5 +1,5 @@
 """
-JUGGERNAUT MCP Server - Using official MCP library (v3)
+JUGGERNAUT MCP Server - Using official MCP library (v4)
 
 SSE-based Model Context Protocol server for Claude.ai integration.
 """
@@ -7,16 +7,9 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
 from typing import Any
 
 import aiohttp
-from starlette.applications import Starlette
-from starlette.middleware import Middleware
-from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Route, Mount
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
 import uvicorn
 
 from mcp.server import Server
@@ -222,73 +215,95 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps({"error": str(e)}))]
 
 
-# SSE Transport
+# SSE Transport - messages endpoint is relative to where it's mounted
 sse_transport = SseServerTransport("/messages")
 
 
-# Create ASGI app for SSE endpoint
-async def handle_sse(scope, receive, send):
-    """Handle SSE connection as ASGI app."""
-    # Extract token from query string
+def check_auth(scope) -> bool:
+    """Check token from query string."""
     query_string = scope.get("query_string", b"").decode()
-    params = dict(p.split("=") for p in query_string.split("&") if "=" in p)
-    token = params.get("token", "")
-    
-    if token != MCP_AUTH_TOKEN:
-        response = Response("Unauthorized", status_code=401)
-        await response(scope, receive, send)
+    params = dict(p.split("=", 1) for p in query_string.split("&") if "=" in p)
+    return params.get("token") == MCP_AUTH_TOKEN
+
+
+async def send_json_response(send, status: int, body: dict):
+    """Send a JSON response."""
+    body_bytes = json.dumps(body).encode()
+    await send({
+        "type": "http.response.start",
+        "status": status,
+        "headers": [
+            [b"content-type", b"application/json"],
+            [b"access-control-allow-origin", b"*"],
+            [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
+            [b"access-control-allow-headers", b"*"],
+        ],
+    })
+    await send({
+        "type": "http.response.body",
+        "body": body_bytes,
+    })
+
+
+async def send_cors_preflight(send):
+    """Send CORS preflight response."""
+    await send({
+        "type": "http.response.start",
+        "status": 204,
+        "headers": [
+            [b"access-control-allow-origin", b"*"],
+            [b"access-control-allow-methods", b"GET, POST, OPTIONS"],
+            [b"access-control-allow-headers", b"*"],
+            [b"access-control-max-age", b"86400"],
+        ],
+    })
+    await send({"type": "http.response.body", "body": b""})
+
+
+async def app(scope, receive, send):
+    """Main ASGI application."""
+    if scope["type"] != "http":
         return
     
-    async with sse_transport.connect_sse(scope, receive, send) as streams:
-        await mcp.run(
-            streams[0],
-            streams[1],
-            mcp.create_initialization_options()
-        )
-
-
-# Create ASGI app for messages endpoint
-async def handle_messages(scope, receive, send):
-    """Handle POST messages as ASGI app."""
-    # Extract token from query string
-    query_string = scope.get("query_string", b"").decode()
-    params = dict(p.split("=") for p in query_string.split("&") if "=" in p)
-    token = params.get("token", "")
+    path = scope["path"]
+    method = scope["method"]
     
-    if token != MCP_AUTH_TOKEN:
-        response = Response("Unauthorized", status_code=401)
-        await response(scope, receive, send)
+    # CORS preflight
+    if method == "OPTIONS":
+        await send_cors_preflight(send)
         return
     
-    await sse_transport.handle_post_message(scope, receive, send)
-
-
-async def health(request: Request):
-    """Health check."""
-    return JSONResponse({"status": "healthy", "tools": 5})
-
-
-# Build routes
-routes = [
-    Route("/health", health, methods=["GET"]),
-    Mount("/mcp", routes=[
-        Route("/sse", handle_sse, methods=["GET"]),
-    ]),
-    Route("/messages", handle_messages, methods=["POST"]),
-]
-
-# Create app with CORS
-app = Starlette(
-    routes=routes,
-    middleware=[
-        Middleware(
-            CORSMiddleware,
-            allow_origins=["*"],
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-    ]
-)
+    # Health check
+    if path == "/health" and method == "GET":
+        await send_json_response(send, 200, {"status": "healthy", "tools": 5})
+        return
+    
+    # SSE endpoint
+    if path == "/mcp/sse" and method == "GET":
+        if not check_auth(scope):
+            await send_json_response(send, 401, {"error": "Unauthorized"})
+            return
+        
+        async with sse_transport.connect_sse(scope, receive, send) as streams:
+            await mcp.run(
+                streams[0],
+                streams[1],
+                mcp.create_initialization_options()
+            )
+        return
+    
+    # Messages endpoint (POST)
+    if path == "/messages" and method == "POST":
+        # Token is in query params from the endpoint URL sent to client
+        if not check_auth(scope):
+            await send_json_response(send, 401, {"error": "Unauthorized"})
+            return
+        
+        await sse_transport.handle_post_message(scope, receive, send)
+        return
+    
+    # 404
+    await send_json_response(send, 404, {"error": "Not found"})
 
 
 if __name__ == "__main__":
