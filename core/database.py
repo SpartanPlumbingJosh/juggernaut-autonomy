@@ -105,8 +105,25 @@ def escape_sql_value(v: Any) -> str:
 
 
 
-def query_db(sql: str) -> Dict[str, Any]:
-    """Execute raw SQL query."""
+def query_db(sql: str, params: Optional[List] = None) -> Dict[str, Any]:
+    """
+    Execute SQL query with optional parameterized values.
+    
+    Args:
+        sql: SQL query with optional $1, $2, etc. placeholders
+        params: List of parameter values to substitute
+        
+    Returns:
+        Query result dict with 'rows', 'rowCount', etc.
+    """
+    if params:
+        # Substitute $1, $2, etc. with formatted values
+        formatted_sql = sql
+        for i, param in enumerate(params, 1):
+            placeholder = f"${i}"
+            formatted_value = _db._format_value(param)
+            formatted_sql = formatted_sql.replace(placeholder, formatted_value, 1)
+        return _db.query(formatted_sql)
     return _db.query(sql)
 
 
