@@ -1700,11 +1700,14 @@ def orchestrator_assign_task(
             # Continue without lock if conflict_manager fails (graceful degradation)
     
     # Update the task assignment
+    # L5-WIRE-01: Set status to in_progress directly for automated routing
+    # Task flow: pending -> in_progress (orchestrator assigns & starts immediately)
     sql = f"""
     UPDATE governance_tasks
     SET 
         assigned_worker = {_format_value(target_worker_id)},
-        status = 'assigned',
+        status = 'in_progress',
+        started_at = NOW(),
         updated_at = NOW(),
         result = jsonb_set(
             COALESCE(result, '{{}}'::jsonb),
