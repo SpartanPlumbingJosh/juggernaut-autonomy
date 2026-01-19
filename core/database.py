@@ -1727,7 +1727,7 @@ def get_ab_test_model(experiment_id: str) -> Optional[str]:
     
     try:
         _db.query(update_sql)
-    except:
+    except Exception:
         pass
     
     return model_id
@@ -1781,7 +1781,7 @@ def update_ab_test_metrics(experiment_id: str) -> Dict[str, Any]:
     
     try:
         _db.query(update_sql)
-    except:
+    except Exception:
         pass
     
     return {
@@ -2045,10 +2045,10 @@ def record_learning(
     summary: str,
     category: str,
     worker_id: str = "SYSTEM",
-    task_id: str = None,
-    goal_id: str = None,
-    details: Dict = None,
-    evidence_task_ids: List[str] = None,
+    task_id: Optional[str] = None,
+    goal_id: Optional[str] = None,
+    details: Optional[Dict] = None,
+    evidence_task_ids: Optional[List[str]] = None,
     confidence: float = 0.7
 ) -> Optional[str]:
     """
@@ -2100,15 +2100,20 @@ def record_learning(
         
         return learning_id
     except Exception as e:
-        print(f"Failed to record learning: {e}")
+        log_execution(
+            worker_id=worker_id,
+            action="learning.record_error",
+            message=f"Failed to record learning: {e}",
+            level="error"
+        )
         return None
 
 
 def search_learnings(
-    category: str = None,
-    worker_id: str = None,
-    search_text: str = None,
-    min_confidence: float = None,
+    category: Optional[str] = None,
+    worker_id: Optional[str] = None,
+    search_text: Optional[str] = None,
+    min_confidence: Optional[float] = None,
     validated_only: bool = False,
     limit: int = 50
 ) -> List[Dict]:
@@ -2148,7 +2153,12 @@ def search_learnings(
         result = _db.query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to search learnings: {e}")
+        log_execution(
+            worker_id="SYSTEM",
+            action="learning.search_error",
+            message=f"Failed to search learnings: {e}",
+            level="error"
+        )
         return []
 
 
@@ -2174,7 +2184,12 @@ def get_learning_categories() -> List[Dict]:
         result = _db.query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get learning categories: {e}")
+        log_execution(
+            worker_id="SYSTEM",
+            action="learning.categories_error",
+            message=f"Failed to get learning categories: {e}",
+            level="error"
+        )
         return []
 
 
@@ -2199,7 +2214,12 @@ def apply_learning(learning_id: str) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to apply learning: {e}")
+        log_execution(
+            worker_id="SYSTEM",
+            action="learning.apply_error",
+            message=f"Failed to apply learning: {e}",
+            level="error"
+        )
         return False
 
 
@@ -2226,5 +2246,10 @@ def validate_learning(learning_id: str, validated_by: str) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to validate learning: {e}")
+        log_execution(
+            worker_id=validated_by,
+            action="learning.validate_error",
+            message=f"Failed to validate learning: {e}",
+            level="error"
+        )
         return False
