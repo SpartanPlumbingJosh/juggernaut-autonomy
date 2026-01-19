@@ -167,6 +167,32 @@ except ImportError as e:
     def capture_task_learning(*args, **kwargs): return (False, None)
 
 
+# L5-07: Failover and Resilience - Worker failure detection and task reassignment
+FAILOVER_AVAILABLE = False
+_failover_import_error = None
+
+try:
+    from core.failover import process_failover
+    FAILOVER_AVAILABLE = True
+except ImportError as e:
+    _failover_import_error = str(e)
+    # Stub function for graceful degradation
+    def process_failover(*args, **kwargs): return {"failed_workers": [], "tasks_reassigned": 0}
+
+
+# CRITICAL-03c: Stale Task Cleanup (wired up by CRITICAL-03c)
+STALE_CLEANUP_AVAILABLE = False
+_stale_cleanup_import_error = None
+
+try:
+    from core.stale_cleanup import reset_stale_tasks
+    STALE_CLEANUP_AVAILABLE = True
+except ImportError as e:
+    _stale_cleanup_import_error = str(e)
+    # Stub function for graceful degradation
+    def reset_stale_tasks(*args, **kwargs): return (0, [])
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -1648,6 +1674,18 @@ def autonomy_loop():
     elif _error_recovery_import_error:
         log_action("error_recovery.unavailable", f"Error recovery disabled: {_error_recovery_import_error}", level="warn")
     
+    # Log failover framework status (L5-07)
+    if FAILOVER_AVAILABLE:
+        log_info("Failover and resilience framework available", {"status": "enabled"})
+    elif _failover_import_error:
+        log_action("failover.unavailable", f"Failover disabled: {_failover_import_error}", level="warn")
+    
+    # Log stale cleanup framework status (CRITICAL-03c)
+    if STALE_CLEANUP_AVAILABLE:
+        log_info("Stale task cleanup available", {"status": "enabled"})
+    elif _stale_cleanup_import_error:
+        log_action("stale_cleanup.unavailable", f"Stale cleanup disabled: {_stale_cleanup_import_error}", level="warn")
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -1669,6 +1707,38 @@ def autonomy_loop():
         loop_count += 1
         loop_start = time.time()
         
+        
+        # L5-07: Check for failed workers and reassign tasks at start of each loop
+        if FAILOVER_AVAILABLE:
+            try:
+                failover_result = process_failover()
+                if failover_result.get("tasks_reassigned", 0) > 0:
+                    log_action(
+                        "failover.tasks_reassigned",
+                        f"Reassigned {failover_result['tasks_reassigned']} tasks from failed workers",
+                        data=failover_result
+                    )
+            except Exception as failover_err:
+                log_error(f"Failover check failed: {failover_err}")
+
+        # CRITICAL-03c: Reset stale tasks at START of each loop cycle
+        if STALE_CLEANUP_AVAILABLE:
+            try:
+                reset_count, reset_tasks = reset_stale_tasks()
+                if reset_count > 0:
+                    log_action(
+                        "stale_cleanup.reset",
+                        f"Reset {reset_count} stale tasks back to pending",
+                        level="info",
+                        output_data={"reset_count": reset_count, "task_ids": [t.get("id") for t in reset_tasks]}
+                    )
+            except Exception as stale_err:
+                log_action(
+                    "stale_cleanup.error",
+                    f"Failed to reset stale tasks: {stale_err}",
+                    level="error"
+                )
+
         try:
             # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
             approved_tasks = poll_approved_tasks(limit=3)
