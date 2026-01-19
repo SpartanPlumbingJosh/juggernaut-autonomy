@@ -93,6 +93,31 @@ except ImportError as e:
     def log_coordination_event(*args, **kwargs): return None
 
 
+# Phase 5.1: Proactive Opportunity Scanning (HIGH-05b)
+PROACTIVE_AVAILABLE = False
+_proactive_import_error = None
+
+try:
+    from core.proactive import (
+        start_scan,
+        complete_scan,
+        fail_scan,
+        scan_servicetitan_opportunities,
+        scan_angi_leads,
+        scan_market_trends,
+    )
+    PROACTIVE_AVAILABLE = True
+except ImportError as e:
+    _proactive_import_error = str(e)
+    # Stub functions for graceful degradation
+    def start_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def complete_scan(*args, **kwargs): return {"success": False}
+    def fail_scan(*args, **kwargs): return {"success": False}
+    def scan_servicetitan_opportunities(*args, **kwargs): return {"success": False}
+    def scan_angi_leads(*args, **kwargs): return {"success": False}
+    def scan_market_trends(*args, **kwargs): return {"success": False}
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -573,6 +598,133 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
     except Exception as e:
         log_error(f"Failed to get tasks: {e}")
         return []
+
+
+def execute_scheduled_scan(scan_config: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Execute a proactive opportunity scan.
+
+    This is called when a scheduled task with task_type='opportunity_scan' is due.
+    It runs all configured scan sources and logs results.
+
+    Args:
+        scan_config: Configuration from scheduled_tasks.config
+
+    Returns:
+        Dict with scan results and statistics
+    """
+    if not PROACTIVE_AVAILABLE:
+        log_action(
+            "scan.unavailable",
+            f"Proactive module not available: {_proactive_import_error}",
+            level="warning"
+        )
+        return {"success": False, "error": "proactive module not available"}
+
+    scan_all = scan_config.get("scan_all_sources", True)
+    total_found = 0
+    total_qualified = 0
+    total_duplicates = 0
+    scan_results = {}
+
+    # Start master scan record
+    scan_result = start_scan(
+        scan_type="proactive_scheduled",
+        source="scheduled_task",
+        config=scan_config,
+        triggered_by=WORKER_ID
+    )
+
+    if not scan_result.get("success"):
+        log_action(
+            "scan.start_failed",
+            "Failed to start scan record",
+            level="error",
+            error_data=scan_result
+        )
+        return scan_result
+
+    scan_id = scan_result["scan_id"]
+
+    try:
+        # Run ServiceTitan scan
+        if scan_all or scan_config.get("scan_servicetitan", True):
+            st_result = scan_servicetitan_opportunities(
+                scan_id=scan_id,
+                config=scan_config.get("servicetitan_config", {})
+            )
+            scan_results["servicetitan"] = st_result
+            total_found += st_result.get("opportunities_found", 0)
+            log_action(
+                "scan.servicetitan",
+                f"ServiceTitan scan complete: {st_result.get('opportunities_found', 0)} found",
+                output_data=st_result
+            )
+
+        # Run Angi scan
+        if scan_all or scan_config.get("scan_angi", True):
+            angi_result = scan_angi_leads(
+                scan_id=scan_id,
+                config=scan_config.get("angi_config", {})
+            )
+            scan_results["angi"] = angi_result
+            total_found += angi_result.get("opportunities_found", 0)
+            log_action(
+                "scan.angi",
+                f"Angi scan complete: {angi_result.get('opportunities_found', 0)} found",
+                output_data=angi_result
+            )
+
+        # Run market trends scan
+        if scan_all or scan_config.get("scan_market", True):
+            market_result = scan_market_trends(
+                scan_id=scan_id,
+                config=scan_config.get("market_config", {})
+            )
+            scan_results["market_trends"] = market_result
+            total_found += market_result.get("opportunities_found", 0)
+            log_action(
+                "scan.market",
+                f"Market scan complete: {market_result.get('opportunities_found', 0)} found",
+                output_data=market_result
+            )
+
+        # Complete the scan
+        complete_scan(
+            scan_id=scan_id,
+            opportunities_found=total_found,
+            opportunities_qualified=total_qualified,
+            opportunities_duplicates=total_duplicates,
+            results_summary=scan_results
+        )
+
+        log_action(
+            "scan.complete",
+            f"Proactive scan complete: {total_found} opportunities found",
+            output_data={
+                "scan_id": scan_id,
+                "total_found": total_found,
+                "sources_scanned": list(scan_results.keys())
+            }
+        )
+
+        return {
+            "success": True,
+            "scan_id": scan_id,
+            "opportunities_found": total_found,
+            "results": scan_results
+        }
+
+    except Exception as e:
+        error_msg = str(e)
+        fail_scan(scan_id, error_msg)
+        log_action(
+            "scan.error",
+            f"Proactive scan failed: {error_msg}",
+            level="error",
+            error_data={"scan_id": scan_id, "error": error_msg}
+        )
+        return {"success": False, "scan_id": scan_id, "error": error_msg}
 
 
 def get_due_scheduled_tasks() -> List[Dict]:
@@ -1549,11 +1701,36 @@ def autonomy_loop():
                 scheduled = get_due_scheduled_tasks()
                 if scheduled:
                     sched_task = scheduled[0]
-                    log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
-                                 "No pending tasks, running scheduled task")
+                    task_type = sched_task.get("task_type", "")
+                    task_config = sched_task.get("config", {}) or {}
+
+                    log_decision(
+                        "loop.scheduled",
+                        f"Running scheduled task: {sched_task['name']} (type: {task_type})",
+                        "No pending tasks, running scheduled task"
+                    )
+
+                    # Execute based on task type
+                    if task_type == "opportunity_scan":
+                        scan_result = execute_scheduled_scan(task_config)
+                        log_action(
+                            "scheduled.scan_executed",
+                            f"Executed proactive scan: {scan_result.get('opportunities_found', 0)} found",
+                            output_data=scan_result
+                        )
+                    else:
+                        log_action(
+                            "scheduled.unknown_type",
+                            f"Unknown scheduled task type: {task_type}",
+                            level="warning"
+                        )
+
                     # Mark as run
                     now = datetime.now(timezone.utc).isoformat()
-                    sql = f"UPDATE scheduled_tasks SET last_run_at = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
+                    sql = f"""UPDATE scheduled_tasks 
+                              SET last_run_at = {escape_value(now)},
+                                  last_run_status = 'success'
+                              WHERE id = {escape_value(sched_task['id'])}"""
                     execute_sql(sql)
                 else:
                     # 3. Nothing to do - log heartbeat
