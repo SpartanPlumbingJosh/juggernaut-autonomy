@@ -565,22 +565,57 @@ def handoff_task(
     return False
 
 
-def log_coordination_event(event_type: str, data: Dict) -> Optional[str]:
+def update_worker_heartbeat(worker_id: str) -> bool:
+    """
+    Update the heartbeat timestamp for a logical worker.
+    
+    This function updates the last_heartbeat and status for workers like
+    ORCHESTRATOR, ANALYST, and STRATEGIST that don't have their own running
+    process but are called as functions within the main autonomy engine.
+    
+    Args:
+        worker_id: The worker ID to update (e.g., 'ORCHESTRATOR', 'ANALYST')
+    
+    Returns:
+        True if heartbeat was updated successfully, False otherwise
+    """
+    sql = f"""
+    UPDATE worker_registry 
+    SET last_heartbeat = NOW(),
+        status = 'active'
+    WHERE worker_id = {_format_value(worker_id)}
+    """
+    
+    try:
+        result = _query(sql)
+        return result.get("rowCount", 0) > 0
+    except Exception as e:
+        logger.warning("Failed to update heartbeat for %s: %s", worker_id, str(e))
+        return False
+
+
+def log_coordination_event(event_type: str, data: Dict, worker_id: str = "ORCHESTRATOR") -> Optional[str]:
     """
     Log an agent coordination event for audit trail.
+    
+    Also updates the worker's heartbeat to keep it marked as active.
     
     Args:
         event_type: Type of event (handoff, conflict, escalation, etc.)
         data: Event data
+        worker_id: Worker ID to log for (default: ORCHESTRATOR)
     
     Returns:
         Event ID or None
     """
+    # Update heartbeat for the worker performing the action
+    update_worker_heartbeat(worker_id)
+    
     sql = f"""
     INSERT INTO execution_logs (
         worker_id, action, message, level, output_data, created_at
     ) VALUES (
-        'ORCHESTRATOR',
+        {_format_value(worker_id)},
         {_format_value(event_type)},
         {_format_value(f"Coordination: {event_type}")},
         'info',
