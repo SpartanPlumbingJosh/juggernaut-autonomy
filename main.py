@@ -39,6 +39,9 @@ from enum import Enum
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
+EXPERIMENTS_AVAILABLE = False
+_experiments_import_error = None
+
 try:
     from core.experiments import (
         create_experiment,
@@ -51,9 +54,17 @@ try:
         get_experiment_dashboard,
     )
     EXPERIMENTS_AVAILABLE = True
-except ImportError:
-    EXPERIMENTS_AVAILABLE = False
-    print("[WARN] core.experiments not available - experiments disabled")
+except ImportError as e:
+    _experiments_import_error = str(e)
+    # Stub functions for graceful degradation
+    def create_experiment(*args, **kwargs): return None
+    def get_experiment(*args, **kwargs): return None
+    def list_experiments(*args, **kwargs): return []
+    def start_experiment(*args, **kwargs): return False
+    def pause_experiment(*args, **kwargs): return False
+    def record_result(*args, **kwargs): return None
+    def conclude_experiment(*args, **kwargs): return False
+    def get_experiment_dashboard(*args, **kwargs): return {}
 
 
 # ============================================================
@@ -963,6 +974,12 @@ def autonomy_loop():
     
     log_info("Autonomy loop starting", {"worker_id": WORKER_ID, "interval": LOOP_INTERVAL})
     
+    # Log experiment framework status (deferred from import time)
+    if EXPERIMENTS_AVAILABLE:
+        log_info("Experiments framework available", {"status": "enabled"})
+    elif _experiments_import_error:
+        log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn")
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -1086,6 +1103,10 @@ class HealthHandler(BaseHTTPRequestHandler):
                 "database": "connected" if db_ok else "error",
                 "dry_run": DRY_RUN,
                 "loop_interval": LOOP_INTERVAL,
+                "experiments": {
+                    "available": EXPERIMENTS_AVAILABLE,
+                    "dashboard": get_experiment_dashboard() if EXPERIMENTS_AVAILABLE else {}
+                },
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
