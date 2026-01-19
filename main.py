@@ -222,6 +222,27 @@ except ImportError as e:
     def reset_stale_tasks(*args, **kwargs): return (0, [])
 
 
+# FIX-05: RBAC with Access Audit Logging
+RBAC_AUDIT_AVAILABLE = False
+_rbac_import_error = None
+
+try:
+    from core.rbac import (
+        check_permission,
+        check_action_allowed as rbac_check_action,
+        check_task_type_allowed,
+        log_access_audit,
+    )
+    RBAC_AUDIT_AVAILABLE = True
+except ImportError as e:
+    _rbac_import_error = str(e)
+    # Stub functions for graceful degradation
+    def check_permission(*args, **kwargs): return (True, "RBAC unavailable")
+    def rbac_check_action(*args, **kwargs): return (True, "RBAC unavailable")
+    def check_task_type_allowed(*args, **kwargs): return (True, "RBAC unavailable")
+    def log_access_audit(*args, **kwargs): return None
+
+
 # SCALE-03: Auto-Scaling Integration
 AUTO_SCALING_AVAILABLE = False
 _auto_scaling_import_error = None
@@ -691,8 +712,18 @@ def get_forbidden_actions() -> List[str]:
         return []
 
 
-def is_action_allowed(action: str) -> Tuple[bool, str]:
-    """Check if an action is allowed for this worker."""
+def is_action_allowed(action: str, resource: str = "unknown") -> Tuple[bool, str]:
+    """Check if an action is allowed for this worker with audit logging."""
+    # FIX-05: Use RBAC module with audit logging when available
+    if RBAC_AUDIT_AVAILABLE:
+        return rbac_check_action(
+            worker_id=WORKER_ID,
+            action=action,
+            resource=resource,
+            context={"source": "autonomy_engine"}
+        )
+    
+    # Fallback to original logic without audit logging
     forbidden = get_forbidden_actions()
     
     for pattern in forbidden:
@@ -1991,6 +2022,12 @@ def autonomy_loop():
             log_error(f"Failed to initialize auto-scaler: {as_init_err}")
             auto_scaler = None
     
+    # Log RBAC audit logging status (FIX-05)
+    if RBAC_AUDIT_AVAILABLE:
+        log_info("RBAC audit logging enabled", {"status": "enabled"})
+    elif _rbac_import_error:
+        log_action("rbac.unavailable", f"RBAC audit logging disabled: {_rbac_import_error}", level="warn")
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -2538,5 +2575,6 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
 
 
