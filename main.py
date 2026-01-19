@@ -93,6 +93,35 @@ except ImportError as e:
     def log_coordination_event(*args, **kwargs): return None
 
 
+# Phase 7: Persistent Memory System (L2-01)
+MEMORY_AVAILABLE = False
+_memory_import_error = None
+
+try:
+    from core.memory import (
+        store_memory,
+        recall_memories,
+        store_exchange,
+        get_recent_exchanges,
+        store_task_context,
+        get_task_context,
+        cleanup_expired_memories,
+        get_memory_stats,
+    )
+    MEMORY_AVAILABLE = True
+except ImportError as e:
+    _memory_import_error = str(e)
+    # Stub functions for graceful degradation
+    def store_memory(*args, **kwargs): return None
+    def recall_memories(*args, **kwargs): return []
+    def store_exchange(*args, **kwargs): return None
+    def get_recent_exchanges(*args, **kwargs): return []
+    def store_task_context(*args, **kwargs): return None
+    def get_task_context(*args, **kwargs): return None
+    def cleanup_expired_memories(*args, **kwargs): return 0
+    def get_memory_stats(*args, **kwargs): return {}
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -1129,6 +1158,22 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
     
+    # L2: Recall recent exchanges for context (Multi-Turn Memory)
+    task_context = None
+    recent_exchanges = []
+    if MEMORY_AVAILABLE:
+        try:
+            # Get stored context for this specific task
+            task_context = get_task_context(task.id)
+            # Get recent worker exchanges for broader context
+            recent_exchanges = get_recent_exchanges(WORKER_ID, limit=5)
+            if recent_exchanges:
+                log_action("memory.recalled", f"Recalled {len(recent_exchanges)} recent exchanges",
+                          task_id=task.id, output_data={"exchange_count": len(recent_exchanges)})
+        except Exception as mem_err:
+            log_action("memory.recall_failed", f"Failed to recall memories: {mem_err}",
+                      level="warn", task_id=task.id)
+    
     # L2: Assess risk before execution
     risk_score, risk_level, risk_factors = assess_task_risk(task)
     log_risk_warning(task, risk_score, risk_level, risk_factors)
@@ -1357,6 +1402,21 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
+            
+            # L2: Store exchange memory for context in future tasks
+            if MEMORY_AVAILABLE:
+                try:
+                    store_exchange(
+                        worker_id=WORKER_ID,
+                        task_id=task.id,
+                        input_summary=f"Task: {task.title} ({task.task_type})",
+                        output_summary=f"Completed successfully in {duration_ms}ms",
+                        importance=0.6
+                    )
+                except Exception as mem_err:
+                    log_action("memory.store_failed", f"Failed to store exchange: {mem_err}",
+                              level="warn", task_id=task.id)
+            
             # Notify Slack (best-effort, don't affect task status)
             try:
                 notify_task_completed(
@@ -1373,6 +1433,22 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "failed", result)
             log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
                        level="error", error_data=result, duration_ms=duration_ms)
+            
+            # L2: Store exchange memory even for failures (learning from errors)
+            if MEMORY_AVAILABLE:
+                try:
+                    error_msg = result.get("error", "Unknown error") if isinstance(result, dict) else str(result)
+                    store_exchange(
+                        worker_id=WORKER_ID,
+                        task_id=task.id,
+                        input_summary=f"Task: {task.title} ({task.task_type})",
+                        output_summary=f"Failed: {error_msg[:200]}",
+                        importance=0.7  # Failures are slightly more important to remember
+                    )
+                except Exception as mem_err:
+                    log_action("memory.store_failed", f"Failed to store failure exchange: {mem_err}",
+                              level="warn", task_id=task.id)
+            
             # Notify Slack (best-effort, don't affect task status)
             try:
                 notify_task_failed(
@@ -1439,6 +1515,16 @@ def autonomy_loop():
         log_info("Experiments framework available", {"status": "enabled"})
     elif _experiments_import_error:
         log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn")
+    
+    # Log memory system status (L2 requirement)
+    if MEMORY_AVAILABLE:
+        try:
+            stats = get_memory_stats()
+            log_info("Memory system available", {"status": "enabled", "stats": stats})
+        except Exception as mem_err:
+            log_action("memory.stats_failed", f"Memory stats unavailable: {mem_err}", level="warn")
+    elif _memory_import_error:
+        log_action("memory.unavailable", f"Memory system disabled: {_memory_import_error}", level="warn")
     
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
@@ -1560,6 +1646,17 @@ def autonomy_loop():
                     if loop_count % 5 == 0:  # Every 5 loops
                         log_action("loop.heartbeat", f"Loop {loop_count}: No work found",
                                    output_data={"loop": loop_count, "tasks_checked": 0})
+                    
+                    # 4. Periodic memory cleanup (every 50 loops, ~50 minutes)
+                    if loop_count % 50 == 0 and MEMORY_AVAILABLE:
+                        try:
+                            cleaned = cleanup_expired_memories()
+                            if cleaned > 0:
+                                log_action("memory.cleanup", f"Cleaned {cleaned} expired memories",
+                                          output_data={"deleted_count": cleaned})
+                        except Exception as cleanup_err:
+                            log_action("memory.cleanup_failed", f"Memory cleanup failed: {cleanup_err}",
+                                      level="warn")
             
             # Update heartbeat
             now = datetime.now(timezone.utc).isoformat()
