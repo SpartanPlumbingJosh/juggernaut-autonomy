@@ -1350,6 +1350,13 @@ def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]
     if not target_worker:
         return False, None, {"reason": "no suitable worker for task type", "task_type": task.task_type}
     
+    # BUGFIX: Prevent self-delegation - if target is ourselves, don't delegate
+    if target_worker == WORKER_ID or target_worker in (WORKER_ID.upper(), WORKER_ID.lower()):
+        return False, WORKER_ID, {
+            "reason": "self_delegation_prevented",
+            "message": f"Target worker {target_worker} is self ({WORKER_ID}), will execute locally"
+        }
+    
     # Check if the target worker is healthy and available
     agents = discover_agents(min_health_score=0.3)
     target_agent = None
@@ -2191,16 +2198,27 @@ def autonomy_loop():
                     
                     # L5: Try to delegate to specialized worker via ORCHESTRATOR first
                     if ORCHESTRATION_AVAILABLE:
-                        delegated, worker_id, delegate_result = delegate_to_worker(task)
+                        delegated, target_worker_id, delegate_result = delegate_to_worker(task)
                         if delegated:
-                            log_decision(
-                                "orchestrator.delegated",
-                                f"Task delegated to {worker_id}",
-                                f"ORCHESTRATOR routing: {delegate_result.get('message', 'capability_match')}"
-                            )
-                            # Task is now assigned to specialized worker - don't execute locally
-                            task_executed = True
-                            break
+                            # BUG FIX: Check for self-delegation - if target is ourselves, execute locally
+                            if target_worker_id == WORKER_ID or target_worker_id in (WORKER_ID.upper(), WORKER_ID.lower()):
+                                log_action(
+                                    "orchestrator.self_delegation",
+                                    f"Self-delegation detected ({target_worker_id} == {WORKER_ID}), executing locally",
+                                    level="info",
+                                    task_id=task.id,
+                                    output_data=delegate_result
+                                )
+                                # Fall through to local execution below
+                            else:
+                                log_decision(
+                                    "orchestrator.delegated",
+                                    f"Task delegated to {target_worker_id}",
+                                    f"ORCHESTRATOR routing: {delegate_result.get('message', 'capability_match')}"
+                                )
+                                # Task is now assigned to specialized worker - don't execute locally
+                                task_executed = True
+                                break
                         else:
                             # Delegation failed - log reason and fall back to local execution
                             log_action(
