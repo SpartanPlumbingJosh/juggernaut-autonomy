@@ -93,6 +93,33 @@ except ImportError as e:
     def log_coordination_event(*args, **kwargs): return None
 
 
+# Phase 5: Proactive Systems - Opportunity Scanner (wired up by HIGH-05)
+PROACTIVE_AVAILABLE = False
+_proactive_import_error = None
+
+try:
+    from core.proactive import (
+        start_scan,
+        complete_scan,
+        fail_scan,
+        get_scan_history,
+        identify_opportunity,
+        score_opportunity,
+    )
+    from core.opportunity_scan_handler import handle_opportunity_scan
+    PROACTIVE_AVAILABLE = True
+except ImportError as e:
+    _proactive_import_error = str(e)
+    # Stub functions for graceful degradation
+    def start_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def complete_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def fail_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def get_scan_history(*args, **kwargs): return []
+    def identify_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def score_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def handle_opportunity_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -1210,7 +1237,33 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             task_succeeded = not workflow_failed
             
         elif task.task_type == "opportunity_scan":
-            result = {"scanned": True, "source": task.payload.get("source")}
+            # Phase 5: Call the proactive opportunity scan handler
+            if PROACTIVE_AVAILABLE:
+                scan_result = handle_opportunity_scan(
+                    task.payload if hasattr(task, 'payload') else {"config": {}},
+                    execute_sql,
+                    log_action
+                )
+                result = scan_result
+                task_succeeded = scan_result.get("success", False)
+                if task_succeeded:
+                    log_action(
+                        "opportunity_scan.complete",
+                        f"Scan completed: found={scan_result.get('opportunities_found', 0)}, qualified={scan_result.get('opportunities_qualified', 0)}",
+                        task_id=task.id,
+                        output_data={
+                            "scan_id": scan_result.get("scan_id"),
+                            "sources_scanned": scan_result.get("sources_scanned", 0),
+                            "opportunities_found": scan_result.get("opportunities_found", 0),
+                            "opportunities_qualified": scan_result.get("opportunities_qualified", 0),
+                            "tasks_created": scan_result.get("tasks_created", 0)
+                        }
+                    )
+            else:
+                result = {"error": "Proactive module not available", "import_error": _proactive_import_error}
+                task_succeeded = False
+                log_action("opportunity_scan.unavailable", "Proactive module not available",
+                          level="warn", task_id=task.id, error_data=result)
             
         elif task.task_type == "health_check":
             result = {"healthy": True, "component": task.payload.get("component")}
@@ -1440,6 +1493,12 @@ def autonomy_loop():
     elif _experiments_import_error:
         log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn")
     
+    # Log proactive framework status (HIGH-05)
+    if PROACTIVE_AVAILABLE:
+        log_info("Proactive opportunity scanner available", {"status": "enabled"})
+    elif _proactive_import_error:
+        log_action("proactive.unavailable", f"Proactive systems disabled: {_proactive_import_error}", level="warn")
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -1549,9 +1608,56 @@ def autonomy_loop():
                 scheduled = get_due_scheduled_tasks()
                 if scheduled:
                     sched_task = scheduled[0]
+                    sched_task_type = sched_task.get('task_type', 'unknown')
                     log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
-                                 "No pending tasks, running scheduled task")
-                    # Mark as run
+                                 f"No pending tasks, running scheduled task (type: {sched_task_type})")
+                    
+                    # Execute the scheduled task based on task_type
+                    sched_result = None
+                    sched_success = False
+                    
+                    try:
+                        if sched_task_type == "opportunity_scan":
+                            # Use the proactive opportunity scan handler
+                            if PROACTIVE_AVAILABLE:
+                                sched_result = handle_opportunity_scan(
+                                    sched_task,
+                                    execute_sql,
+                                    log_action
+                                )
+                                sched_success = sched_result.get("success", False)
+                            else:
+                                sched_result = {"error": "Proactive module not available"}
+                                sched_success = False
+                        elif sched_task_type == "health_check":
+                            # Simple health check - verify DB connection
+                            execute_sql("SELECT 1")
+                            sched_result = {"healthy": True, "timestamp": datetime.now(timezone.utc).isoformat()}
+                            sched_success = True
+                        else:
+                            # Unknown scheduled task type - log and continue
+                            sched_result = {"skipped": True, "reason": f"No handler for task_type: {sched_task_type}"}
+                            sched_success = True  # Don't mark as failed, just skipped
+                        
+                        # Log the result
+                        log_action(
+                            f"scheduled.{sched_task_type}.{'complete' if sched_success else 'failed'}",
+                            f"Scheduled task {sched_task['name']}: {'success' if sched_success else 'failed'}",
+                            level="info" if sched_success else "error",
+                            output_data=sched_result
+                        )
+                        
+                    except Exception as sched_error:
+                        sched_success = False
+                        sched_result = {"error": str(sched_error)}
+                        log_action(
+                            f"scheduled.{sched_task_type}.error",
+                            f"Scheduled task {sched_task['name']} failed: {str(sched_error)}",
+                            level="error",
+                            error_data={"error": str(sched_error), "traceback": traceback.format_exc()[:300]}
+                        )
+                    
+                    # Mark as run (regardless of success - prevents infinite retry loop)
                     now = datetime.now(timezone.utc).isoformat()
                     sql = f"UPDATE scheduled_tasks SET last_run_at = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
                     execute_sql(sql)
