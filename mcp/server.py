@@ -48,6 +48,61 @@ async def execute_sql(query: str, params: list[Any] | None = None) -> dict[str, 
         ) as resp:
             return await resp.json()
 
+# MCP Factory helpers
+async def mcp_create_from_spec(name: str, description: str, tools: list, owner: str = None) -> dict:
+    """Create a new MCP from specification."""
+    import uuid
+    mcp_id = str(uuid.uuid4())
+    auth_token = str(uuid.uuid4()).replace("-", "")[:32]
+    
+    # Register in database
+    sql = f"""
+    INSERT INTO mcp_registry (id, name, description, status, owner_worker_id, auth_token, tools_config)
+    VALUES ('{mcp_id}', '{name}', '{description.replace("'", "''")}', 'pending', 
+            {'NULL' if not owner else f"'{owner}'"}, '{auth_token}', '{json.dumps(tools)}'::jsonb)
+    ON CONFLICT (name) DO UPDATE SET
+        description = EXCLUDED.description,
+        tools_config = EXCLUDED.tools_config
+    RETURNING id, auth_token
+    """
+    result = await execute_sql(sql)
+    if result.get("rows"):
+        return {
+            "mcp_id": result["rows"][0]["id"],
+            "auth_token": result["rows"][0]["auth_token"],
+            "status": "registered",
+            "message": f"MCP '{name}' registered. Deploy via Railway to activate."
+        }
+    return {"error": "Failed to register MCP"}
+
+
+async def mcp_list_all(status: str = None) -> list:
+    """List all registered MCPs."""
+    where = f"WHERE status = '{status}'" if status else ""
+    sql = f"""
+    SELECT id, name, description, status, endpoint_url, health_status, created_at
+    FROM mcp_registry {where}
+    ORDER BY created_at DESC
+    """
+    result = await execute_sql(sql)
+    return result.get("rows", [])
+
+
+async def mcp_get_status(mcp_id: str) -> dict:
+    """Get status of a specific MCP."""
+    sql = f"""
+    SELECT id, name, description, status, endpoint_url, auth_token,
+           railway_service_id, health_status, error_message, 
+           created_at, deployed_at, last_health_check
+    FROM mcp_registry WHERE id = '{mcp_id}' OR name = '{mcp_id}'
+    """
+    result = await execute_sql(sql)
+    if result.get("rows"):
+        return result["rows"][0]
+    return {"error": "MCP not found"}
+
+
+
 
 @mcp.list_tools()
 async def list_tools() -> list[Tool]:
@@ -61,7 +116,18 @@ async def list_tools() -> list[Tool]:
         Tool(name="war_room_post", description="Post to Slack #war-room",
              inputSchema={"type": "object", "properties": {"bot": {"type": "string"}, "message": {"type": "string"}}, "required": ["bot", "message"]}),
         Tool(name="war_room_history", description="Get #war-room history",
-             inputSchema={"type": "object", "properties": {"limit": {"type": "integer"}}})
+             inputSchema={"type": "object", "properties": {"limit": {"type": "integer"}}}),
+        Tool(name="mcp_create", description="Create a new MCP server. Workers can define custom tools.",
+             inputSchema={"type": "object", "properties": {
+                 "name": {"type": "string", "description": "Unique name for the MCP"},
+                 "description": {"type": "string", "description": "What this MCP does"},
+                 "tools": {"type": "array", "description": "Array of tool definitions with name, description, parameters"},
+                 "owner_worker_id": {"type": "string", "description": "Worker ID that owns this MCP"}
+             }, "required": ["name", "description", "tools"]}),
+        Tool(name="mcp_list", description="List all registered MCP servers",
+             inputSchema={"type": "object", "properties": {"status": {"type": "string", "description": "Filter by status: pending, active, failed"}}}),
+        Tool(name="mcp_status", description="Get status of a specific MCP server",
+             inputSchema={"type": "object", "properties": {"mcp_id": {"type": "string", "description": "MCP ID or name"}}, "required": ["mcp_id"]})
     ]
 
 
@@ -127,6 +193,23 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 ) as resp:
                     return [TextContent(type="text", text=json.dumps(await resp.json()))]
         
+        elif name == "mcp_create":
+            result = await mcp_create_from_spec(
+                name=arguments.get("name"),
+                description=arguments.get("description"),
+                tools=arguments.get("tools", []),
+                owner=arguments.get("owner_worker_id")
+            )
+            return [TextContent(type="text", text=json.dumps(result))]
+        
+        elif name == "mcp_list":
+            result = await mcp_list_all(status=arguments.get("status"))
+            return [TextContent(type="text", text=json.dumps(result))]
+        
+        elif name == "mcp_status":
+            result = await mcp_get_status(mcp_id=arguments.get("mcp_id"))
+            return [TextContent(type="text", text=json.dumps(result))]
+        
         return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
     except Exception as e:
         logger.exception(f"Error in {name}")
@@ -176,7 +259,7 @@ async def app(scope, receive, send):
     
     # Health
     if path == "/health":
-        await send_response(send, 200, json.dumps({"status": "healthy", "tools": 5}).encode())
+        await send_response(send, 200, json.dumps({"status": "healthy", "tools": 8}).encode())
         return
     
     # SSE - handle /mcp/sse OR just /sse OR root with token
