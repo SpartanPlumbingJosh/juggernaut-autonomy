@@ -73,6 +73,25 @@ except ImportError as e:
     def conclude_experiment(*args, **kwargs): return False
     def get_experiment_dashboard(*args, **kwargs): return {}
 
+# Phase 2.5: Error Recovery System (integrated for MED-01)
+ERROR_RECOVERY_AVAILABLE = False
+_error_recovery_import_error = None
+
+try:
+    from core.error_recovery import (
+        move_to_dead_letter,
+        create_alert,
+        check_repeated_failures,
+    )
+    ERROR_RECOVERY_AVAILABLE = True
+except ImportError as e:
+    _error_recovery_import_error = str(e)
+    # Stub functions for graceful degradation
+    def move_to_dead_letter(*args, **kwargs): return None
+    def create_alert(*args, **kwargs): return None
+    def check_repeated_failures(*args, **kwargs): return False
+
+
 
 # ============================================================
 # CONFIGURATION
@@ -712,23 +731,94 @@ def schedule_task_retry(task_id: str, retry_count: int, error: str):
         log_error(f"Failed to schedule retry: {e}")
 
 
-def send_to_dlq(task_id: str, error: str, attempts: int):
-    """Send failed task to dead letter queue."""
+def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
+    """
+    Send failed task to dead letter queue using error_recovery module.
+    
+    Uses move_to_dead_letter from core.error_recovery for proper task
+    snapshot capture, and creates system alert for visibility.
+    
+    Args:
+        task_id: The UUID of the failed task
+        error: Error message describing the failure
+        attempts: Number of retry attempts made
+        
+    Returns:
+        DLQ entry ID if successful, None otherwise
+    """
+    dlq_id = None
+    
+    # Use error_recovery module if available (preferred - captures task snapshot)
+    if ERROR_RECOVERY_AVAILABLE:
+        try:
+            dlq_id = move_to_dead_letter(
+                task_id=task_id,
+                reason=f"Max retries exceeded ({attempts} attempts)",
+                final_error=error,
+                metadata={
+                    "worker_id": WORKER_ID,
+                    "attempts": attempts,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            if dlq_id:
+                log_action(
+                    "dlq.added", 
+                    f"Task {task_id} sent to DLQ after {attempts} attempts",
+                    task_id=task_id, 
+                    error_data={"error": error, "attempts": attempts, "dlq_id": dlq_id}
+                )
+                
+                # Create system alert for visibility
+                create_alert(
+                    alert_type="task_failure",
+                    severity="error",
+                    title=f"Task sent to DLQ after {attempts} retries",
+                    message=f"Task {task_id} permanently failed: {error[:200]}",
+                    source=WORKER_ID,
+                    related_id=task_id,
+                    metadata={"dlq_id": dlq_id, "attempts": attempts}
+                )
+                return dlq_id
+        except Exception as e:
+            log_error(f"error_recovery.move_to_dead_letter failed: {e}")
+    
+    # Fallback: Direct SQL insert (legacy method)
+    log_action(
+        "dlq.fallback", 
+        "Using fallback DLQ method - error_recovery unavailable",
+        level="warn",
+        task_id=task_id
+    )
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO dead_letter_queue (
-            task_id, error_message, attempts, worker_id, created_at
+            original_task_id, reason, final_error, metadata, status, created_at
         ) VALUES (
-            {escape_value(task_id)}, {escape_value(error)}, {attempts}, {escape_value(WORKER_ID)},
+            {escape_value(task_id)}, 
+            {escape_value(f'Max retries exceeded ({attempts} attempts)')},
+            {escape_value(error)}, 
+            {escape_value({"worker_id": WORKER_ID, "attempts": attempts})},
+            'pending',
             {escape_value(now)}
         )
+        RETURNING id
     """
     try:
-        execute_sql(sql)
-        log_action("dlq.added", f"Task {task_id} sent to DLQ after {attempts} attempts", 
-                   task_id=task_id, error_data={"error": error, "attempts": attempts})
+        result = execute_sql(sql)
+        rows = result.get("rows", [])
+        if rows:
+            dlq_id = rows[0].get("id")
+        log_action(
+            "dlq.added", 
+            f"Task {task_id} sent to DLQ after {attempts} attempts (fallback)",
+            task_id=task_id, 
+            error_data={"error": error, "attempts": attempts}
+        )
+        return dlq_id
     except Exception as e:
         log_error(f"Failed to send to DLQ: {e}")
+        return None
 
 
 def create_escalation(task_id: str, issue: str, level: str = "medium"):
