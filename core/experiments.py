@@ -1686,16 +1686,18 @@ def log_experiment_event(
     _execute_sql(query)
 
 
-def get_experiment_dashboard(experiment_id: str) -> Dict[str, Any]:
+def get_experiment_dashboard(experiment_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Get comprehensive dashboard data for an experiment.
     
     Args:
-        experiment_id: Experiment to get dashboard for
+        experiment_id: Experiment to get dashboard for. If None, returns empty dashboard.
     
     Returns:
-        Dict with all experiment data
+        Dict with all experiment data, or empty dict if no experiment_id provided
     """
+    if experiment_id is None:
+        return {}
     experiment = get_experiment(experiment_id)
     if not experiment:
         return {"success": False, "error": "Experiment not found"}
