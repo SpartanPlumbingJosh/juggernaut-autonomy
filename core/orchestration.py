@@ -67,10 +67,14 @@ except ImportError as e:
 # Initialize conflict management tables on module load
 if CONFLICT_MANAGER_AVAILABLE:
     try:
-        ensure_conflict_tables()
-        logger.info("Conflict management tables initialized")
+        if ensure_conflict_tables():
+            logger.info("Conflict management tables initialized")
+        else:
+            logger.warning("Conflict management tables unavailable; disabling conflict locks")
+            CONFLICT_MANAGER_AVAILABLE = False
     except Exception as e:
         logger.warning("Failed to initialize conflict tables: %s", str(e))
+        CONFLICT_MANAGER_AVAILABLE = False
 
 
 
