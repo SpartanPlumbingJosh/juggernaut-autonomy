@@ -771,26 +771,60 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                 result = {"error": "No SQL query provided in payload", "expected_fields": ["sql", "query"]}
                 task_succeeded = False
             else:
+                # SECURITY: Check for write operations - require approval
+                sql_upper = sql_query.strip().upper()
+                first_token = sql_upper.split()[0] if sql_upper.split() else ""
+                read_only_statements = {"SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE"}
+                
+                if first_token not in read_only_statements:
+                    # Non-read-only query detected - require approval
+                    log_action("task.write_blocked", 
+                              f"Write operation '{first_token}' requires approval",
+                              level="warn", task_id=task.id,
+                              output_data={"statement_type": first_token, "task_id": task.id})
+                    
+                    update_task_status(task.id, "waiting_approval", {
+                        "reason": f"Write operation '{first_token}' requires human approval",
+                        "statement_type": first_token,
+                        "sql_preview": sql_query[:100] + "..." if len(sql_query) > 100 else sql_query
+                    })
+                    
+                    return False, {
+                        "waiting_approval": True,
+                        "reason": f"Write operation '{first_token}' requires approval",
+                        "statement_type": first_token
+                    }
+                
                 try:
                     query_result = execute_sql(sql_query)
                     result = {
                         "executed": True,
-                        "sql": sql_query[:200] + "..." if len(sql_query) > 200 else sql_query,
                         "rowCount": query_result.get("rowCount", 0),
-                        "rows_preview": query_result.get("rows", [])[:5]  # Limit preview
+                        "rows_preview": query_result.get("rows", [])[:5]  # Keep in result for task storage
                     }
-                    log_action("task.database_executed", f"Executed SQL: {sql_query[:100]}",
-                              task_id=task.id, output_data=result)
+                    # SECURITY: Log only metadata, not raw SQL or row data
+                    log_action("task.database_executed", f"Query executed successfully",
+                              task_id=task.id, output_data={
+                                  "executed": True,
+                                  "rowCount": query_result.get("rowCount", 0),
+                                  "sql_length": len(sql_query),
+                                  "sql_truncated": len(sql_query) > 200
+                              })
                 except Exception as sql_error:
-                    result = {"error": str(sql_error), "sql_preview": sql_query[:100]}
+                    result = {"error": str(sql_error)}
                     task_succeeded = False
-                    log_action("task.database_failed", f"SQL execution failed: {sql_error}",
-                              level="error", task_id=task.id, error_data=result)
+                    log_action("task.database_failed", f"SQL execution failed",
+                              level="error", task_id=task.id, 
+                              error_data={"error": str(sql_error), "sql_length": len(sql_query)})
         
         elif task.task_type == "test":
             # Execute verification/test queries
             test_queries = task.payload.get("queries", [])
             test_sql = task.payload.get("sql")
+            
+            # TYPE SAFETY: Handle string input by wrapping in list
+            if isinstance(test_queries, str):
+                test_queries = [test_queries]
             
             if test_sql:
                 test_queries = [test_sql]
