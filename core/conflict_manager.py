@@ -168,8 +168,7 @@ def ensure_tables_exist() -> bool:
         status VARCHAR(50) DEFAULT 'active',
         metadata JSONB DEFAULT '{}',
         created_at TIMESTAMPTZ DEFAULT NOW(),
-        UNIQUE(resource_type, resource_id, status) 
-            WHERE status = 'active'
+        -- Partial unique index created below
     );
     """
     
@@ -192,7 +191,13 @@ def ensure_tables_exist() -> bool:
     """
     
     create_index_sql = """
-    CREATE INDEX IF NOT EXISTS idx_resource_locks_active 
+    CREATE INDEX IF NOT EXISTS idx_resource_locks_lookup 
+        ON resource_locks(resource_type, resource_id) 
+        WHERE status = 'active';
+    """
+    
+    create_unique_index_sql = """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_resource_locks_unique_active 
         ON resource_locks(resource_type, resource_id) 
         WHERE status = 'active';
     """
@@ -201,6 +206,7 @@ def ensure_tables_exist() -> bool:
         _query(create_locks_sql)
         _query(create_conflicts_sql)
         _query(create_index_sql)
+        _query(create_unique_index_sql)
         logger.info("Conflict management tables verified/created")
         return True
     except (urllib.error.HTTPError, urllib.error.URLError) as e:
@@ -766,3 +772,4 @@ def get_conflict_stats(days: int = 7) -> Dict[str, Any]:
     except (urllib.error.HTTPError, urllib.error.URLError) as e:
         logger.error("Failed to get conflict stats: %s", str(e))
         return {"period_days": days, "error": str(e)}
+
