@@ -226,7 +226,7 @@ async def msgraph_api(method: str, endpoint: str, data: dict = None, user: str =
                 return await resp.json()
 
 
-async def perplexity_search(query: str, model: str = "llama-3.1-sonar-small-128k-online") -> dict[str, Any]:
+async def perplexity_search(query: str, model: str = "sonar") -> dict[str, Any]:
     """Search with Perplexity AI."""
     if not PERPLEXITY_API_KEY:
         return {"error": "Perplexity not configured"}
@@ -492,7 +492,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         # PERPLEXITY (Web Search)
         elif name == "web_search":
             query = arguments.get("query")
-            model = "llama-3.1-sonar-large-128k-online" if arguments.get("detailed") else "llama-3.1-sonar-small-128k-online"
+            model = "sonar-pro" if arguments.get("detailed") else "sonar"
             result = await perplexity_search(query, model)
             # Extract the answer
             if "choices" in result and result["choices"]:
@@ -800,3 +800,4 @@ async def app(scope, receive, send):
 if __name__ == "__main__":
     logger.info(f"Starting JUGGERNAUT MCP Server v9 on port {PORT}")
     uvicorn.run(app, host="0.0.0.0", port=PORT)
+
