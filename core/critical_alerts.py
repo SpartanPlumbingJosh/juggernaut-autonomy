@@ -13,10 +13,11 @@ Uses existing SLACK_WEBHOOK_URL environment variable.
 import json
 import logging
 import os
+import re
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -26,17 +27,9 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # =============================================================================
 
-# Database configuration from environment with fallback
-NEON_ENDPOINT: str = os.environ.get(
-    "NEON_HTTP_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-NEON_CONNECTION_STRING: str = os.environ.get(
-    "NEON_CONNECTION_STRING",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
-    "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/"
-    "neondb?sslmode=require"
-)
+# Database configuration from environment - fail fast if not set
+NEON_ENDPOINT: str = os.environ.get("NEON_HTTP_ENDPOINT", "")
+NEON_CONNECTION_STRING: str = os.environ.get("NEON_CONNECTION_STRING", "")
 
 HIGH_PRIORITY_QUEUE_THRESHOLD: int = 10
 DATABASE_TIMEOUT_SECONDS: int = 30
@@ -51,6 +44,31 @@ _slack_module_checked: bool = False
 # DATABASE UTILITIES
 # =============================================================================
 
+def _get_neon_config() -> Tuple[str, str]:
+    """
+    Get Neon database configuration with fail-fast behavior.
+    
+    Returns:
+        Tuple of (endpoint, connection_string)
+        
+    Raises:
+        RuntimeError: If required environment variables are not set
+    """
+    endpoint = NEON_ENDPOINT or os.environ.get(
+        "NEON_HTTP_ENDPOINT",
+        "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+    )
+    conn_string = NEON_CONNECTION_STRING or os.environ.get("NEON_CONNECTION_STRING", "")
+    
+    if not conn_string:
+        raise RuntimeError(
+            "NEON_CONNECTION_STRING environment variable is not set. "
+            "Database operations require this configuration."
+        )
+    
+    return endpoint, conn_string
+
+
 def _query(sql: str) -> Dict[str, Any]:
     """
     Execute SQL query via HTTP.
@@ -62,15 +80,18 @@ def _query(sql: str) -> Dict[str, Any]:
         Query result dictionary
         
     Raises:
+        RuntimeError: If database configuration is missing
         Exception: If database connection fails
     """
+    endpoint, conn_string = _get_neon_config()
+    
     headers = {
         "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
+        "Neon-Connection-String": conn_string
     }
     data = json.dumps({"query": sql}).encode("utf-8")
     req = urllib.request.Request(
-        NEON_ENDPOINT, 
+        endpoint, 
         data=data, 
         headers=headers, 
         method="POST"
@@ -78,6 +99,51 @@ def _query(sql: str) -> Dict[str, Any]:
     
     with urllib.request.urlopen(req, timeout=DATABASE_TIMEOUT_SECONDS) as response:
         return json.loads(response.read().decode("utf-8"))
+
+
+# =============================================================================
+# ERROR SANITIZATION
+# =============================================================================
+
+def _sanitize_error_message(error_message: str) -> str:
+    """
+    Sanitize error messages to remove sensitive information.
+    
+    Args:
+        error_message: Raw error message
+        
+    Returns:
+        Sanitized error message safe for logging/alerting
+    """
+    if not error_message:
+        return ""
+    
+    sanitized = error_message
+    
+    # Redact patterns that look like connection strings
+    # Pattern for postgresql:// URLs
+    sanitized = re.sub(
+        r'postgresql://[^@\s]+@[^\s]+',
+        'postgresql://[REDACTED]',
+        sanitized
+    )
+    
+    # Pattern for password-like strings
+    sanitized = re.sub(
+        r'(password|pwd|passwd|secret|token|key|apikey|api_key)[\s]*[=:]\s*[^\s,;]+',
+        r'\1=[REDACTED]',
+        sanitized,
+        flags=re.IGNORECASE
+    )
+    
+    # Redact anything that looks like a credential in a URL
+    sanitized = re.sub(
+        r'://[^:]+:[^@]+@',
+        '://[REDACTED]@',
+        sanitized
+    )
+    
+    return sanitized[:500]  # Truncate long errors
 
 
 # =============================================================================
@@ -140,7 +206,7 @@ def _send_critical_alert(
             details=details
         )
     except Exception as e:
-        logger.error("Failed to send Slack alert: %s", e)
+        logger.error("Failed to send Slack alert: %s", _sanitize_error_message(str(e)))
         return False
 
 
@@ -183,7 +249,7 @@ def alert_worker_failure(
     }
     
     if failure_reason:
-        details["Failure Reason"] = failure_reason
+        details["Failure Reason"] = _sanitize_error_message(failure_reason)
     
     return _send_critical_alert(
         title="Worker Failure Detected",
@@ -195,7 +261,7 @@ def alert_worker_failure(
 
 def check_and_alert_worker_failures(
     heartbeat_threshold_seconds: int = 120
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], int]:
     """
     Check for worker failures and send alerts for each.
     
@@ -205,9 +271,10 @@ def check_and_alert_worker_failures(
         heartbeat_threshold_seconds: Seconds since last heartbeat to consider failed
         
     Returns:
-        List of failed workers that were alerted
+        Tuple of (list of failed workers, number of alerts actually sent)
     """
     alerted_workers: List[Dict[str, Any]] = []
+    alerts_sent: int = 0
     
     try:
         # Query for workers with consecutive failures or missed heartbeats
@@ -231,19 +298,22 @@ def check_and_alert_worker_failures(
             worker_name = worker.get("name")
             consecutive_failures = worker.get("consecutive_failures", 0)
             
-            # Send alert
+            # Send alert and track actual success
             if alert_worker_failure(
                 worker_id=worker_id,
                 worker_name=worker_name,
                 consecutive_failures=consecutive_failures
             ):
                 alerted_workers.append(worker)
+                alerts_sent += 1
         
     except Exception as e:
-        logger.error("Failed to check worker failures: %s", e)
-        alert_database_failure("check_worker_failures", str(e))
+        safe_error = _sanitize_error_message(str(e))
+        logger.error("Failed to check worker failures: %s", safe_error)
+        if alert_database_failure("check_worker_failures", str(e)):
+            alerts_sent += 1
     
-    return alerted_workers
+    return alerted_workers, alerts_sent
 
 
 # =============================================================================
@@ -394,7 +464,7 @@ def alert_task_queue_backup(
 
 def check_and_alert_task_queue_backup(
     threshold: int = HIGH_PRIORITY_QUEUE_THRESHOLD
-) -> Optional[Dict[str, int]]:
+) -> Tuple[Optional[Dict[str, int]], bool]:
     """
     Check task queue status and alert if backup detected.
     
@@ -404,7 +474,7 @@ def check_and_alert_task_queue_backup(
         threshold: Number of high-priority tasks to trigger alert
         
     Returns:
-        Queue status dict if backup detected, None otherwise
+        Tuple of (queue status dict if backup detected, alert_sent boolean)
     """
     try:
         queue_sql = """
@@ -418,7 +488,7 @@ def check_and_alert_task_queue_backup(
         result = _query(queue_sql)
         
         if not result.get("rows"):
-            return None
+            return None, False
         
         row = result["rows"][0]
         total_pending = int(row.get("total_pending", 0))
@@ -427,7 +497,7 @@ def check_and_alert_task_queue_backup(
         
         # Alert if high priority tasks exceed threshold
         if high_pending >= threshold or critical_pending > 0:
-            alert_task_queue_backup(
+            alert_sent = alert_task_queue_backup(
                 pending_count=total_pending,
                 high_priority_count=high_pending,
                 critical_count=critical_pending
@@ -436,51 +506,20 @@ def check_and_alert_task_queue_backup(
                 "total_pending": total_pending,
                 "high_pending": high_pending,
                 "critical_pending": critical_pending
-            }
+            }, alert_sent
         
-        return None
+        return None, False
         
     except Exception as e:
-        logger.error("Failed to check task queue: %s", e)
-        alert_database_failure("check_task_queue", str(e))
-        return None
+        safe_error = _sanitize_error_message(str(e))
+        logger.error("Failed to check task queue: %s", safe_error)
+        alert_sent = alert_database_failure("check_task_queue", str(e))
+        return None, alert_sent
 
 
 # =============================================================================
 # ALERT: DATABASE CONNECTION FAILURES
 # =============================================================================
-
-def _sanitize_error_message(error_message: str) -> str:
-    """
-    Sanitize error messages to remove sensitive information.
-    
-    Args:
-        error_message: Raw error message
-        
-    Returns:
-        Sanitized error message safe for logging/alerting
-    """
-    # Remove potential connection strings and credentials
-    sanitized = error_message
-    
-    # Redact patterns that look like connection strings
-    import re
-    # Pattern for postgresql:// URLs
-    sanitized = re.sub(
-        r'postgresql://[^@]+@[^\s]+',
-        'postgresql://[REDACTED]',
-        sanitized
-    )
-    # Pattern for password-like strings
-    sanitized = re.sub(
-        r'(password|pwd|passwd|secret|token|key)[\s]*[=:]\s*[^\s]+',
-        r'\1=[REDACTED]',
-        sanitized,
-        flags=re.IGNORECASE
-    )
-    
-    return sanitized[:500]  # Truncate long errors
-
 
 def alert_database_failure(
     operation: str,
@@ -500,14 +539,14 @@ def alert_database_failure(
     Returns:
         True if alert sent successfully
     """
+    # Sanitize error BEFORE logging to prevent credential leaks
+    safe_error = _sanitize_error_message(error_message)
+    
     logger.error(
         "Database connection failure during %s: %s",
         operation,
-        error_message
+        safe_error
     )
-    
-    # Sanitize error message before including in alert
-    safe_error = _sanitize_error_message(error_message)
     
     details = {
         "Operation": operation,
@@ -524,24 +563,25 @@ def alert_database_failure(
     )
 
 
-def check_database_connectivity() -> bool:
+def check_database_connectivity() -> Tuple[bool, bool]:
     """
     Check database connectivity and alert on failure.
     
     Returns:
-        True if database is accessible, False otherwise
+        Tuple of (is_healthy, alert_sent)
     """
     try:
         result = _query("SELECT 1 as health_check")
         rows = result.get("rows", [])
         if not rows:
-            return False
+            return False, False
         # Handle both integer and string return values
         health_value = rows[0].get("health_check")
-        return str(health_value) == "1" or health_value == 1
+        is_healthy = str(health_value) == "1" or health_value == 1
+        return is_healthy, False
     except Exception as e:
-        alert_database_failure("health_check", str(e))
-        return False
+        alert_sent = alert_database_failure("health_check", str(e))
+        return False, alert_sent
 
 
 # =============================================================================
@@ -558,7 +598,7 @@ def run_critical_alerts_check() -> Dict[str, Any]:
     Returns:
         Summary of alerts triggered
     """
-    summary = {
+    summary: Dict[str, Any] = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "database_healthy": False,
         "worker_failures": [],
@@ -567,20 +607,24 @@ def run_critical_alerts_check() -> Dict[str, Any]:
     }
     
     # Check database connectivity first
-    summary["database_healthy"] = check_database_connectivity()
-    if not summary["database_healthy"]:
+    db_healthy, db_alert_sent = check_database_connectivity()
+    summary["database_healthy"] = db_healthy
+    if db_alert_sent:
         summary["alerts_sent"] += 1
+    
+    if not db_healthy:
         return summary  # Skip other checks if database is down
     
     # Check worker failures
-    failed_workers = check_and_alert_worker_failures()
+    failed_workers, worker_alerts_sent = check_and_alert_worker_failures()
     summary["worker_failures"] = [w.get("worker_id") for w in failed_workers]
-    summary["alerts_sent"] += len(failed_workers)
+    summary["alerts_sent"] += worker_alerts_sent
     
     # Check task queue backup
-    queue_status = check_and_alert_task_queue_backup()
+    queue_status, queue_alert_sent = check_and_alert_task_queue_backup()
     if queue_status:
         summary["queue_backup"] = queue_status
+    if queue_alert_sent:
         summary["alerts_sent"] += 1
     
     logger.info(
@@ -600,7 +644,7 @@ def integrate_with_experiments(
     budget_spent: float,
     budget_limit: float,
     experiment_name: Optional[str] = None
-) -> None:
+) -> bool:
     """
     Integration point for experiments.py to call budget alerts.
     
@@ -611,27 +655,32 @@ def integrate_with_experiments(
         budget_spent: Current total spent
         budget_limit: Maximum budget
         experiment_name: Optional experiment name
+        
+    Returns:
+        True if alert was sent successfully
     """
     if budget_limit <= 0:
-        return
+        return False
     
     usage_pct = budget_spent / budget_limit
     
     if usage_pct >= 1.0:
-        alert_experiment_budget_exceeded(
+        return alert_experiment_budget_exceeded(
             experiment_id=experiment_id,
             experiment_name=experiment_name,
             budget_spent=budget_spent,
             budget_limit=budget_limit
         )
     elif usage_pct >= BUDGET_WARNING_THRESHOLD:
-        alert_experiment_budget_warning(
+        return alert_experiment_budget_warning(
             experiment_id=experiment_id,
             experiment_name=experiment_name,
             budget_spent=budget_spent,
             budget_limit=budget_limit,
             threshold_pct=BUDGET_WARNING_THRESHOLD * 100
         )
+    
+    return False
 
 
 def integrate_with_orchestration(failed_agents: List[Dict[str, Any]]) -> int:
@@ -644,7 +693,7 @@ def integrate_with_orchestration(failed_agents: List[Dict[str, Any]]) -> int:
         failed_agents: List of failed agent records from detect_agent_failures()
         
     Returns:
-        Number of alerts sent
+        Number of alerts actually sent successfully
     """
     alerts_sent = 0
     
