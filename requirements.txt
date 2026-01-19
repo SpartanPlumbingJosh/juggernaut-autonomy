@@ -10,7 +10,9 @@
 # - threading for background tasks
 # - datetime, time, os, sys for basics
 
-# If you need additional capabilities, uncomment:
+# Required for core/experiments.py
+httpx==0.27.0
+
+# Optional (uncomment if needed):
 # psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)
-# httpx==0.27.0           # Better HTTP client (optional)
 # schedule==1.2.1         # Cron scheduling (optional)
