@@ -637,15 +637,19 @@ def check_approval_status(task: Task) -> Tuple[bool, Optional[str], Optional[str
     """
     Check approval status for a task (read-only, no side effects).
     
+    Args:
+        task: Task object to check approval for
+    
     Returns:
-        (requires_approval, approval_id_or_none, status)
-        - status can be: "approved", "denied", "pending", "none"
+        Tuple of (requires_approval, approval_id_or_none, decision_status)
+        - decision_status values: "approved", "auto_approved", "rejected", 
+          "auto_rejected", "pending", "escalated", "timeout", "none", "error"
     """
     if not task.requires_approval:
         return False, None, "not_required"
     
     sql = f"""
-        SELECT id, status, approved_by, approved_at
+        SELECT id, decision, decided_by, decided_at
         FROM approvals
         WHERE task_id = {escape_value(task.id)}
         ORDER BY created_at DESC
@@ -658,8 +662,9 @@ def check_approval_status(task: Task) -> Tuple[bool, Optional[str], Optional[str
             return True, None, "none"
         
         approval = rows[0]
-        return True, approval["id"], approval["status"]
-    except Exception:
+        return True, approval["id"], approval["decision"]
+    except Exception as e:
+        log_error(f"Failed to check approval status: {e}")
         return True, None, "error"
 
 
@@ -667,32 +672,161 @@ def ensure_approval_request(task: Task) -> bool:
     """
     Ensure an approval request exists for a task. Creates one if needed.
     
-    Returns:
-        True if approval request was created, False if already existed
-    """
-    requires, approval_id, status = check_approval_status(task)
+    Args:
+        task: Task object that requires approval
     
-    if not requires or status != "none":
+    Returns:
+        True if approval request was created, False if already existed or error
+    """
+    requires, approval_id, decision = check_approval_status(task)
+    
+    if not requires or decision != "none":
         return False
     
-    # Create approval request
-    now = datetime.now(timezone.utc).isoformat()
+    # Create approval request with correct schema columns
+    action_data = {
+        "task_type": task.task_type,
+        "title": task.title,
+        "priority": task.priority,
+        "description": task.description[:500] if task.description else ""
+    }
+    
+    action_description = f"Task execution: {task.title} (type: {task.task_type}, priority: {task.priority})"
+    
     sql = f"""
         INSERT INTO approvals (
-            task_id, requested_by, request_type, request_data, status, created_at
+            task_id, worker_id, action_type, action_description, 
+            action_data, risk_level, estimated_impact
         ) VALUES (
-            {escape_value(task.id)}, {escape_value(WORKER_ID)}, 'task_execution',
-            {escape_value({"task_type": task.task_type, "title": task.title, "priority": task.priority})},
-            'pending', {escape_value(now)}
+            {escape_value(task.id)}, 
+            {escape_value(WORKER_ID)}, 
+            'task_execution',
+            {escape_value(action_description)},
+            {escape_value(action_data)},
+            'medium',
+            {escape_value(f"Execution of {task.task_type} task")}
         )
     """
     try:
         execute_sql(sql)
-        log_action("approval.requested", f"Approval requested for task: {task.title}", task_id=task.id)
+        log_action(
+            "approval.requested", 
+            f"Approval requested for task: {task.title}", 
+            task_id=task.id,
+            output_data={"action_type": "task_execution", "risk_level": "medium"}
+        )
         return True
     except Exception as e:
-        log_error(f"Failed to create approval request: {e}")
+        log_error(f"Failed to create approval request: {e}", {"task_id": task.id})
         return False
+
+
+def poll_approved_tasks(limit: int = 5) -> List[Task]:
+    """
+    Find tasks that are waiting for approval and have been approved.
+    
+    This function enables the approval resume flow:
+    1. Task requires approval -> status set to waiting_approval
+    2. Human approves via DB or UI -> approvals.decision = 'approved'
+    3. This function finds those tasks so they can resume execution
+    
+    Args:
+        limit: Maximum number of approved tasks to return
+    
+    Returns:
+        List of Task objects that have been approved and can resume execution
+    """
+    sql = f"""
+        SELECT DISTINCT ON (t.id)
+            t.id, t.task_type, t.title, t.description, 
+            CASE t.priority 
+                WHEN 'critical' THEN 1 
+                WHEN 'high' THEN 2 
+                WHEN 'medium' THEN 3 
+                WHEN 'low' THEN 4 
+                ELSE 5 
+            END as priority_num,
+            t.status, t.payload, t.assigned_worker, t.created_at, t.requires_approval,
+            a.decision, a.decided_by, a.decided_at
+        FROM governance_tasks t
+        INNER JOIN approvals a ON a.task_id = t.id
+        WHERE t.status = 'waiting_approval'
+          AND a.decision IN ('approved', 'auto_approved')
+        ORDER BY t.id, a.decided_at DESC
+        LIMIT {limit}
+    """
+    
+    try:
+        result = execute_sql(sql)
+        rows = result.get("rows", [])
+        
+        tasks = []
+        for row in rows:
+            payload = row.get("payload", {})
+            if isinstance(payload, str):
+                try:
+                    payload = json.loads(payload)
+                except (json.JSONDecodeError, TypeError):
+                    payload = {}
+            
+            task = Task(
+                id=row["id"],
+                task_type=row.get("task_type", ""),
+                title=row.get("title", ""),
+                description=row.get("description", ""),
+                priority=int(row.get("priority_num", 3)),
+                status=row.get("status", ""),
+                payload=payload,
+                assigned_to=row.get("assigned_worker"),
+                created_at=row.get("created_at", ""),
+                requires_approval=row.get("requires_approval", False)
+            )
+            tasks.append(task)
+            
+            log_action(
+                "approval.found_approved",
+                f"Task '{task.title}' approved by {row.get('decided_by', 'unknown')}",
+                task_id=task.id,
+                output_data={
+                    "decision": row.get("decision"),
+                    "decided_by": row.get("decided_by"),
+                    "decided_at": row.get("decided_at")
+                }
+            )
+        
+        return tasks
+    except Exception as e:
+        log_error(f"Failed to poll approved tasks: {e}")
+        return []
+
+
+def resume_approved_task(task: Task) -> Tuple[bool, Dict[str, Any]]:
+    """
+    Resume execution of a task that was waiting for approval and has been approved.
+    
+    This updates the task status from waiting_approval to in_progress
+    and then executes the task.
+    
+    Args:
+        task: Approved task to resume
+    
+    Returns:
+        Tuple of (success, result_dict)
+    """
+    log_action(
+        "approval.resuming",
+        f"Resuming approved task: {task.title}",
+        task_id=task.id
+    )
+    
+    # Mark the task as no longer requiring approval for this execution
+    task.requires_approval = False
+    
+    # Update status to in_progress
+    update_task_status(task.id, "in_progress", {"approval_resumed": True})
+    
+    # Execute the task
+    return execute_task(task)
 
 
 # ============================================================
@@ -1328,6 +1462,28 @@ def autonomy_loop():
         loop_start = time.time()
         
         try:
+            # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
+            approved_tasks = poll_approved_tasks(limit=3)
+            if approved_tasks:
+                for approved_task in approved_tasks:
+                    # Resume execution of approved task
+                    success, result = resume_approved_task(approved_task)
+                    if success:
+                        log_action(
+                            "approval.completed",
+                            f"Approved task executed successfully: {approved_task.title}",
+                            task_id=approved_task.id
+                        )
+                        break  # Execute one approved task per loop
+                    else:
+                        log_action(
+                            "approval.failed",
+                            f"Approved task execution failed: {approved_task.title}",
+                            level="error",
+                            task_id=approved_task.id,
+                            error_data=result
+                        )
+            
             # 1. Check for pending tasks
             tasks = get_pending_tasks(limit=5)
             
