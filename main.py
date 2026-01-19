@@ -83,6 +83,7 @@ try:
         discover_agents,
         orchestrator_assign_task,
         log_coordination_event,
+        check_escalation_timeouts,
     )
     ORCHESTRATION_AVAILABLE = True
 except ImportError as e:
@@ -91,6 +92,7 @@ except ImportError as e:
     def discover_agents(*args, **kwargs): return []
     def orchestrator_assign_task(*args, **kwargs): return {"success": False, "error": "orchestration not available"}
     def log_coordination_event(*args, **kwargs): return None
+    def check_escalation_timeouts(*args, **kwargs): return []
 
 
 # Phase 5: Proactive Systems - Opportunity Scanner (wired up by HIGH-05)
@@ -1786,6 +1788,49 @@ def autonomy_loop():
                     f"Failed to reset stale tasks: {stale_err}",
                     level="error"
                 )
+
+        # L5-WIRE-04: Check escalation timeouts each loop
+        if ORCHESTRATION_AVAILABLE:
+            try:
+                escalated = check_escalation_timeouts()
+                if escalated:
+                    log_action(
+                        "escalation.timeout_check",
+                        f"Auto-escalated {len(escalated)} timed-out escalations",
+                        output_data={"escalated_ids": escalated}
+                    )
+            except Exception as esc_err:
+                log_error(f"Escalation timeout check failed: {esc_err}")
+
+        # L5-WIRE-04: Create escalations for stuck tasks (in_progress > 30 min)
+        try:
+            stuck_threshold_minutes = 30
+            stuck_sql = f"""
+            SELECT id, title, task_type 
+            FROM governance_tasks 
+            WHERE status = 'in_progress' 
+              AND started_at < NOW() - INTERVAL '{stuck_threshold_minutes} minutes'
+              AND id NOT IN (
+                  SELECT DISTINCT CAST(context->>'task_id' AS UUID)
+                  FROM escalations 
+                  WHERE context->>'task_id' IS NOT NULL 
+                  AND status = 'open'
+              )
+            LIMIT 5
+            """
+            stuck_result = execute_sql(stuck_sql)
+            for stuck_task in stuck_result.get("rows", []):
+                create_escalation(
+                    stuck_task["id"],
+                    f"Task stuck in_progress for >{stuck_threshold_minutes} minutes: {stuck_task.get('title', 'Unknown')}"
+                )
+                log_action(
+                    "escalation.stuck_task",
+                    f"Created escalation for stuck task: {stuck_task.get('title', 'Unknown')}",
+                    task_id=stuck_task["id"]
+                )
+        except Exception as stuck_err:
+            log_error(f"Stuck task escalation check failed: {stuck_err}")
 
         try:
             # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
