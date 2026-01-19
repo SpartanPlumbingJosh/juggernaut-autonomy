@@ -84,6 +84,20 @@ except ImportError as e:
 
 
 
+
+
+# BRAIN-03: Brain API for AI consultation
+BRAIN_API_AVAILABLE = False
+_brain_api_import_error = None
+
+try:
+    from api.brain_api import handle_brain_request, BRAIN_AVAILABLE
+    BRAIN_API_AVAILABLE = BRAIN_AVAILABLE
+except ImportError as e:
+    _brain_api_import_error = str(e)
+    def handle_brain_request(*args, **kwargs): 
+        return {"status": 503, "body": {"success": False, "error": "brain api not available"}}
+
 # Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
 ORCHESTRATION_AVAILABLE = False
 _orchestration_import_error = None
@@ -2401,7 +2415,10 @@ class HealthHandler(BaseHTTPRequestHandler):
                     "/api/dashboard/revenue",
                     "/api/dashboard/workers",
                     "/api/dashboard/experiments",
-                    "/api/dashboard/tasks"
+                    "/api/dashboard/tasks",
+                    "/api/brain/consult",
+                    "/api/brain/history",
+                    "/api/brain/clear"
                 ]
             }).encode())
         
@@ -2426,6 +2443,17 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(result, default=str).encode())
+        
+        # Brain API endpoints (GET)
+        elif path.startswith("/api/brain/"):
+            endpoint = path.replace("/api/brain/", "")
+            result = handle_brain_request("GET", endpoint, params)
+            
+            self.send_response(result.get("status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
         
         else:
             self.send_response(404)
@@ -2477,6 +2505,61 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
+        
+        # Brain API endpoints (POST)
+        elif path.startswith("/api/brain/"):
+            endpoint = path.replace("/api/brain/", "")
+            
+            # Parse query params
+            query_string = self.path.split('?')[1] if '?' in self.path else ''
+            params = {}
+            if query_string:
+                import urllib.parse
+                for param in query_string.split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        params[key] = urllib.parse.unquote(value)
+            
+            result = handle_brain_request("POST", endpoint, params, body)
+            
+            self.send_response(result.get("status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
+        
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
+
+
+    def do_DELETE(self):
+        """Handle DELETE requests."""
+        path = self.path.split('?')[0]
+        
+        # Parse query params
+        query_string = self.path.split('?')[1] if '?' in self.path else ''
+        params = {}
+        if query_string:
+            import urllib.parse
+            for param in query_string.split('&'):
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    params[key] = urllib.parse.unquote(value)
+        
+        # Brain API DELETE endpoints
+        if path.startswith("/api/brain/"):
+            endpoint = path.replace("/api/brain/", "")
+            result = handle_brain_request("DELETE", endpoint, params)
+            
+            self.send_response(result.get("status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
         
         else:
             self.send_response(404)
