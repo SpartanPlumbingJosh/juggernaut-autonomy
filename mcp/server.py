@@ -1,5 +1,5 @@
 """
-JUGGERNAUT MCP Server - Using official MCP library (v4)
+JUGGERNAUT MCP Server - Using official MCP library (v5)
 
 SSE-based Model Context Protocol server for Claude.ai integration.
 """
@@ -220,10 +220,21 @@ sse_transport = SseServerTransport("/messages")
 
 
 def check_auth(scope) -> bool:
-    """Check token from query string."""
+    """Check token from query string or Authorization header."""
+    # Check query string
     query_string = scope.get("query_string", b"").decode()
     params = dict(p.split("=", 1) for p in query_string.split("&") if "=" in p)
-    return params.get("token") == MCP_AUTH_TOKEN
+    if params.get("token") == MCP_AUTH_TOKEN:
+        return True
+    
+    # Check Authorization header
+    headers = dict(scope.get("headers", []))
+    auth_header = headers.get(b"authorization", b"").decode()
+    if auth_header.startswith("Bearer "):
+        if auth_header[7:] == MCP_AUTH_TOKEN:
+            return True
+    
+    return False
 
 
 async def send_json_response(send, status: int, body: dict):
@@ -268,6 +279,8 @@ async def app(scope, receive, send):
     path = scope["path"]
     method = scope["method"]
     
+    logger.info(f"Request: {method} {path}")
+    
     # CORS preflight
     if method == "OPTIONS":
         await send_cors_preflight(send)
@@ -281,9 +294,11 @@ async def app(scope, receive, send):
     # SSE endpoint
     if path == "/mcp/sse" and method == "GET":
         if not check_auth(scope):
+            logger.warning("Unauthorized SSE request")
             await send_json_response(send, 401, {"error": "Unauthorized"})
             return
         
+        logger.info("Starting SSE connection")
         async with sse_transport.connect_sse(scope, receive, send) as streams:
             await mcp.run(
                 streams[0],
@@ -292,13 +307,10 @@ async def app(scope, receive, send):
             )
         return
     
-    # Messages endpoint (POST)
+    # Messages endpoint (POST) - NO AUTH REQUIRED (session_id is the auth)
+    # The MCP protocol uses session_id for correlation, which is unguessable
     if path == "/messages" and method == "POST":
-        # Token is in query params from the endpoint URL sent to client
-        if not check_auth(scope):
-            await send_json_response(send, 401, {"error": "Unauthorized"})
-            return
-        
+        logger.info("Handling message POST")
         await sse_transport.handle_post_message(scope, receive, send)
         return
     
