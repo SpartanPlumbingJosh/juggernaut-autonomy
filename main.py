@@ -93,6 +93,64 @@ except ImportError as e:
     def log_coordination_event(*args, **kwargs): return None
 
 
+# Phase 5: Proactive Systems - Opportunity Scanner (wired up by HIGH-05)
+PROACTIVE_AVAILABLE = False
+_proactive_import_error = None
+
+try:
+    from core.proactive import (
+        start_scan,
+        complete_scan,
+        fail_scan,
+        get_scan_history,
+        identify_opportunity,
+        score_opportunity,
+    )
+    from core.opportunity_scan_handler import handle_opportunity_scan
+    PROACTIVE_AVAILABLE = True
+except ImportError as e:
+    _proactive_import_error = str(e)
+    # Stub functions for graceful degradation
+    def start_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def complete_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def fail_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def get_scan_history(*args, **kwargs): return []
+    def identify_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def score_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    def handle_opportunity_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+
+
+# Phase 2.5: Error Recovery System (MED-01)
+ERROR_RECOVERY_AVAILABLE = False
+_error_recovery_import_error = None
+
+try:
+    from core.error_recovery import (
+        move_to_dead_letter,
+        get_dead_letter_items,
+        resolve_dead_letter,
+        retry_dead_letter,
+        create_alert,
+        get_open_alerts,
+        acknowledge_alert,
+        resolve_alert,
+        check_repeated_failures,
+    )
+    ERROR_RECOVERY_AVAILABLE = True
+except ImportError as e:
+    _error_recovery_import_error = str(e)
+    # Stub functions for graceful degradation
+    def move_to_dead_letter(*args, **kwargs): return None
+    def get_dead_letter_items(*args, **kwargs): return []
+    def resolve_dead_letter(*args, **kwargs): return False
+    def retry_dead_letter(*args, **kwargs): return None
+    def create_alert(*args, **kwargs): return None
+    def get_open_alerts(*args, **kwargs): return []
+    def acknowledge_alert(*args, **kwargs): return False
+    def resolve_alert(*args, **kwargs): return False
+    def check_repeated_failures(*args, **kwargs): return False
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -115,6 +173,7 @@ PORT = int(os.getenv("PORT", "8000"))
 # Retry configuration
 RETRY_BASE_DELAY_SECONDS = 60  # 1 minute base delay
 RETRY_MAX_DELAY_SECONDS = 3600  # 1 hour max delay
+MAX_RETRY_ATTEMPTS = 3  # Maximum retries before sending to dead letter queue
 
 # Sensitive keys to redact from logs
 SENSITIVE_KEYS = frozenset([
@@ -856,7 +915,7 @@ def schedule_task_retry(task_id: str, retry_count: int, error: str):
         execute_sql(sql)
         log_action(
             "task.retry_scheduled", 
-            f"Task will retry in {delay_seconds}s ({retry_count + 1}/3)",
+            f"Task will retry in {delay_seconds}s ({retry_count + 1}/{MAX_RETRY_ATTEMPTS})",
             level="warn", 
             task_id=task_id,
             output_data={"retry_count": retry_count + 1, "next_retry_at": next_retry_at, "delay_seconds": delay_seconds}
@@ -865,23 +924,66 @@ def schedule_task_retry(task_id: str, retry_count: int, error: str):
         log_error(f"Failed to schedule retry: {e}")
 
 
-def send_to_dlq(task_id: str, error: str, attempts: int):
-    """Send failed task to dead letter queue."""
-    now = datetime.now(timezone.utc).isoformat()
-    sql = f"""
-        INSERT INTO dead_letter_queue (
-            task_id, error_message, attempts, worker_id, created_at
-        ) VALUES (
-            {escape_value(task_id)}, {escape_value(error)}, {attempts}, {escape_value(WORKER_ID)},
-            {escape_value(now)}
-        )
+def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
     """
-    try:
-        execute_sql(sql)
-        log_action("dlq.added", f"Task {task_id} sent to DLQ after {attempts} attempts", 
-                   task_id=task_id, error_data={"error": error, "attempts": attempts})
-    except Exception as e:
-        log_error(f"Failed to send to DLQ: {e}")
+    Send failed task to dead letter queue.
+    
+    Uses the error_recovery module's move_to_dead_letter function for richer
+    functionality including task snapshots. Falls back to direct insert if
+    error_recovery module is unavailable.
+    
+    Args:
+        task_id: ID of the failed task
+        error: Error message describing the failure
+        attempts: Number of retry attempts made
+        
+    Returns:
+        DLQ entry ID if successful, None otherwise
+    """
+    if ERROR_RECOVERY_AVAILABLE:
+        # Use error_recovery module for richer DLQ handling
+        dlq_id = move_to_dead_letter(
+            task_id=task_id,
+            reason="max_retries_exceeded",
+            final_error=error,
+            metadata={"attempts": attempts, "worker_id": WORKER_ID}
+        )
+        if dlq_id:
+            log_action("dlq.added", f"Task {task_id} sent to DLQ after {attempts} attempts", 
+                       task_id=task_id, error_data={"error": error, "attempts": attempts, "dlq_id": dlq_id})
+            # Create system alert for visibility
+            create_alert(
+                alert_type="task_failure",
+                severity="error",
+                title=f"Task permanently failed: {task_id}",
+                message=f"Task failed after {attempts} retries: {error}",
+                source=WORKER_ID,
+                related_id=task_id,
+                metadata={"dlq_id": dlq_id, "attempts": attempts}
+            )
+            return dlq_id
+        else:
+            log_error(f"Failed to move task {task_id} to DLQ via error_recovery module")
+            return None
+    else:
+        # Fallback: direct insert if error_recovery module unavailable
+        now = datetime.now(timezone.utc).isoformat()
+        sql = f"""
+            INSERT INTO dead_letter_queue (
+                task_id, error_message, attempts, worker_id, created_at
+            ) VALUES (
+                {escape_value(task_id)}, {escape_value(error)}, {attempts}, {escape_value(WORKER_ID)},
+                {escape_value(now)}
+            )
+        """
+        try:
+            execute_sql(sql)
+            log_action("dlq.added", f"Task {task_id} sent to DLQ after {attempts} attempts (fallback)", 
+                       task_id=task_id, error_data={"error": error, "attempts": attempts})
+            return task_id  # Return task_id as pseudo-DLQ id in fallback mode
+        except Exception as e:
+            log_error(f"Failed to send to DLQ: {e}")
+            return None
 
 
 def create_escalation(task_id: str, issue: str, level: str = "medium"):
@@ -1210,7 +1312,33 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             task_succeeded = not workflow_failed
             
         elif task.task_type == "opportunity_scan":
-            result = {"scanned": True, "source": task.payload.get("source")}
+            # Phase 5: Call the proactive opportunity scan handler
+            if PROACTIVE_AVAILABLE:
+                scan_result = handle_opportunity_scan(
+                    task.payload if hasattr(task, 'payload') else {"config": {}},
+                    execute_sql,
+                    log_action
+                )
+                result = scan_result
+                task_succeeded = scan_result.get("success", False)
+                if task_succeeded:
+                    log_action(
+                        "opportunity_scan.complete",
+                        f"Scan completed: found={scan_result.get('opportunities_found', 0)}, qualified={scan_result.get('opportunities_qualified', 0)}",
+                        task_id=task.id,
+                        output_data={
+                            "scan_id": scan_result.get("scan_id"),
+                            "sources_scanned": scan_result.get("sources_scanned", 0),
+                            "opportunities_found": scan_result.get("opportunities_found", 0),
+                            "opportunities_qualified": scan_result.get("opportunities_qualified", 0),
+                            "tasks_created": scan_result.get("tasks_created", 0)
+                        }
+                    )
+            else:
+                result = {"error": "Proactive module not available", "import_error": _proactive_import_error}
+                task_succeeded = False
+                log_action("opportunity_scan.unavailable", "Proactive module not available",
+                          level="warn", task_id=task.id, error_data=result)
             
         elif task.task_type == "health_check":
             result = {"healthy": True, "component": task.payload.get("component")}
@@ -1400,7 +1528,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         except (ValueError, TypeError):
             retries = 0
         
-        if retries < 3:
+        if retries < MAX_RETRY_ATTEMPTS:
             # Schedule retry with exponential backoff
             schedule_task_retry(task.id, retries, error_str)
         else:
@@ -1439,6 +1567,18 @@ def autonomy_loop():
         log_info("Experiments framework available", {"status": "enabled"})
     elif _experiments_import_error:
         log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn")
+    
+    # Log proactive framework status (HIGH-05)
+    if PROACTIVE_AVAILABLE:
+        log_info("Proactive opportunity scanner available", {"status": "enabled"})
+    elif _proactive_import_error:
+        log_action("proactive.unavailable", f"Proactive systems disabled: {_proactive_import_error}", level="warn")
+    
+    # Log error recovery framework status (MED-01)
+    if ERROR_RECOVERY_AVAILABLE:
+        log_info("Error recovery module available", {"status": "enabled"})
+    elif _error_recovery_import_error:
+        log_action("error_recovery.unavailable", f"Error recovery module disabled: {_error_recovery_import_error}", level="warn")
     
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
@@ -1549,9 +1689,56 @@ def autonomy_loop():
                 scheduled = get_due_scheduled_tasks()
                 if scheduled:
                     sched_task = scheduled[0]
+                    sched_task_type = sched_task.get('task_type', 'unknown')
                     log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
-                                 "No pending tasks, running scheduled task")
-                    # Mark as run
+                                 f"No pending tasks, running scheduled task (type: {sched_task_type})")
+                    
+                    # Execute the scheduled task based on task_type
+                    sched_result = None
+                    sched_success = False
+                    
+                    try:
+                        if sched_task_type == "opportunity_scan":
+                            # Use the proactive opportunity scan handler
+                            if PROACTIVE_AVAILABLE:
+                                sched_result = handle_opportunity_scan(
+                                    sched_task,
+                                    execute_sql,
+                                    log_action
+                                )
+                                sched_success = sched_result.get("success", False)
+                            else:
+                                sched_result = {"error": "Proactive module not available"}
+                                sched_success = False
+                        elif sched_task_type == "health_check":
+                            # Simple health check - verify DB connection
+                            execute_sql("SELECT 1")
+                            sched_result = {"healthy": True, "timestamp": datetime.now(timezone.utc).isoformat()}
+                            sched_success = True
+                        else:
+                            # Unknown scheduled task type - log and continue
+                            sched_result = {"skipped": True, "reason": f"No handler for task_type: {sched_task_type}"}
+                            sched_success = True  # Don't mark as failed, just skipped
+                        
+                        # Log the result
+                        log_action(
+                            f"scheduled.{sched_task_type}.{'complete' if sched_success else 'failed'}",
+                            f"Scheduled task {sched_task['name']}: {'success' if sched_success else 'failed'}",
+                            level="info" if sched_success else "error",
+                            output_data=sched_result
+                        )
+                        
+                    except Exception as sched_error:
+                        sched_success = False
+                        sched_result = {"error": str(sched_error)}
+                        log_action(
+                            f"scheduled.{sched_task_type}.error",
+                            f"Scheduled task {sched_task['name']} failed: {str(sched_error)}",
+                            level="error",
+                            error_data={"error": str(sched_error), "traceback": traceback.format_exc()[:300]}
+                        )
+                    
+                    # Mark as run (regardless of success - prevents infinite retry loop)
                     now = datetime.now(timezone.utc).isoformat()
                     sql = f"UPDATE scheduled_tasks SET last_run_at = {escape_value(now)} WHERE id = {escape_value(sched_task['id'])}"
                     execute_sql(sql)
