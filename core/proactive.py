@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
-from .database import execute_query, log_execution
+from .database import query_db, log_execution
 
 # =============================================================================
 # SCAN MANAGEMENT
@@ -39,7 +39,7 @@ def start_scan(
     scan_id = str(uuid4())
     config = config or {}
     
-    result = execute_query(
+    result = query_db(
         """
         INSERT INTO opportunity_scans (id, scan_type, source, scan_config, triggered_by)
         VALUES ($1, $2, $3, $4, $5)
@@ -86,7 +86,7 @@ def complete_scan(
     """
     results_summary = results_summary or {}
     
-    result = execute_query(
+    result = query_db(
         """
         UPDATE opportunity_scans 
         SET status = 'completed',
@@ -133,7 +133,7 @@ def fail_scan(scan_id: str, error_message: str) -> Dict[str, Any]:
     Returns:
         Dict with failure status
     """
-    result = execute_query(
+    result = query_db(
         """
         UPDATE opportunity_scans 
         SET status = 'failed', completed_at = NOW(), error_message = $2
@@ -193,7 +193,7 @@ def get_scan_history(
     
     where_clause = " AND ".join(conditions)
     
-    result = execute_query(
+    result = query_db(
         f"""
         SELECT id, scan_type, source, status, started_at, completed_at,
                opportunities_found, opportunities_qualified, opportunities_duplicates,
@@ -248,7 +248,7 @@ def identify_opportunity(
     customer_contact = customer_contact or {}
     metadata = metadata or {}
     
-    result = execute_query(
+    result = query_db(
         """
         INSERT INTO opportunities (
             id, source_id, external_id, opportunity_type, category,
@@ -328,7 +328,7 @@ def score_opportunity(
     final_score = round(final_score, 4)
     
     # Update opportunity with score
-    result = execute_query(
+    result = query_db(
         """
         UPDATE opportunities 
         SET confidence_score = $2,
@@ -352,7 +352,7 @@ def score_opportunity(
         return {"success": False, "error": "Opportunity not found"}
     
     # Record score in history
-    execute_query(
+    query_db(
         """
         INSERT INTO opportunity_scores_history (opportunity_id, score, scoring_model, factors)
         VALUES ($1, $2, $3, $4)
@@ -393,7 +393,7 @@ def bulk_score_opportunities(
     results = {}
     for opp_id in opportunity_ids:
         # Get opportunity details
-        opp = execute_query(
+        opp = query_db(
             "SELECT * FROM opportunities WHERE id = $1",
             [opp_id]
         )
@@ -439,7 +439,7 @@ def get_top_opportunities(
     
     where_clause = " AND ".join(conditions)
     
-    result = execute_query(
+    result = query_db(
         f"""
         SELECT id, opportunity_type, category, description, 
                estimated_value, confidence_score, status, stage,
@@ -514,7 +514,7 @@ def check_duplicate(
     """
     # First check by external_id (exact match)
     if external_id:
-        result = execute_query(
+        result = query_db(
             """
             SELECT id, opportunity_type, description, status, created_at
             FROM opportunities
@@ -535,7 +535,7 @@ def check_duplicate(
         opportunity_type, category, description, external_id, customer_name
     )
     
-    result = execute_query(
+    result = query_db(
         """
         SELECT id, opportunity_type, description, status, created_at,
                metadata->>'fingerprint' as fingerprint
@@ -555,7 +555,7 @@ def check_duplicate(
     
     # Fuzzy match on description + customer (within same type/category)
     if customer_name:
-        result = execute_query(
+        result = query_db(
             """
             SELECT id, opportunity_type, description, status, customer_name, created_at,
                    similarity(description, $4) as desc_sim
@@ -705,7 +705,7 @@ def get_scheduled_scans() -> List[Dict]:
     Returns:
         List of scheduled scan tasks
     """
-    result = execute_query(
+    result = query_db(
         """
         SELECT id, name, description, cron_expression, interval_seconds,
                next_run_at, last_run_at, last_run_status, enabled, priority,
