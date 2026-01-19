@@ -180,6 +180,19 @@ except ImportError as e:
     def process_failover(*args, **kwargs): return {"failed_workers": [], "tasks_reassigned": 0}
 
 
+# CRITICAL-03c: Stale Task Cleanup (wired up by CRITICAL-03c)
+STALE_CLEANUP_AVAILABLE = False
+_stale_cleanup_import_error = None
+
+try:
+    from core.stale_cleanup import reset_stale_tasks
+    STALE_CLEANUP_AVAILABLE = True
+except ImportError as e:
+    _stale_cleanup_import_error = str(e)
+    # Stub function for graceful degradation
+    def reset_stale_tasks(*args, **kwargs): return (0, [])
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -1666,6 +1679,12 @@ def autonomy_loop():
         log_info("Failover and resilience framework available", {"status": "enabled"})
     elif _failover_import_error:
         log_action("failover.unavailable", f"Failover disabled: {_failover_import_error}", level="warn")
+
+    # Log stale cleanup framework status (CRITICAL-03c)
+    if STALE_CLEANUP_AVAILABLE:
+        log_info("Stale task cleanup available", {"status": "enabled"})
+    elif _stale_cleanup_import_error:
+        log_action("stale_cleanup.unavailable", f"Stale cleanup disabled: {_stale_cleanup_import_error}", level="warn")
     
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
@@ -1701,6 +1720,25 @@ def autonomy_loop():
                     )
             except Exception as failover_err:
                 log_error(f"Failover check failed: {failover_err}")
+
+        # CRITICAL-03c: Reset stale tasks at START of each loop cycle
+        if STALE_CLEANUP_AVAILABLE:
+            try:
+                reset_count, reset_tasks = reset_stale_tasks()
+                if reset_count > 0:
+                    log_action(
+                        "stale_cleanup.reset",
+                        f"Reset {reset_count} stale tasks back to pending",
+                        level="info",
+                        output_data={"reset_count": reset_count, "task_ids": [t.get("id") for t in reset_tasks]}
+                    )
+            except Exception as stale_err:
+                log_action(
+                    "stale_cleanup.error",
+                    f"Failed to reset stale tasks: {stale_err}",
+                    level="error"
+                )
+
         try:
             # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
             approved_tasks = poll_approved_tasks(limit=3)
