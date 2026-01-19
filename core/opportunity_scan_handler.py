@@ -1,4 +1,9 @@
-"""Opportunity Scan Handler - Handles scheduled opportunity scans."""
+"""Opportunity Scan Handler - Handles scheduled opportunity scans.
+
+This module provides the handler function for the opportunity_scan scheduled task type.
+It orchestrates scanning of configured opportunity sources and creates evaluation tasks
+for high-scoring opportunities.
+"""
 
 import json
 from datetime import datetime, timezone
@@ -6,6 +11,22 @@ from uuid import uuid4
 
 
 def handle_opportunity_scan(task, execute_sql, log_action):
+    """Handle an opportunity_scan scheduled task.
+    
+    Orchestrates the scanning of all active opportunity sources, generates
+    opportunities, saves them to the database, and creates evaluation tasks
+    for high-scoring opportunities.
+    
+    Args:
+        task: The scheduled task dict containing config parameters.
+        execute_sql: Function to execute SQL queries against the database.
+        log_action: Function to log actions and events.
+        
+    Returns:
+        dict: Results containing success status, scan_id (if successful),
+              sources_scanned, opportunities_found, opportunities_qualified,
+              and tasks_created counts. On failure, includes error message.
+    """
     config = task.get("config", {})
     if isinstance(config, str):
         config = json.loads(config)
@@ -49,6 +70,18 @@ def handle_opportunity_scan(task, execute_sql, log_action):
 
 
 def _gen_opps(source_id, source_type):
+    """Generate sample opportunities for a given source.
+    
+    This is a placeholder implementation that generates test opportunities.
+    In production, this would call real APIs for each source type.
+    
+    Args:
+        source_id: The UUID of the opportunity source.
+        source_type: The type of source (e.g., 'expired_domains', 'trending_niches').
+        
+    Returns:
+        list: List of opportunity dicts with type, cat, desc, val, confidence, and meta.
+    """
     now = datetime.now(timezone.utc).isoformat()
     opps = []
     if source_type == "expired_domains":
