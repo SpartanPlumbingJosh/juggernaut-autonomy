@@ -77,6 +77,25 @@ if CONFLICT_MANAGER_AVAILABLE:
         CONFLICT_MANAGER_AVAILABLE = False
 
 
+# ============================================================
+# LEARNING CAPTURE INTEGRATION (L5-WIRE-07)
+# ============================================================
+
+# Import learning capture with graceful degradation
+LEARNING_CAPTURE_AVAILABLE = False
+_learning_capture_import_error = None
+
+try:
+    from core.learning_capture import capture_task_learning
+    LEARNING_CAPTURE_AVAILABLE = True
+except ImportError as e:
+    _learning_capture_import_error = str(e)
+    # Stub function for graceful degradation
+    def capture_task_learning(*args, **kwargs):
+        """Stub: learning_capture module not available."""
+        return (False, None)
+
+
 
 # Database configuration (same as agents.py)
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
@@ -1819,7 +1838,7 @@ def worker_report_task_status(
         result = COALESCE(result, '{{}}'::jsonb) || {_format_value(result_data)}::jsonb
     WHERE id = {_format_value(task_id)}
       AND assigned_worker = {_format_value(worker_id)}
-    RETURNING id, title, status
+    RETURNING id, title, status, task_type, description
     """
     
     try:
@@ -1874,6 +1893,39 @@ def worker_report_task_status(
                         logger.info("Lock released for task %s by %s", task_id, worker_id)
                 except Exception as release_err:
                     logger.warning("Failed to release lock for task %s: %s", task_id, str(release_err))
+            
+            # L5-WIRE-07: Capture learning from completed/failed tasks
+            if status in ("completed", "failed") and LEARNING_CAPTURE_AVAILABLE:
+                try:
+                    # Get task details for learning capture
+                    duration_ms = metrics.get("duration_ms", 0) if metrics else 0
+                    success = (status == "completed")
+                    
+                    learning_result = capture_task_learning(
+                        execute_sql_func=_query,
+                        escape_value_func=_format_value,
+                        log_action_func=lambda action, msg, **kw: logger.info(
+                            "%s: %s %s", action, msg, kw
+                        ),
+                        task_id=task_id,
+                        task_type=task_info.get("task_type", "unknown"),
+                        task_title=task_info.get("title", ""),
+                        task_description=task_info.get("description", ""),
+                        success=success,
+                        result=result or {"error": error} if error else {},
+                        duration_ms=duration_ms,
+                        worker_id=worker_id,
+                    )
+                    if learning_result[0]:
+                        logger.info(
+                            "Learning captured for task %s: %s",
+                            task_id, learning_result[1]
+                        )
+                except Exception as learn_err:
+                    logger.warning(
+                        "Failed to capture learning for task %s: %s",
+                        task_id, str(learn_err)
+                    )
             
             return {
                 "success": True,
