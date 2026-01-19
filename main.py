@@ -1156,7 +1156,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         now = datetime.now(timezone.utc).isoformat()
         sql = f"""
             INSERT INTO tool_executions (
-                tool_name, input_params, status, worker_id, started_at
+                tool_name, params, status, worker_id, started_at
             ) VALUES (
                 {escape_value(tool_name)}, {escape_value(params)}, 'running', {escape_value(WORKER_ID)},
                 {escape_value(now)}
@@ -1191,7 +1191,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         sql = f"""
             UPDATE tool_executions SET
                 status = 'completed',
-                output_result = {escape_value(output)},
+                result_data = {escape_value(output)},
                 completed_at = {escape_value(now)},
                 duration_ms = {duration_ms}
             WHERE id = {escape_value(tool_exec_id)}
@@ -1213,7 +1213,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
             sql = f"""
                 UPDATE tool_executions SET
                     status = 'failed',
-                    output_result = {escape_value(error_output)},
+                    result_data = {escape_value(error_output)},
                     completed_at = {escape_value(now)},
                     duration_ms = {duration_ms}
                 WHERE id = {escape_value(tool_exec_id)}
