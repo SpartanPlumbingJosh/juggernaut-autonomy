@@ -45,6 +45,19 @@ from core.notifications import (
     notify_engine_started
 )
 
+# Stale task cleanup (CRITICAL-03b: Wire stale cleanup)
+STALE_CLEANUP_AVAILABLE = False
+_stale_cleanup_import_error = None
+
+try:
+    from core.stale_cleanup import reset_stale_tasks, get_stale_task_count
+    STALE_CLEANUP_AVAILABLE = True
+except ImportError as e:
+    _stale_cleanup_import_error = str(e)
+    # Stub functions for graceful degradation
+    def reset_stale_tasks(*args, **kwargs): return (0, [])
+    def get_stale_task_count(*args, **kwargs): return 0
+
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
 EXPERIMENTS_AVAILABLE = False
 _experiments_import_error = None
@@ -1193,6 +1206,12 @@ def autonomy_loop():
     elif _experiments_import_error:
         log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn")
     
+    # Log stale cleanup status (CRITICAL-03b)
+    if STALE_CLEANUP_AVAILABLE:
+        log_info("Stale task cleanup available", {"status": "enabled", "interval": "every 5 loops"})
+    elif _stale_cleanup_import_error:
+        log_action("stale_cleanup.unavailable", f"Stale cleanup disabled: {_stale_cleanup_import_error}", level="warn")
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -1273,6 +1292,19 @@ def autonomy_loop():
             now = datetime.now(timezone.utc).isoformat()
             sql = f"UPDATE worker_registry SET last_heartbeat = {escape_value(now)} WHERE worker_id = {escape_value(WORKER_ID)}"
             execute_sql(sql)
+            
+            # Run stale task cleanup periodically (every 5 loops)
+            if loop_count % 5 == 0 and STALE_CLEANUP_AVAILABLE:
+                try:
+                    reset_count, reset_tasks = reset_stale_tasks()
+                    if reset_count > 0:
+                        log_action(
+                            "stale_cleanup.executed",
+                            f"Reset {reset_count} stale task(s)",
+                            output_data={"reset_count": reset_count, "task_ids": [t.get("id") for t in reset_tasks]}
+                        )
+                except Exception as cleanup_error:
+                    log_error(f"Stale cleanup failed: {cleanup_error}")
             
         except Exception as e:
             log_error(f"Loop error: {str(e)}", {"traceback": traceback.format_exc()[:500]})
