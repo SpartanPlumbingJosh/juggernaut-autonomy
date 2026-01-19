@@ -1709,6 +1709,13 @@ def worker_report_task_status(
             task_info = query_result.get("rows", [{}])[0]
             
             # Update worker statistics if completed or failed
+            # Update heartbeat for any status report
+            _query(f"""
+                UPDATE worker_registry 
+                SET last_heartbeat = NOW()
+                WHERE worker_id = {_format_value(worker_id)}
+            """)
+
             if status == "completed":
                 _query(f"""
                     UPDATE worker_registry 
@@ -1835,6 +1842,7 @@ def orchestrator_parallel_execute(
 
 
 def get_worker_activity_log(
+    # Note: limit is validated to be an integer
     worker_id: str = None,
     limit: int = 50,
     event_types: List[str] = None
@@ -1870,7 +1878,7 @@ def get_worker_activity_log(
     FROM execution_logs
     WHERE {where_clause}
     ORDER BY created_at DESC
-    LIMIT {limit}
+    LIMIT {min(max(int(limit), 1), 1000)}
     """
     
     try:
