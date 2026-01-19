@@ -110,7 +110,7 @@ def detect_failed_workers(
             last_check_at < NOW() - INTERVAL '{threshold_minutes} minutes'
             OR consecutive_failures >= {MAX_CONSECUTIVE_FAILURES}
         )
-        AND status != 'failed'
+        AND status != 'unhealthy'
         ORDER BY last_check_at ASC;
     """
     
@@ -136,7 +136,7 @@ def mark_worker_failed(component: str) -> bool:
     Mark a worker as failed in health_checks table.
     
     Args:
-        component: The worker/component name to mark as failed
+        component: The worker/component name to mark as unhealthy
         
     Returns:
         True if worker was marked failed, False if no matching worker found
@@ -144,9 +144,9 @@ def mark_worker_failed(component: str) -> bool:
     query = f"""
         UPDATE health_checks
         SET 
-            status = 'failed',
+            status = 'unhealthy',
             error_message = COALESCE(error_message, '') || 
-                ' [AUTO-FAILOVER: Marked failed due to heartbeat timeout at ' || 
+                ' [AUTO-FAILOVER: Marked unhealthy due to heartbeat timeout at ' || 
                 NOW()::text || ']',
             metadata = COALESCE(metadata, '{{}}'::jsonb) || 
                 jsonb_build_object(
@@ -163,7 +163,7 @@ def mark_worker_failed(component: str) -> bool:
         logger.info("Marked worker '%s' as failed", component)
         return True
     
-    logger.warning("No worker found with component '%s' to mark as failed", component)
+    logger.warning("No worker found with component '%s' to mark as unhealthy", component)
     return False
 
 
@@ -359,7 +359,7 @@ def get_worker_health_status() -> list[dict]:
             consecutive_failures,
             error_message,
             CASE 
-                WHEN status = 'failed' THEN 'FAILED'
+                WHEN status = 'unhealthy' THEN 'FAILED'
                 WHEN last_check_at < NOW() - INTERVAL '5 minutes' THEN 'STALE'
                 WHEN consecutive_failures > 0 THEN 'DEGRADED'
                 ELSE 'HEALTHY'
@@ -413,7 +413,7 @@ def reset_failed_worker(component: str) -> bool:
                     'reset_reason', 'manual_recovery'
                 )
         WHERE component = '{component}'
-          AND status = 'failed'
+          AND status = 'unhealthy'
         RETURNING id, component;
     """
     
