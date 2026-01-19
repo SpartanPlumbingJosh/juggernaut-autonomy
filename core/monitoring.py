@@ -779,6 +779,382 @@ def _get_recent_alerts(limit: int = 10) -> List[Dict]:
 # EXPORTS
 # =============================================================================
 
+
+# =============================================================================
+# HEALTH DASHBOARD (INT-03)
+# =============================================================================
+
+
+def get_tasks_per_hour(hours: int = 24) -> List[Dict[str, Any]]:
+    """
+    Calculate tasks completed per hour for the given time window.
+    
+    Args:
+        hours: Number of hours to analyze (default: 24)
+    
+    Returns:
+        List of hourly task counts with timestamps
+    """
+    result = execute_query(
+        f"""
+        SELECT 
+            date_trunc('hour', completed_at) as hour,
+            COUNT(*) as tasks_completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as tasks_failed
+        FROM governance_tasks
+        WHERE completed_at > NOW() - INTERVAL '{hours} hours'
+          AND completed_at IS NOT NULL
+        GROUP BY date_trunc('hour', completed_at)
+        ORDER BY hour DESC
+        """
+    )
+    return result.get("rows", [])
+
+
+def get_error_rate(hours: int = 24) -> Dict[str, Any]:
+    """
+    Calculate error rate for tasks and tool executions.
+    
+    Args:
+        hours: Time window for analysis
+    
+    Returns:
+        Dict with error rates for different categories
+    """
+    # Task error rate
+    task_result = execute_query(
+        f"""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
+        FROM governance_tasks
+        WHERE created_at > NOW() - INTERVAL '{hours} hours'
+        """
+    )
+    
+    # Tool execution error rate
+    tool_result = execute_query(
+        f"""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed
+        FROM tool_executions
+        WHERE created_at > NOW() - INTERVAL '{hours} hours'
+        """
+    )
+    
+    # Execution log error rate
+    log_result = execute_query(
+        f"""
+        SELECT 
+            COUNT(*) as total,
+            SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as errors,
+            SUM(CASE WHEN level = 'warning' THEN 1 ELSE 0 END) as warnings
+        FROM execution_logs
+        WHERE created_at > NOW() - INTERVAL '{hours} hours'
+        """
+    )
+    
+    task_data = task_result.get("rows", [{}])[0] if task_result.get("rows") else {}
+    tool_data = tool_result.get("rows", [{}])[0] if tool_result.get("rows") else {}
+    log_data = log_result.get("rows", [{}])[0] if log_result.get("rows") else {}
+    
+    task_total = int(task_data.get("total") or 0)
+    task_failed = int(task_data.get("failed") or 0)
+    tool_total = int(tool_data.get("total") or 0)
+    tool_failed = int(tool_data.get("failed") or 0)
+    
+    return {
+        "period_hours": hours,
+        "tasks": {
+            "total": task_total,
+            "failed": task_failed,
+            "completed": int(task_data.get("completed") or 0),
+            "error_rate": round(task_failed / task_total * 100, 2) if task_total > 0 else 0
+        },
+        "tool_executions": {
+            "total": tool_total,
+            "failed": tool_failed,
+            "completed": int(tool_data.get("completed") or 0),
+            "error_rate": round(tool_failed / tool_total * 100, 2) if tool_total > 0 else 0
+        },
+        "logs": {
+            "total": int(log_data.get("total") or 0),
+            "errors": int(log_data.get("errors") or 0),
+            "warnings": int(log_data.get("warnings") or 0)
+        }
+    }
+
+
+def get_feature_usage() -> Dict[str, Any]:
+    """
+    Get counts of records in key feature tables to show feature usage.
+    
+    Returns:
+        Dict with table counts for learnings, experiments, etc.
+    """
+    tables_to_check = [
+        ("learnings", "Learnings recorded"),
+        ("experiments", "Experiments created"),
+        ("experiment_results", "Experiment results"),
+        ("hypotheses", "Hypotheses tracked"),
+        ("opportunities", "Opportunities found"),
+        ("goals", "Goals defined"),
+        ("governance_tasks", "Tasks processed"),
+        ("tool_executions", "Tool executions"),
+        ("cost_events", "Cost events tracked"),
+        ("execution_logs", "Log entries"),
+    ]
+    
+    feature_counts = {}
+    
+    for table_name, description in tables_to_check:
+        result = execute_query(f"SELECT COUNT(*) as count FROM {table_name}")
+        rows = result.get("rows", [])
+        count = int(rows[0].get("count", 0)) if rows else 0
+        feature_counts[table_name] = {
+            "description": description,
+            "count": count
+        }
+    
+    # Also get counts from last 24 hours
+    recent_counts = {}
+    for table_name, description in tables_to_check:
+        result = execute_query(
+            f"SELECT COUNT(*) as count FROM {table_name} WHERE created_at > NOW() - INTERVAL '24 hours'"
+        )
+        rows = result.get("rows", [])
+        count = int(rows[0].get("count", 0)) if rows else 0
+        recent_counts[table_name] = count
+    
+    return {
+        "total_counts": feature_counts,
+        "last_24h_counts": recent_counts,
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+def get_hourly_trends(hours: int = 24) -> Dict[str, Any]:
+    """
+    Get hourly breakdown of key metrics for trend visualization.
+    
+    Args:
+        hours: Number of hours of history
+    
+    Returns:
+        Dict with hourly data for tasks, errors, and costs
+    """
+    # Hourly task completion
+    tasks_hourly = execute_query(
+        f"""
+        SELECT 
+            date_trunc('hour', created_at) as hour,
+            COUNT(*) as created,
+            SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+            SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+        FROM governance_tasks
+        WHERE created_at > NOW() - INTERVAL '{hours} hours'
+        GROUP BY date_trunc('hour', created_at)
+        ORDER BY hour
+        """
+    )
+    
+    # Hourly errors from logs
+    errors_hourly = execute_query(
+        f"""
+        SELECT 
+            date_trunc('hour', created_at) as hour,
+            COUNT(*) as total_logs,
+            SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as errors
+        FROM execution_logs
+        WHERE created_at > NOW() - INTERVAL '{hours} hours'
+        GROUP BY date_trunc('hour', created_at)
+        ORDER BY hour
+        """
+    )
+    
+    # Hourly costs
+    costs_hourly = execute_query(
+        f"""
+        SELECT 
+            date_trunc('hour', recorded_at) as hour,
+            SUM(amount) as total_cost,
+            COUNT(*) as cost_events
+        FROM cost_events
+        WHERE recorded_at > NOW() - INTERVAL '{hours} hours'
+        GROUP BY date_trunc('hour', recorded_at)
+        ORDER BY hour
+        """
+    )
+    
+    return {
+        "period_hours": hours,
+        "tasks": tasks_hourly.get("rows", []),
+        "errors": errors_hourly.get("rows", []),
+        "costs": costs_hourly.get("rows", []),
+        "generated_at": datetime.utcnow().isoformat()
+    }
+
+
+def check_degradation_alerts() -> List[Dict[str, Any]]:
+    """
+    Check for system degradation and generate alerts.
+    
+    Checks:
+    - High error rate (>10%)
+    - Low task throughput
+    - Stale heartbeats
+    - Consecutive health check failures
+    
+    Returns:
+        List of alert dictionaries
+    """
+    alerts = []
+    
+    # Constants for thresholds
+    ERROR_RATE_THRESHOLD = 10.0  # percent
+    MIN_TASKS_PER_HOUR = 0  # Allow 0 for quiet periods
+    HEARTBEAT_STALE_MINUTES = 30
+    CONSECUTIVE_FAILURE_THRESHOLD = 3
+    
+    # Check error rate
+    error_data = get_error_rate(hours=1)
+    task_error_rate = error_data.get("tasks", {}).get("error_rate", 0)
+    if task_error_rate > ERROR_RATE_THRESHOLD:
+        alerts.append({
+            "type": "error_rate",
+            "severity": "high" if task_error_rate > 25 else "medium",
+            "message": f"Task error rate is {task_error_rate}% (threshold: {ERROR_RATE_THRESHOLD}%)",
+            "metric_value": task_error_rate,
+            "threshold": ERROR_RATE_THRESHOLD
+        })
+    
+    # Check for health check failures
+    health_result = execute_query(
+        f"""
+        SELECT component, check_type, consecutive_failures, error_message
+        FROM health_checks
+        WHERE consecutive_failures >= {CONSECUTIVE_FAILURE_THRESHOLD}
+        """
+    )
+    for row in health_result.get("rows", []):
+        alerts.append({
+            "type": "health_check_failure",
+            "severity": "high",
+            "message": f"{row['component']}/{row['check_type']} has {row['consecutive_failures']} consecutive failures",
+            "component": row["component"],
+            "error": row.get("error_message")
+        })
+    
+    # Check for stale workers (no recent activity)
+    stale_result = execute_query(
+        f"""
+        SELECT worker_id, last_heartbeat
+        FROM worker_registry
+        WHERE status = 'active'
+          AND last_heartbeat < NOW() - INTERVAL '{HEARTBEAT_STALE_MINUTES} minutes'
+        """
+    )
+    for row in stale_result.get("rows", []):
+        alerts.append({
+            "type": "stale_worker",
+            "severity": "medium",
+            "message": f"Worker {row['worker_id']} has not sent heartbeat in {HEARTBEAT_STALE_MINUTES}+ minutes",
+            "worker_id": row["worker_id"],
+            "last_heartbeat": str(row.get("last_heartbeat"))
+        })
+    
+    # Check for stuck tasks (in_progress for too long)
+    stuck_result = execute_query(
+        """
+        SELECT id, title, assigned_worker, started_at
+        FROM governance_tasks
+        WHERE status = 'in_progress'
+          AND started_at < NOW() - INTERVAL '2 hours'
+        """
+    )
+    for row in stuck_result.get("rows", []):
+        alerts.append({
+            "type": "stuck_task",
+            "severity": "medium",
+            "message": f"Task '{row['title']}' has been in_progress for >2 hours",
+            "task_id": row["id"],
+            "worker": row.get("assigned_worker")
+        })
+    
+    return alerts
+
+
+def get_health_dashboard() -> Dict[str, Any]:
+    """
+    Generate comprehensive health monitoring dashboard data.
+    
+    Provides:
+    1. Real-time engine status
+    2. Tasks/hour metrics
+    3. Error rates
+    4. Feature usage statistics
+    5. Degradation alerts
+    6. Historical trends (24 hours)
+    
+    Returns:
+        Dict with all dashboard data for monitoring UI
+    """
+    # Get all dashboard components
+    health_status = get_health_status()
+    error_rates = get_error_rate(hours=24)
+    feature_usage = get_feature_usage()
+    hourly_trends = get_hourly_trends(hours=24)
+    degradation_alerts = check_degradation_alerts()
+    tasks_per_hour = get_tasks_per_hour(hours=24)
+    
+    # Calculate summary metrics
+    total_tasks_24h = error_rates.get("tasks", {}).get("total", 0)
+    hours_with_data = len([t for t in tasks_per_hour if t.get("tasks_completed", 0) > 0])
+    avg_tasks_per_hour = round(total_tasks_24h / 24, 2) if total_tasks_24h > 0 else 0
+    
+    # Determine overall system status
+    if degradation_alerts:
+        high_severity = any(a.get("severity") == "high" for a in degradation_alerts)
+        overall_status = "critical" if high_severity else "degraded"
+    elif health_status.get("overall_status") == "unhealthy":
+        overall_status = "unhealthy"
+    elif health_status.get("overall_status") == "degraded":
+        overall_status = "degraded"
+    else:
+        overall_status = "healthy"
+    
+    return {
+        "status": {
+            "overall": overall_status,
+            "health_check_status": health_status.get("overall_status", "unknown"),
+            "active_alerts": len(degradation_alerts),
+            "generated_at": datetime.utcnow().isoformat()
+        },
+        "throughput": {
+            "tasks_last_24h": total_tasks_24h,
+            "avg_tasks_per_hour": avg_tasks_per_hour,
+            "hours_with_activity": hours_with_data,
+            "tasks_per_hour_data": tasks_per_hour
+        },
+        "error_rates": error_rates,
+        "feature_usage": feature_usage,
+        "health_checks": health_status.get("components", {}),
+        "alerts": degradation_alerts,
+        "trends": hourly_trends,
+        "summary": {
+            "total_learnings": feature_usage.get("total_counts", {}).get("learnings", {}).get("count", 0),
+            "total_experiments": feature_usage.get("total_counts", {}).get("experiments", {}).get("count", 0),
+            "total_tasks": feature_usage.get("total_counts", {}).get("governance_tasks", {}).get("count", 0),
+            "tasks_completed_24h": error_rates.get("tasks", {}).get("completed", 0),
+            "task_error_rate": error_rates.get("tasks", {}).get("error_rate", 0),
+            "tool_executions_24h": error_rates.get("tool_executions", {}).get("total", 0)
+        }
+    }
+
+
 __all__ = [
     # Metrics
     "record_metric",
@@ -797,6 +1173,14 @@ __all__ = [
     "record_anomaly",
     "get_open_anomalies",
     "resolve_anomaly",
+    
+    # Health Dashboard (INT-03)
+    "get_tasks_per_hour",
+    "get_error_rate",
+    "get_feature_usage",
+    "get_hourly_trends",
+    "check_degradation_alerts",
+    "get_health_dashboard",
     
     # Performance
     "get_performance_summary",
