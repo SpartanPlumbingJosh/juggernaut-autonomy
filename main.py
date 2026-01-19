@@ -370,14 +370,30 @@ def log_action(
     input_data: Dict = None,
     output_data: Dict = None,
     error_data: Dict = None,
-    duration_ms: int = None
+    duration_ms: int = None,
+    source: str = "autonomy_engine"
 ) -> Optional[str]:
-    """Log an autonomous action to execution_logs with PII sanitization."""
+    """Log an autonomous action to execution_logs with PII sanitization.
+    
+    Args:
+        action: The action being logged (e.g., 'task.completed', 'decision.execute')
+        message: Human-readable description of the action
+        level: Log level ('info', 'warn', 'error')
+        task_id: Optional task UUID this action relates to
+        input_data: Optional input data for the action (will be sanitized)
+        output_data: Optional output/result data (will be sanitized)
+        error_data: Optional error information (will be sanitized)
+        duration_ms: Optional execution duration in milliseconds
+        source: The source/origin of this action for traceability (L2 requirement)
+    
+    Returns:
+        The UUID of the created log entry, or None if logging failed
+    """
     now = datetime.now(timezone.utc).isoformat()
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
-            escape_value(level), escape_value("autonomy_engine"), escape_value(now)]
+            escape_value(level), escape_value(source), escape_value(now)]
     
     if task_id:
         cols.append("task_id")
@@ -406,25 +422,50 @@ def log_action(
         return None
 
 
-def log_info(message: str, data: Dict = None):
-    log_action("system.info", message, "info", output_data=data)
+def log_info(message: str, data: Dict = None, source: str = "system"):
+    """Log an informational message.
+    
+    Args:
+        message: The message to log
+        data: Optional additional data to include
+        source: The source of this log entry for traceability
+    """
+    log_action("system.info", message, "info", output_data=data, source=source)
     print(f"[INFO] {message}")
 
 
-def log_error(message: str, data: Optional[Dict[str, Any]] = None):
-    log_action("system.error", message, "error", error_data=data)
+def log_error(message: str, data: Optional[Dict[str, Any]] = None, source: str = "system"):
+    """Log an error message.
+    
+    Args:
+        message: The error message to log
+        data: Optional additional error data to include
+        source: The source of this error for traceability
+    """
+    log_action("system.error", message, "error", error_data=data, source=source)
     print(f"[ERROR] {message}")
 
 
-def log_decision(action: str, decision: str, reasoning: str, data: Optional[Dict[str, Any]] = None, confidence: float = 1.0):
+def log_decision(
+    action: str, 
+    decision: str, 
+    reasoning: str, 
+    data: Optional[Dict[str, Any]] = None, 
+    confidence: float = 1.0,
+    source: str = "decision_engine"
+):
     """Log an autonomous decision (Level 3: Traceable Decisions).
     
+    This function ensures all decisions can be traced back to their origin,
+    satisfying L2 requirement for references and sourcing.
+    
     Args:
-        action: The decision action type
-        decision: What was decided
-        reasoning: Why it was decided
-        data: Additional context data
+        action: The decision action type (e.g., 'task.execute', 'loop.scheduled')
+        decision: What was decided (the outcome)
+        reasoning: Why it was decided (the rationale)
+        data: Additional context data to include in the log
         confidence: Confidence level 0.0-1.0 (L2: Uncertainty tracking)
+        source: The source/component that made this decision for traceability
     """
     # Flag low confidence decisions
     uncertainty_warning = ""
@@ -435,7 +476,14 @@ def log_decision(action: str, decision: str, reasoning: str, data: Optional[Dict
         f"decision.{action}",
         f"{decision}: {reasoning}{uncertainty_warning}",
         "info" if confidence >= 0.5 else "warn",
-        output_data={"decision": decision, "reasoning": reasoning, "confidence": confidence, **(data or {})}
+        output_data={
+            "decision": decision, 
+            "reasoning": reasoning, 
+            "confidence": confidence,
+            "decision_source": source,
+            **(data or {})
+        },
+        source=source
     )
     print(f"[DECISION] {action}: {decision}" + (f" (confidence: {confidence:.0%})" if confidence < 1.0 else ""))
 
