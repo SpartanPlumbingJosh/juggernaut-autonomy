@@ -1563,6 +1563,373 @@ def create_phase6_tables() -> bool:
 
 
 # ============================================================
+
+# ============================================================
+# L5-01: MULTI-AGENT ORCHESTRATION - CORE FUNCTIONS
+# ============================================================
+
+def orchestrator_assign_task(
+    task_id: str,
+    target_worker_id: str,
+    reason: str = "capability_match"
+) -> Dict[str, Any]:
+    """
+    ORCHESTRATOR assigns a task to a specialized worker.
+    
+    This is the core L5 function that enables ORCHESTRATOR to delegate
+    tasks to specialized workers (EXECUTOR, ANALYST, STRATEGIST, etc.).
+    
+    Args:
+        task_id: UUID of the task to assign
+        target_worker_id: Worker ID to assign to (e.g., 'EXECUTOR', 'ANALYST')
+        reason: Reason for assignment (capability_match, load_balancing, etc.)
+    
+    Returns:
+        Dict with success status, task_id, worker_id, and log_id
+    """
+    assignment_time = datetime.now(timezone.utc).isoformat()
+    
+    # Update the task assignment
+    sql = f"""
+    UPDATE governance_tasks
+    SET 
+        assigned_worker_id = {_format_value(target_worker_id)},
+        status = 'assigned',
+        updated_at = NOW(),
+        result = jsonb_set(
+            COALESCE(result, '{{}}'::jsonb),
+            '{{assignment_history}}',
+            COALESCE(result->'assignment_history', '[]'::jsonb) || 
+            {_format_value([{
+                "assigned_to": target_worker_id,
+                "assigned_by": "ORCHESTRATOR",
+                "reason": reason,
+                "at": assignment_time
+            }])}::jsonb
+        )
+    WHERE id = {_format_value(task_id)}
+    RETURNING id, title, assigned_worker_id
+    """
+    
+    try:
+        result = _query(sql)
+        if result.get("rowCount", 0) > 0:
+            task_info = result.get("rows", [{}])[0]
+            
+            # Log the assignment event
+            log_id = log_coordination_event(
+                "task_assignment",
+                {
+                    "task_id": task_id,
+                    "task_title": task_info.get("title"),
+                    "target_worker": target_worker_id,
+                    "reason": reason,
+                    "assigned_at": assignment_time
+                }
+            )
+            
+            return {
+                "success": True,
+                "task_id": task_id,
+                "worker_id": target_worker_id,
+                "log_id": log_id,
+                "message": f"ORCHESTRATOR assigned task to {target_worker_id}"
+            }
+    except Exception as e:
+        print(f"Failed to assign task: {e}")
+    
+    return {
+        "success": False,
+        "task_id": task_id,
+        "worker_id": target_worker_id,
+        "error": "Assignment failed"
+    }
+
+
+def worker_report_task_status(
+    worker_id: str,
+    task_id: str,
+    status: str,
+    result: Dict = None,
+    error: str = None,
+    metrics: Dict = None
+) -> Dict[str, Any]:
+    """
+    Worker reports task status back to ORCHESTRATOR.
+    
+    Workers use this to report progress, completion, or failure
+    back to the ORCHESTRATOR for tracking and coordination.
+    
+    Args:
+        worker_id: ID of the reporting worker
+        task_id: ID of the task being reported on
+        status: Status update ('in_progress', 'completed', 'failed', 'blocked')
+        result: Task result data (for completion)
+        error: Error message (for failure)
+        metrics: Performance metrics (duration, tokens used, etc.)
+    
+    Returns:
+        Dict with success status and acknowledgment
+    """
+    report_time = datetime.now(timezone.utc).isoformat()
+    
+    # Build the result update
+    result_data = {
+        "last_status_report": {
+            "worker_id": worker_id,
+            "status": status,
+            "reported_at": report_time,
+            "metrics": metrics or {}
+        }
+    }
+    
+    if result:
+        result_data["task_result"] = result
+    if error:
+        result_data["error"] = error
+    
+    # Update task status
+    completed_clause = "completed_at = NOW()," if status in ("completed", "failed") else ""
+    
+    sql = f"""
+    UPDATE governance_tasks
+    SET 
+        status = {_format_value(status)},
+        {completed_clause}
+        updated_at = NOW(),
+        result = COALESCE(result, '{{}}'::jsonb) || {_format_value(result_data)}::jsonb
+    WHERE id = {_format_value(task_id)}
+      AND assigned_worker_id = {_format_value(worker_id)}
+    RETURNING id, title, status
+    """
+    
+    try:
+        query_result = _query(sql)
+        if query_result.get("rowCount", 0) > 0:
+            task_info = query_result.get("rows", [{}])[0]
+            
+            # Update worker statistics if completed or failed
+            if status == "completed":
+                _query(f"""
+                    UPDATE worker_registry 
+                    SET tasks_completed = tasks_completed + 1,
+                        last_heartbeat = NOW()
+                    WHERE worker_id = {_format_value(worker_id)}
+                """)
+            elif status == "failed":
+                _query(f"""
+                    UPDATE worker_registry 
+                    SET tasks_failed = tasks_failed + 1,
+                        consecutive_failures = consecutive_failures + 1,
+                        last_heartbeat = NOW()
+                    WHERE worker_id = {_format_value(worker_id)}
+                """)
+            
+            # Log the status report
+            log_id = log_coordination_event(
+                "worker_status_report",
+                {
+                    "worker_id": worker_id,
+                    "task_id": task_id,
+                    "task_title": task_info.get("title"),
+                    "status": status,
+                    "has_result": result is not None,
+                    "has_error": error is not None,
+                    "reported_at": report_time
+                }
+            )
+            
+            return {
+                "success": True,
+                "acknowledged": True,
+                "task_id": task_id,
+                "worker_id": worker_id,
+                "status": status,
+                "log_id": log_id,
+                "message": f"ORCHESTRATOR received status report from {worker_id}"
+            }
+    except Exception as e:
+        print(f"Failed to report status: {e}")
+    
+    return {
+        "success": False,
+        "acknowledged": False,
+        "error": "Status report failed"
+    }
+
+
+def orchestrator_parallel_execute(
+    task_assignments: List[Dict[str, str]]
+) -> Dict[str, Any]:
+    """
+    ORCHESTRATOR assigns multiple tasks to different workers in parallel.
+    
+    Enables parallel task execution across specialized workers.
+    
+    Args:
+        task_assignments: List of {task_id, worker_id} dicts
+    
+    Returns:
+        Dict with overall success and per-task results
+    """
+    execution_id = str(uuid.uuid4())[:8]
+    start_time = datetime.now(timezone.utc).isoformat()
+    
+    results = {
+        "execution_id": execution_id,
+        "started_at": start_time,
+        "total_tasks": len(task_assignments),
+        "successful": 0,
+        "failed": 0,
+        "assignments": []
+    }
+    
+    for assignment in task_assignments:
+        task_id = assignment.get("task_id")
+        worker_id = assignment.get("worker_id")
+        
+        if not task_id or not worker_id:
+            results["assignments"].append({
+                "task_id": task_id,
+                "worker_id": worker_id,
+                "success": False,
+                "error": "Missing task_id or worker_id"
+            })
+            results["failed"] += 1
+            continue
+        
+        # Assign each task
+        assign_result = orchestrator_assign_task(
+            task_id=task_id,
+            target_worker_id=worker_id,
+            reason="parallel_execution"
+        )
+        
+        results["assignments"].append({
+            "task_id": task_id,
+            "worker_id": worker_id,
+            "success": assign_result.get("success", False),
+            "log_id": assign_result.get("log_id")
+        })
+        
+        if assign_result.get("success"):
+            results["successful"] += 1
+        else:
+            results["failed"] += 1
+    
+    # Log the parallel execution
+    log_coordination_event(
+        "parallel_execution",
+        {
+            "execution_id": execution_id,
+            "total_tasks": results["total_tasks"],
+            "successful": results["successful"],
+            "failed": results["failed"],
+            "started_at": start_time
+        }
+    )
+    
+    results["success"] = results["failed"] == 0
+    return results
+
+
+def get_worker_activity_log(
+    worker_id: str = None,
+    limit: int = 50,
+    event_types: List[str] = None
+) -> List[Dict]:
+    """
+    Get activity log for worker(s) from ORCHESTRATOR's tracking.
+    
+    ORCHESTRATOR uses this to track all worker activities.
+    
+    Args:
+        worker_id: Optional filter for specific worker
+        limit: Max number of entries to return
+        event_types: Optional filter for event types
+    
+    Returns:
+        List of activity log entries
+    """
+    conditions = ["1=1"]
+    
+    if worker_id:
+        conditions.append(f"(output_data->>'worker_id' = {_format_value(worker_id)} OR output_data->>'target_worker' = {_format_value(worker_id)})")
+    
+    if event_types:
+        type_list = ", ".join([_format_value(t) for t in event_types])
+        conditions.append(f"action IN ({type_list})")
+    else:
+        conditions.append("action IN ('task_assignment', 'worker_status_report', 'parallel_execution', 'handoff')")
+    
+    where_clause = " AND ".join(conditions)
+    
+    sql = f"""
+    SELECT id, worker_id, action, message, output_data, created_at
+    FROM execution_logs
+    WHERE {where_clause}
+    ORDER BY created_at DESC
+    LIMIT {limit}
+    """
+    
+    try:
+        result = _query(sql)
+        return result.get("rows", [])
+    except Exception as e:
+        print(f"Failed to get activity log: {e}")
+        return []
+
+
+def get_orchestrator_dashboard() -> Dict[str, Any]:
+    """
+    Get ORCHESTRATOR dashboard showing all worker statuses and activities.
+    
+    Returns:
+        Dashboard data with workers, tasks, and recent activities
+    """
+    dashboard = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "workers": [],
+        "task_summary": {},
+        "recent_activities": []
+    }
+    
+    # Get all workers with their status
+    try:
+        workers_result = _query("""
+            SELECT 
+                worker_id, name, status, level, 
+                tasks_completed, tasks_failed, health_score,
+                last_heartbeat, max_concurrent_tasks
+            FROM worker_registry
+            WHERE status != 'offline'
+            ORDER BY level DESC, health_score DESC
+        """)
+        dashboard["workers"] = workers_result.get("rows", [])
+    except Exception as e:
+        print(f"Failed to get workers: {e}")
+    
+    # Get task summary
+    try:
+        task_result = _query("""
+            SELECT 
+                status, 
+                COUNT(*) as count
+            FROM governance_tasks
+            WHERE created_at > NOW() - INTERVAL '24 hours'
+            GROUP BY status
+        """)
+        for row in task_result.get("rows", []):
+            dashboard["task_summary"][row["status"]] = int(row["count"])
+    except Exception as e:
+        print(f"Failed to get task summary: {e}")
+    
+    # Get recent activities
+    dashboard["recent_activities"] = get_worker_activity_log(limit=20)
+    
+    return dashboard
+
+# ============================================================
 # EXPORTS
 # ============================================================
 
@@ -1609,6 +1976,13 @@ __all__ = [
     "activate_backup_agent",
     "run_health_check",
     "auto_recover",
+    
+    # L5-01: Multi-Agent Orchestration Core
+    "orchestrator_assign_task",
+    "worker_report_task_status",
+    "orchestrator_parallel_execute",
+    "get_worker_activity_log",
+    "get_orchestrator_dashboard",
     
     # Setup
     "create_phase6_tables"
