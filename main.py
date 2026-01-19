@@ -445,8 +445,11 @@ def log_risk_warning(task: Task, risk_score: float, risk_level: str, risk_factor
 
 
 def should_require_approval_for_risk(risk_score: float, risk_level: str) -> bool:
-    """Determine if a task should require approval based on risk level."""
-    return risk_level == "critical" or risk_score >= RISK_THRESHOLDS["high"]
+    """Determine if a task should require approval based on risk level.
+    
+    Returns True for both 'high' (0.6-0.8) and 'critical' (>=0.8) risk tasks.
+    """
+    return risk_level in ("high", "critical") or risk_score >= RISK_THRESHOLDS["medium"]
 
 
 # ============================================================
