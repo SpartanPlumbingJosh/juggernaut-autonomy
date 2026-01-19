@@ -13,7 +13,7 @@ This is the main entry point that:
 
 Level 3 Requirements Implemented:
 - Goal/Task Acceptance: Accepts tasks from governance_tasks
-- Workflow Planning: Executes multi-step workflows
+- Workflow Planning: Multi-step workflow with dependency enforcement (L3-02)
 - Tool/API Execution: Runs registered tools
 - Persistent Task Memory: Tasks survive restarts
 - Error Recovery: DLQ, retries with exponential backoff, escalation
@@ -21,6 +21,13 @@ Level 3 Requirements Implemented:
 - Human-in-the-Loop: Approval workflow
 - Action Logging: Every action logged (with PII sanitization)
 - Permission/Scope Control: Forbidden actions enforced
+
+L3-02 Workflow Features:
+- Task dependencies via depends_on field
+- Dependency validation before execution
+- Blocked tasks wait for dependencies
+- DAG visualization via /workflow endpoint
+- Ready-tasks filtering for execution
 """
 
 import os
@@ -122,6 +129,11 @@ class Task:
     assigned_to: Optional[str]
     created_at: str
     requires_approval: bool = False
+    depends_on: List[str] = None  # L3-02: Task dependency support
+    
+    def __post_init__(self):
+        if self.depends_on is None:
+            self.depends_on = []
 
 
 # ============================================================
@@ -355,14 +367,168 @@ def check_cost_limit(estimated_cost: float) -> Tuple[bool, str]:
 
 
 # ============================================================
-# TASK MANAGEMENT (Level 3: Goal/Task Acceptance + Persistent Memory)
+# WORKFLOW PLANNING (Level 3: Multi-step workflow with dependencies)
 # ============================================================
 
+def check_dependencies_complete(depends_on: List[str]) -> Tuple[bool, List[str]]:
+    """
+    Check if all task dependencies are completed.
+    
+    Args:
+        depends_on: List of task IDs that must be completed first
+        
+    Returns:
+        Tuple of (all_complete, incomplete_task_ids)
+    """
+    if not depends_on:
+        return True, []
+    
+    # Build placeholders for IN clause
+    placeholders = ", ".join([escape_value(tid) for tid in depends_on])
+    sql = f"""
+        SELECT id, status, title
+        FROM governance_tasks
+        WHERE id IN ({placeholders})
+    """
+    
+    try:
+        result = execute_sql(sql)
+        rows = result.get("rows", [])
+        
+        incomplete = []
+        for row in rows:
+            if row.get("status") != "completed":
+                incomplete.append(row.get("id"))
+        
+        # Also check for missing dependencies (referenced but don't exist)
+        found_ids = {row.get("id") for row in rows}
+        for tid in depends_on:
+            if tid not in found_ids:
+                incomplete.append(tid)
+        
+        return len(incomplete) == 0, incomplete
+        
+    except Exception as e:
+        log_error(f"Failed to check dependencies: {e}")
+        return False, depends_on  # Fail safe - assume incomplete
+
+
+def get_workflow_dag(root_task_id: str = None) -> Dict:
+    """
+    Get workflow as a directed acyclic graph (DAG) for visualization.
+    
+    Args:
+        root_task_id: Optional root task to start from. If None, returns all tasks.
+        
+    Returns:
+        DAG structure with nodes and edges
+    """
+    if root_task_id:
+        # Get tasks related to this root (parent chain and children)
+        sql = f"""
+            WITH RECURSIVE task_tree AS (
+                -- Start with root task
+                SELECT id, title, status, depends_on, 0 as depth
+                FROM governance_tasks
+                WHERE id = {escape_value(root_task_id)}
+                
+                UNION ALL
+                
+                -- Find tasks that depend on tasks in tree
+                SELECT g.id, g.title, g.status, g.depends_on, t.depth + 1
+                FROM governance_tasks g
+                JOIN task_tree t ON g.depends_on @> jsonb_build_array(t.id::text)
+                WHERE t.depth < 10  -- Prevent infinite loops
+            )
+            SELECT DISTINCT id, title, status, depends_on
+            FROM task_tree
+            ORDER BY id
+        """
+    else:
+        # Get all tasks with dependencies
+        sql = """
+            SELECT id, title, status, depends_on
+            FROM governance_tasks
+            WHERE depends_on IS NOT NULL AND depends_on != '[]'
+            OR id IN (
+                SELECT DISTINCT jsonb_array_elements_text(depends_on)::uuid
+                FROM governance_tasks
+                WHERE depends_on IS NOT NULL AND depends_on != '[]'
+            )
+            ORDER BY created_at
+            LIMIT 100
+        """
+    
+    try:
+        result = execute_sql(sql)
+        rows = result.get("rows", [])
+        
+        nodes = []
+        edges = []
+        
+        for row in rows:
+            node_id = row.get("id")
+            nodes.append({
+                "id": node_id,
+                "title": row.get("title", ""),
+                "status": row.get("status", "pending")
+            })
+            
+            deps = row.get("depends_on") or []
+            for dep_id in deps:
+                edges.append({
+                    "from": dep_id,
+                    "to": node_id
+                })
+        
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "node_count": len(nodes),
+            "edge_count": len(edges)
+        }
+        
+    except Exception as e:
+        log_error(f"Failed to get workflow DAG: {e}")
+        return {"nodes": [], "edges": [], "error": str(e)}
+
+
+def get_ready_tasks(pending_tasks: List[Task]) -> List[Task]:
+    """
+    Filter tasks to only those with completed dependencies.
+    Tasks with no dependencies are always ready.
+    
+    Args:
+        pending_tasks: List of pending tasks
+        
+    Returns:
+        List of tasks ready for execution
+    """
+    ready = []
+    blocked = []
+    
+    for task in pending_tasks:
+        if not task.depends_on:
+            ready.append(task)
+        else:
+            deps_complete, incomplete = check_dependencies_complete(task.depends_on)
+            if deps_complete:
+                ready.append(task)
+            else:
+                blocked.append((task, incomplete))
+                # Log blocked task
+                log_action("task.blocked_by_deps", 
+                          f"Task '{task.title}' waiting on {len(incomplete)} dependencies",
+                          level="info", task_id=task.id,
+                          output_data={"incomplete_deps": incomplete[:5]})  # Limit to 5
+    
+    return ready
+
 def get_pending_tasks(limit: int = 10) -> List[Task]:
-    """Get pending tasks ordered by priority, respecting retry backoff."""
+    """Get pending tasks ordered by priority, respecting retry backoff and dependencies."""
     sql = f"""
         SELECT id, task_type, title, description, priority, status, 
-               payload, assigned_worker, created_at, requires_approval
+               payload, assigned_worker, created_at, requires_approval, depends_on
         FROM governance_tasks 
         WHERE status IN ('pending', 'in_progress')
         AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
@@ -390,7 +556,8 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
                 payload=row.get("payload") or {},
                 assigned_to=row.get("assigned_worker"),
                 created_at=row.get("created_at", ""),
-                requires_approval=row.get("requires_approval", False)
+                requires_approval=row.get("requires_approval", False),
+                depends_on=row.get("depends_on") or []
             ))
         # Sort by priority (desc) then created_at (asc) using Python's priority_map values
         tasks.sort(key=lambda t: (-t.priority, t.created_at))
@@ -735,6 +902,17 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
         return False, {"blocked": True, "reason": reason}
     
+    # L3-02: Check dependencies before execution
+    if task.depends_on:
+        deps_complete, incomplete = check_dependencies_complete(task.depends_on)
+        if not deps_complete:
+            log_action("task.blocked_deps", 
+                      f"Task blocked: {len(incomplete)} dependencies incomplete",
+                      level="info", task_id=task.id,
+                      output_data={"incomplete_deps": incomplete[:5]})
+            update_task_status(task.id, "blocked", {"waiting_on": incomplete})
+            return False, {"blocked_by_deps": True, "incomplete": incomplete}
+    
     # Check approval (read-only check)
     requires_approval, approval_id, status = check_approval_status(task)
     if requires_approval:
@@ -1006,39 +1184,47 @@ def autonomy_loop():
             tasks = get_pending_tasks(limit=5)
             
             if tasks:
-                # Try to claim and execute tasks in priority order
-                task_executed = False
+                # L3-02: Filter to only tasks with completed dependencies
+                ready_tasks = get_ready_tasks(tasks)
                 
-                for task in tasks:
-                    # Check permission BEFORE claiming (Level 3: Permission enforcement)
-                    # This prevents claiming tasks that the worker is forbidden from executing
-                    allowed, reason = is_action_allowed(f"task.{task.task_type}")
-                    if not allowed:
-                        log_action("task.skipped", f"Task skipped (forbidden): {reason}", 
-                                   level="warn", task_id=task.id)
-                        continue  # Skip forbidden tasks without claiming
+                if not ready_tasks:
+                    # All tasks are blocked by dependencies
+                    log_action("loop.all_blocked", "All pending tasks blocked by dependencies",
+                               output_data={"total_pending": len(tasks), "blocked": len(tasks)})
+                else:
+                    # Try to claim and execute tasks in priority order
+                    task_executed = False
                     
-                    # Try to claim this task
-                    if not claim_task(task.id):
-                        continue  # Someone else claimed it, try next
+                    for task in ready_tasks:
+                        # Check permission BEFORE claiming (Level 3: Permission enforcement)
+                        # This prevents claiming tasks that the worker is forbidden from executing
+                        allowed, reason = is_action_allowed(f"task.{task.task_type}")
+                        if not allowed:
+                            log_action("task.skipped", f"Task skipped (forbidden): {reason}", 
+                                       level="warn", task_id=task.id)
+                            continue  # Skip forbidden tasks without claiming
+                        
+                        # Try to claim this task
+                        if not claim_task(task.id):
+                            continue  # Someone else claimed it, try next
+                        
+                        log_decision("loop.execute", f"Executing task: {task.title}",
+                                     f"Priority {task.priority} of {len(ready_tasks)} ready tasks ({len(tasks)} total)")
+                        
+                        success, result = execute_task(task)
+                        
+                        if result.get("waiting_approval") or result.get("blocked_by_deps"):
+                            # Task is waiting for approval or blocked, try next task
+                            continue
+                        
+                        # Task was executed (success or failure), we're done for this loop
+                        task_executed = True
+                        break
                     
-                    log_decision("loop.execute", f"Executing task: {task.title}",
-                                 f"Priority {task.priority} of {len(tasks)} pending tasks")
-                    
-                    success, result = execute_task(task)
-                    
-                    if result.get("waiting_approval"):
-                        # Task is waiting for approval, try next task
-                        continue
-                    
-                    # Task was executed (success or failure), we're done for this loop
-                    task_executed = True
-                    break
-                
-                if not task_executed:
-                    # All tasks either couldn't be claimed, are forbidden, or are waiting for approval
-                    log_action("loop.no_executable", "No executable tasks this iteration",
-                               output_data={"tasks_checked": len(tasks)})
+                    if not task_executed:
+                        # All tasks either couldn't be claimed, are forbidden, or are waiting for approval
+                        log_action("loop.no_executable", "No executable tasks this iteration",
+                                   output_data={"tasks_checked": len(ready_tasks), "total_pending": len(tasks)})
             else:
                 # 2. Check scheduled tasks
                 scheduled = get_due_scheduled_tasks()
@@ -1097,7 +1283,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             status = "healthy" if db_ok else "degraded"
             response = {
                 "status": status,
-                "version": "1.1.0",
+                "version": "1.2.0",  # L3-02: Updated version
                 "worker_id": WORKER_ID,
                 "uptime_seconds": int(uptime),
                 "database": "connected" if db_ok else "error",
@@ -1114,6 +1300,23 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(response).encode())
+        
+        # L3-02: Workflow DAG visualization endpoint
+        elif self.path.startswith("/workflow"):
+            # Parse optional task_id from query string
+            task_id = None
+            if "?" in self.path:
+                query = self.path.split("?")[1]
+                for param in query.split("&"):
+                    if param.startswith("task_id="):
+                        task_id = param.split("=")[1]
+            
+            dag = get_workflow_dag(task_id)
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(dag).encode())
             
         elif self.path == "/":
             self.send_response(200)
@@ -1122,8 +1325,8 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "service": "JUGGERNAUT Autonomy Engine",
                 "status": "running",
-                "version": "1.1.0",
-                "endpoints": ["/", "/health"]
+                "version": "1.2.0",
+                "endpoints": ["/", "/health", "/workflow"]
             }).encode())
             
         else:
