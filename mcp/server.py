@@ -29,6 +29,14 @@ SLACK_BOT_TOKEN = os.environ.get('SLACK_BOT_TOKEN', '')
 WAR_ROOM_CHANNEL = os.environ.get('WAR_ROOM_CHANNEL', 'C0A5WTBHX1A')
 PORT = int(os.environ.get('PORT', 8080))
 
+# CORS headers for Claude.ai
+CORS_HEADERS = {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Access-Control-Max-Age': '86400',
+}
+
 
 class MCPServer:
     """SSE-based MCP Server for JUGGERNAUT tools."""
@@ -248,13 +256,28 @@ class MCPServer:
 mcp_server = MCPServer()
 
 
+@web.middleware
+async def cors_middleware(request: web.Request, handler):
+    """Add CORS headers to all responses."""
+    if request.method == 'OPTIONS':
+        response = web.Response(status=204)
+    else:
+        try:
+            response = await handler(request)
+        except web.HTTPException as ex:
+            response = ex
+    
+    response.headers.update(CORS_HEADERS)
+    return response
+
+
 async def handle_sse(request: web.Request) -> web.StreamResponse:
     """Handle SSE connections for MCP protocol (GET requests)."""
     token = request.query.get('token')
     if token != MCP_AUTH_TOKEN:
-        return web.Response(status=401, text="Unauthorized")
+        return web.Response(status=401, text="Unauthorized", headers=CORS_HEADERS)
 
-    async with sse_response(request) as resp:
+    async with sse_response(request, headers=CORS_HEADERS) as resp:
         tools_message = {
             "jsonrpc": "2.0",
             "method": "tools/list",
@@ -276,7 +299,7 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
     if not token:
         token = request.headers.get('Authorization', '').replace('Bearer ', '')
     if token != MCP_AUTH_TOKEN:
-        return web.Response(status=401, text="Unauthorized")
+        return web.Response(status=401, text="Unauthorized", headers=CORS_HEADERS)
 
     try:
         data = await request.json()
@@ -288,7 +311,6 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
         request_id = data.get('id')
 
         if method == 'tools/list':
-            # Return tool list
             return web.json_response({
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -298,10 +320,9 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
                         for name, tool in mcp_server.tools.items()
                     ]
                 }
-            })
+            }, headers=CORS_HEADERS)
 
         if method == 'tools/call':
-            # Execute tool call
             tool_name = params.get('name')
             arguments = params.get('arguments', {})
             result = await mcp_server.handle_tool_call(tool_name, arguments)
@@ -309,7 +330,7 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": {"content": [{"type": "text", "text": json.dumps(result)}]}
-            })
+            }, headers=CORS_HEADERS)
 
         # Legacy format support
         if 'name' in data:
@@ -320,29 +341,29 @@ async def handle_mcp_post(request: web.Request) -> web.Response:
                 "jsonrpc": "2.0",
                 "id": request_id,
                 "result": result
-            })
+            }, headers=CORS_HEADERS)
 
         return web.json_response({
             "jsonrpc": "2.0",
             "id": request_id,
             "error": {"code": -32601, "message": f"Unknown method: {method}"}
-        })
+        }, headers=CORS_HEADERS)
 
     except json.JSONDecodeError:
-        return web.Response(status=400, text="Invalid JSON")
+        return web.Response(status=400, text="Invalid JSON", headers=CORS_HEADERS)
     except Exception as e:
         logger.exception("Error handling MCP POST")
         return web.json_response({
             "jsonrpc": "2.0",
             "error": {"code": -32603, "message": str(e)}
-        }, status=500)
+        }, status=500, headers=CORS_HEADERS)
 
 
 async def handle_tool_call(request: web.Request) -> web.Response:
     """Handle tool call requests at /mcp/tools/call."""
     token = request.headers.get('Authorization', '').replace('Bearer ', '')
     if token != MCP_AUTH_TOKEN:
-        return web.Response(status=401, text="Unauthorized")
+        return web.Response(status=401, text="Unauthorized", headers=CORS_HEADERS)
 
     try:
         data = await request.json()
@@ -355,15 +376,15 @@ async def handle_tool_call(request: web.Request) -> web.Response:
             "jsonrpc": "2.0",
             "id": data.get('id'),
             "result": result
-        })
+        }, headers=CORS_HEADERS)
     except json.JSONDecodeError:
-        return web.Response(status=400, text="Invalid JSON")
+        return web.Response(status=400, text="Invalid JSON", headers=CORS_HEADERS)
     except Exception as e:
         logger.exception("Error handling tool call")
         return web.json_response({
             "jsonrpc": "2.0",
             "error": {"code": -32603, "message": str(e)}
-        }, status=500)
+        }, status=500, headers=CORS_HEADERS)
 
 
 async def handle_health(request: web.Request) -> web.Response:
@@ -372,15 +393,17 @@ async def handle_health(request: web.Request) -> web.Response:
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
         "tools": len(mcp_server.tools)
-    })
+    }, headers=CORS_HEADERS)
 
 
 def create_app() -> web.Application:
     """Create the aiohttp application."""
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app.router.add_get('/mcp/sse', handle_sse)
-    app.router.add_post('/mcp/sse', handle_mcp_post)  # Handle POST to SSE endpoint
+    app.router.add_post('/mcp/sse', handle_mcp_post)
+    app.router.add_options('/mcp/sse', lambda r: web.Response(status=204))  # CORS preflight
     app.router.add_post('/mcp/tools/call', handle_tool_call)
+    app.router.add_options('/mcp/tools/call', lambda r: web.Response(status=204))
     app.router.add_get('/health', handle_health)
     return app
 
