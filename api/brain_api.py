@@ -35,6 +35,18 @@ CORS_HEADERS = {
     "Access-Control-Max-Age": "86400",
 }
 
+# Check if BrainService is available at module load time
+BRAIN_AVAILABLE = False
+_brain_import_error = None
+
+try:
+    from core.brain import BrainService
+    BRAIN_AVAILABLE = True
+except ImportError as e:
+    _brain_import_error = str(e)
+    logger.warning("BrainService not available: %s", e)
+
+
 
 def _make_response(
     status_code: int,
@@ -109,17 +121,12 @@ def _get_brain_service():
     Get or create BrainService instance.
 
     Returns:
-        BrainService instance.
-
-    Raises:
-        ImportError: If brain module not available.
+        BrainService instance, or None if BrainService is not available.
     """
-    try:
-        from core.brain import BrainService
-        return BrainService()
-    except ImportError as e:
-        logger.error("Failed to import BrainService: %s", str(e))
-        raise
+    if not BRAIN_AVAILABLE:
+        logger.error("BrainService not available: %s", _brain_import_error)
+        return None
+    return BrainService()
 
 
 def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[str, Any]:
