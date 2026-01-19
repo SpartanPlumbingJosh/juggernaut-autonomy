@@ -9,7 +9,7 @@ FROM python:3.11-slim
 
 # Labels
 LABEL maintainer="JUGGERNAUT System"
-LABEL version="1.0.0"
+LABEL version="1.2.0"
 LABEL description="JUGGERNAUT Autonomy Engine - Autonomous Revenue Framework"
 
 # Security: Create non-root user
@@ -24,6 +24,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY main.py .
 COPY core/ ./core/
+COPY api/ ./api/
 
 # Set ownership
 RUN chown -R juggernaut:juggernaut /app
