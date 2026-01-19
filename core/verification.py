@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
 
-from core.database import execute_query
+from core.database import query_db
 from core.notifications import SlackNotifier
 
 
@@ -132,7 +132,7 @@ class CompletionVerifier:
             reason=None if is_valid else "No valid evidence found"
         )
     
-    async def audit_completed_tasks(self, days_back: int = 7) -> List[VerificationResult]:
+    def audit_completed_tasks(self, days_back: int = 7) -> List[VerificationResult]:
         """
         Audit all tasks completed in the last N days.
         
@@ -143,23 +143,25 @@ class CompletionVerifier:
             List of VerificationResult for each task
         """
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
+        cutoff_str = cutoff_date.isoformat()
         
-        query = """
+        query = f"""
             SELECT id, title, completion_evidence, completed_at, assigned_worker
             FROM governance_tasks
             WHERE status = 'completed'
-              AND (completed_at >= %1 OR completed_at IS NULL)
+              AND (completed_at >= '{cutoff_str}' OR completed_at IS NULL)
             ORDER BY completed_at DESC NULLS FIRST
         """
         
         try:
-            results = await execute_query(query, [cutoff_date.isoformat()])
-            return [self.verify_task(task) for task in results]
+            result = query_db(query)
+            tasks = result.get("rows", [])
+            return [self.verify_task(task) for task in tasks]
         except Exception as e:
             print(f"[VERIFICATION] Error auditing tasks: {e}")
             return []
     
-    async def reset_fake_completions(self, verifications: List[VerificationResult]) -> int:
+    def reset_fake_completions(self, verifications: List[VerificationResult]) -> int:
         """
         Reset tasks without valid evidence back to pending.
         
@@ -178,7 +180,10 @@ class CompletionVerifier:
         
         for task in fake_tasks:
             try:
-                query = """
+                # Escape task_id for safety
+                task_id_escaped = str(task.task_id).replace("'", "''")
+                
+                query = f"""
                     UPDATE governance_tasks 
                     SET status = 'pending',
                         completed_at = NULL,
@@ -186,12 +191,12 @@ class CompletionVerifier:
                             COALESCE(error_message, ''),
                             '[VERIFICATION] Reset: No valid completion evidence. '
                         )
-                    WHERE id = %1::uuid
+                    WHERE id = '{task_id_escaped}'::uuid
                       AND status = 'completed'
                 """
                 
-                result = await execute_query(query, [task.task_id])
-                if result:
+                result = query_db(query)
+                if result.get("rowCount", 0) > 0:
                     reset_count += 1
                     
                     # Send alert for each fake completion
@@ -206,7 +211,7 @@ class CompletionVerifier:
         
         return reset_count
     
-    async def generate_audit_report(self, days_back: int = 7) -> AuditReport:
+    def generate_audit_report(self, days_back: int = 7) -> AuditReport:
         """
         Generate a complete audit report.
         
@@ -217,11 +222,11 @@ class CompletionVerifier:
             AuditReport with all findings
         """
         # Audit tasks
-        verifications = await self.audit_completed_tasks(days_back)
+        verifications = self.audit_completed_tasks(days_back)
         
         # Reset fake completions
         fake_completions = [v for v in verifications if not v.has_evidence]
-        reset_count = await self.reset_fake_completions(verifications)
+        reset_count = self.reset_fake_completions(verifications)
         
         # Build report
         report = AuditReport(
@@ -241,14 +246,17 @@ class CompletionVerifier:
         )
         
         # Save report to database
-        await self._save_report(report)
+        self._save_report(report)
         
         return report
     
-    async def _save_report(self, report: AuditReport) -> None:
+    def _save_report(self, report: AuditReport) -> None:
         """Save audit report to database."""
         try:
-            query = """
+            details_json = json.dumps(report.details).replace("'", "''")
+            report_date = report.report_date.date().isoformat()
+            
+            query = f"""
                 INSERT INTO audit_reports (
                     report_type, 
                     report_date, 
@@ -258,21 +266,15 @@ class CompletionVerifier:
                     details
                 ) VALUES (
                     'weekly_completion_verification',
-                    %1,
-                    %2,
-                    %3,
-                    %4,
-                    %5::jsonb
+                    '{report_date}',
+                    {report.tasks_audited},
+                    {report.fake_completions_found},
+                    {report.fake_completions_reset},
+                    '{details_json}'::jsonb
                 )
             """
             
-            await execute_query(query, [
-                report.report_date.date().isoformat(),
-                report.tasks_audited,
-                report.fake_completions_found,
-                report.fake_completions_reset,
-                json.dumps(report.details)
-            ])
+            query_db(query)
             
         except Exception as e:
             print(f"[VERIFICATION] Error saving report: {e}")
@@ -280,7 +282,7 @@ class CompletionVerifier:
 
 # Convenience functions for scheduled jobs
 
-async def run_daily_verification() -> Dict[str, Any]:
+def run_daily_verification() -> Dict[str, Any]:
     """
     Run daily verification check.
     Checks tasks completed in the last 24 hours.
@@ -291,12 +293,12 @@ async def run_daily_verification() -> Dict[str, Any]:
     verifier = CompletionVerifier()
     
     # Check last 24 hours
-    verifications = await verifier.audit_completed_tasks(days_back=1)
+    verifications = verifier.audit_completed_tasks(days_back=1)
     
     fake_completions = [v for v in verifications if not v.has_evidence]
     
     # Reset fake completions
-    reset_count = await verifier.reset_fake_completions(verifications)
+    reset_count = verifier.reset_fake_completions(verifications)
     
     return {
         "tasks_checked": len(verifications),
@@ -306,25 +308,22 @@ async def run_daily_verification() -> Dict[str, Any]:
     }
 
 
-async def run_weekly_audit() -> Dict[str, Any]:
+def run_weekly_audit() -> Dict[str, Any]:
     """
     Run weekly audit and generate report.
     
     Returns:
-        Dictionary with audit report summary
+        Dictionary with audit summary
     """
     verifier = CompletionVerifier()
-    report = await verifier.generate_audit_report(days_back=7)
+    
+    # Generate full report
+    report = verifier.generate_audit_report(days_back=7)
     
     # Send summary to Slack
-    notifier = SlackNotifier()
-    notifier.notify_alert(
-        alert_type="Weekly Audit Report",
-        message=(
-            f"Audited: {report.tasks_audited} tasks\n"
-            f"Fake completions: {report.fake_completions_found}\n"
-            f"Tasks reset: {report.fake_completions_reset}"
-        ),
+    verifier.notifier.notify_alert(
+        alert_type="Weekly Verification Audit",
+        message=f"Tasks audited: {report.tasks_audited}, Fake completions found: {report.fake_completions_found}, Reset: {report.fake_completions_reset}",
         severity="info" if report.fake_completions_found == 0 else "warning"
     )
     
@@ -332,5 +331,5 @@ async def run_weekly_audit() -> Dict[str, Any]:
         "report_date": report.report_date.isoformat(),
         "tasks_audited": report.tasks_audited,
         "fake_completions_found": report.fake_completions_found,
-        "fake_completions_reset": report.fake_completions_reset,
+        "fake_completions_reset": report.fake_completions_reset
     }
