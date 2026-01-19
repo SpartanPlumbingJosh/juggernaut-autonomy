@@ -10,6 +10,11 @@ import urllib.error
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 
+import logging
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
 NEON_CONNECTION_STRING = os.getenv(
@@ -196,7 +201,7 @@ def log_execution(
     try:
         return _db.insert("execution_logs", data)
     except Exception as e:
-        print(f"Failed to log execution: {e}")
+        logger.error("Failed to log execution: %s", e)
         return None
 
 
@@ -256,7 +261,7 @@ def cleanup_old_logs(days_to_keep: int = 30) -> int:
         )
         return deleted
     except Exception as e:
-        print(f"Failed to cleanup logs: {e}")
+        logger.error("Failed to cleanup logs: %s", e)
         return 0
 
 
@@ -312,7 +317,7 @@ def get_log_summary(days: int = 7) -> Dict[str, Any]:
             "by_action": {r["action"]: int(r["count"]) for r in actions}
         }
     except Exception as e:
-        print(f"Failed to get log summary: {e}")
+        logger.error("Failed to get log summary: %s", e)
         return {}
 
 
@@ -396,7 +401,7 @@ def create_opportunity(
         
         return opp_id
     except Exception as e:
-        print(f"Failed to create opportunity: {e}")
+        logger.error("Failed to create opportunity: %s", e)
         return None
 
 
@@ -424,7 +429,7 @@ def update_opportunity(
         )
         return True
     except Exception as e:
-        print(f"Failed to update opportunity: {e}")
+        logger.error("Failed to update opportunity: %s", e)
         return False
 
 
@@ -516,7 +521,7 @@ def record_revenue(
         
         return rev_id
     except Exception as e:
-        print(f"Failed to record revenue: {e}")
+        logger.error("Failed to record revenue: %s", e)
         return None
 
 
@@ -576,7 +581,7 @@ def get_revenue_summary(days: int = 30) -> Dict[str, Any]:
             "by_type": {r["revenue_type"]: float(r["total"]) for r in by_type}
         }
     except Exception as e:
-        print(f"Failed to get revenue summary: {e}")
+        logger.error("Failed to get revenue summary: %s", e)
         return {}
 
 
@@ -658,7 +663,7 @@ def write_memory(
     try:
         return _db.insert("memories", data)
     except Exception as e:
-        print(f"Failed to write memory: {e}")
+        logger.error("Failed to write memory: %s", e)
         return None
 
 
@@ -707,7 +712,7 @@ def update_memory_importance(memory_id: str, new_importance: float) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to update memory: {e}")
+        logger.error("Failed to update memory: %s", e)
         return False
 
 
@@ -756,7 +761,7 @@ def send_message(
     try:
         return _db.insert("communications", data)
     except Exception as e:
-        print(f"Failed to send message: {e}")
+        logger.error("Failed to send message: %s", e)
         return None
 
 
@@ -807,7 +812,7 @@ def acknowledge_message(message_id: str, worker_id: str) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to acknowledge message: {e}")
+        logger.error("Failed to acknowledge message: %s", e)
         return False
 
 
@@ -818,7 +823,7 @@ def mark_message_read(message_id: str) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to mark message read: {e}")
+        logger.error("Failed to mark message read: %s", e)
         return False
 
 
@@ -891,7 +896,7 @@ def record_cost(
     try:
         return _db.insert("cost_events", data)
     except Exception as e:
-        print(f"Failed to record cost: {e}")
+        logger.error("Failed to record cost: %s", e)
         return None
 
 
@@ -1035,7 +1040,7 @@ def get_cost_summary(
             "by_category": {r["category"]: int(r["total"]) for r in by_cat}
         }
     except Exception as e:
-        print(f"Failed to get cost summary: {e}")
+        logger.error("Failed to get cost summary: %s", e)
         return {}
 
 
@@ -1060,7 +1065,7 @@ def get_cost_events(
     try:
         return _db.query(sql).get("rows", [])
     except Exception as e:
-        print(f"Failed to get cost events: {e}")
+        logger.error("Failed to get cost events: %s", e)
         return []
 
 
@@ -1107,7 +1112,7 @@ def create_budget(
     try:
         return _db.insert("cost_budgets", data)
     except Exception as e:
-        print(f"Failed to create budget: {e}")
+        logger.error("Failed to create budget: %s", e)
         return None
 
 
@@ -1231,7 +1236,7 @@ def get_profit_loss(days: int = 30) -> Dict[str, Any]:
             "margin_percent": round(((net_revenue - total_cost_dollars) / net_revenue) * 100, 1) if net_revenue > 0 else 0
         }
     except Exception as e:
-        print(f"Failed to get profit/loss: {e}")
+        logger.error("Failed to get profit/loss: %s", e)
         return {}
 
 
@@ -1280,7 +1285,7 @@ def get_experiment_roi(experiment_id: str) -> Dict[str, Any]:
             "roi_percent": round(roi, 1)
         }
     except Exception as e:
-        print(f"Failed to get experiment ROI: {e}")
+        logger.error("Failed to get experiment ROI: %s", e)
         return {}
 
 
@@ -1323,7 +1328,7 @@ def create_model(
     try:
         return _db.insert("scoring_models", data)
     except Exception as e:
-        print(f"Failed to create model: {e}")
+        logger.error("Failed to create model: %s", e)
         return None
 
 
@@ -1358,7 +1363,7 @@ def get_model(model_id: str = None, name: str = None, active_only: bool = False)
         rows = result.get("rows", [])
         return rows[0] if rows else None
     except Exception as e:
-        print(f"Failed to get model: {e}")
+        logger.error("Failed to get model: %s", e)
         return None
 
 
@@ -1376,7 +1381,7 @@ def list_models(model_type: str = None, active_only: bool = False) -> List[Dict]
     try:
         return _db.query(sql).get("rows", [])
     except Exception as e:
-        print(f"Failed to list models: {e}")
+        logger.error("Failed to list models: %s", e)
         return []
 
 
@@ -1399,7 +1404,7 @@ def create_model_version(
     # Get current model
     current = get_model(model_id=model_id)
     if not current:
-        print(f"Model {model_id} not found")
+        logger.warning("Model %s not found", model_id)
         return None
     
     # Create new version
@@ -1422,7 +1427,7 @@ def create_model_version(
         )
         return new_id
     except Exception as e:
-        print(f"Failed to create model version: {e}")
+        logger.error("Failed to create model version: %s", e)
         return None
 
 
@@ -1455,7 +1460,7 @@ def activate_model(model_id: str) -> bool:
         )
         return True
     except Exception as e:
-        print(f"Failed to activate model: {e}")
+        logger.error("Failed to activate model: %s", e)
         return False
 
 
@@ -1473,7 +1478,7 @@ def rollback_model(name: str, to_version: int = None) -> bool:
     # Get current active version
     current = get_model(name=name, active_only=True)
     if not current:
-        print(f"No active model found for {name}")
+        logger.warning("No active model found for %s", name)
         return False
     
     # Find target version
@@ -1487,13 +1492,13 @@ def rollback_model(name: str, to_version: int = None) -> bool:
         result = _db.query(sql)
         rows = result.get("rows", [])
         if not rows:
-            print(f"No previous version found for {name}")
+            logger.warning("No previous version found for %s", name)
             return False
         
         target_id = rows[0]["id"]
         return activate_model(target_id)
     except Exception as e:
-        print(f"Failed to rollback model: {e}")
+        logger.error("Failed to rollback model: %s", e)
         return False
 
 
@@ -1537,7 +1542,7 @@ def record_prediction(
     try:
         return _db.insert("prediction_outcomes", data)
     except Exception as e:
-        print(f"Failed to record prediction: {e}")
+        logger.error("Failed to record prediction: %s", e)
         return None
 
 
@@ -1584,7 +1589,7 @@ def resolve_prediction(
         _db.query(update_sql)
         return True
     except Exception as e:
-        print(f"Failed to resolve prediction: {e}")
+        logger.error("Failed to resolve prediction: %s", e)
         return False
 
 
@@ -1629,7 +1634,7 @@ def get_model_accuracy(model_id: str, days: int = 30) -> Dict[str, Any]:
             "median_error": round(float(row.get("median_error") or 0), 4) if row.get("median_error") else None
         }
     except Exception as e:
-        print(f"Failed to get model accuracy: {e}")
+        logger.error("Failed to get model accuracy: %s", e)
         return {}
 
 
@@ -1651,7 +1656,7 @@ def update_model_accuracy(model_id: str) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to update model accuracy: {e}")
+        logger.error("Failed to update model accuracy: %s", e)
         return False
 
 
@@ -1708,7 +1713,7 @@ def create_ab_test(
         )
         return exp_id
     except Exception as e:
-        print(f"Failed to create A/B test: {e}")
+        logger.error("Failed to create A/B test: %s", e)
         return None
 
 
@@ -1869,7 +1874,7 @@ def conclude_ab_test(experiment_id: str, winner: str = None) -> bool:
         
         return True
     except Exception as e:
-        print(f"Failed to conclude A/B test: {e}")
+        logger.error("Failed to conclude A/B test: %s", e)
         return False
 
 
@@ -1881,7 +1886,7 @@ def list_ab_tests(status: str = None) -> List[Dict]:
     try:
         return _db.query(sql).get("rows", [])
     except Exception as e:
-        print(f"Failed to list A/B tests: {e}")
+        logger.error("Failed to list A/B tests: %s", e)
         return []
 
 
@@ -1941,7 +1946,7 @@ def start_training_run(
         )
         return run_id
     except Exception as e:
-        print(f"Failed to start training run: {e}")
+        logger.error("Failed to start training run: %s", e)
         return None
 
 
@@ -2011,7 +2016,7 @@ def complete_training_run(
         
         return True
     except Exception as e:
-        print(f"Failed to complete training run: {e}")
+        logger.error("Failed to complete training run: %s", e)
         return False
 
 
@@ -2029,7 +2034,7 @@ def fail_training_run(run_id: str, error_message: str) -> bool:
         _db.query(sql)
         return True
     except Exception as e:
-        print(f"Failed to fail training run: {e}")
+        logger.error("Failed to fail training run: %s", e)
         return False
 
 
@@ -2041,7 +2046,7 @@ def get_training_history(model_id: str = None, limit: int = 20) -> List[Dict]:
     try:
         return _db.query(sql).get("rows", [])
     except Exception as e:
-        print(f"Failed to get training history: {e}")
+        logger.error("Failed to get training history: %s", e)
         return []
 
 
@@ -2050,7 +2055,7 @@ def get_model_performance() -> List[Dict]:
     try:
         return _db.query("SELECT * FROM v_model_performance").get("rows", [])
     except Exception as e:
-        print(f"Failed to get model performance: {e}")
+        logger.error("Failed to get model performance: %s", e)
         return []
 
 
