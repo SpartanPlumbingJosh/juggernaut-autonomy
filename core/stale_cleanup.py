@@ -13,10 +13,15 @@ from typing import Any
 
 # Configuration
 DEFAULT_STALE_THRESHOLD_MINUTES = 30
-NEON_ENDPOINT = os.getenv("NEON_ENDPOINT", "")
+
+# Use environment variables with hardcoded fallbacks for Railway deployment
+NEON_ENDPOINT = os.getenv(
+    "NEON_ENDPOINT",
+    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+)
 NEON_CONNECTION_STRING = os.getenv(
     "DATABASE_URL",
-    ""
+    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
 )
 
 # Logger setup
@@ -211,3 +216,4 @@ if __name__ == "__main__":
         print("Resetting stale tasks...")
         reset_count, reset_tasks = reset_stale_tasks()
         print(f"Reset {reset_count} task(s)")
+
