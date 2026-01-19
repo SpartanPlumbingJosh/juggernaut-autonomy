@@ -11,6 +11,7 @@ This service runs continuously and:
 3) Handles agent failures via handle_agent_failure()
 4) Checks and auto-escalates timed-out escalations
 5) Synchronizes shared memory across agents
+6) Garbage collects expired memory entries periodically
 
 Usage:
     python orchestrator_main.py
@@ -40,6 +41,7 @@ try:
         check_escalation_timeouts,
         detect_agent_failures,
         discover_agents,
+        garbage_collect_memory,
         get_resource_status,
         handle_agent_failure,
         log_coordination_event,
@@ -65,11 +67,13 @@ HEALTH_CHECK_INTERVAL_SECONDS: int = 60
 MEMORY_SYNC_INTERVAL_SECONDS: int = 120
 FAILURE_CHECK_INTERVAL_SECONDS: int = 45
 ESCALATION_CHECK_INTERVAL_SECONDS: int = 60
+GARBAGE_COLLECT_INTERVAL_SECONDS: int = 3600  # Run GC every hour
 
 # Thresholds
 MIN_AGENT_HEALTH_SCORE: float = 0.3
 MAX_TASKS_PER_CYCLE: int = 10
 HEARTBEAT_TIMEOUT_SECONDS: int = 120
+MEMORY_MAX_AGE_DAYS: int = 30
 
 # =============================================================================
 # GLOBAL STATE
@@ -80,6 +84,7 @@ _last_health_check: float = 0.0
 _last_memory_sync: float = 0.0
 _last_failure_check: float = 0.0
 _last_escalation_check: float = 0.0
+_last_garbage_collect: float = 0.0
 _cycle_count: int = 0
 
 
@@ -114,18 +119,18 @@ def discover_available_agents() -> List[Dict[str, Any]]:
             status=None,
             min_health_score=MIN_AGENT_HEALTH_SCORE
         )
-        
+
         active_count = sum(
-            1 for a in agents 
+            1 for a in agents
             if a.get("status") not in ("offline", "error")
         )
-        
+
         logger.info(
             "Discovered %d agents (%d active)",
             len(agents),
             active_count
         )
-        
+
         return agents
     except Exception as e:
         logger.error("Failed to discover agents: %s", str(e))
@@ -139,34 +144,34 @@ def fetch_pending_tasks() -> List[Dict[str, Any]]:
     Returns:
         List of pending task records
     """
-    from core.orchestration import _query, _format_value
-    
+    from core.orchestration import _query
+
     sql = f"""
-    SELECT 
+    SELECT
         id, task_type, title, description, priority, goal_id,
         created_at, payload
     FROM governance_tasks
     WHERE status = 'pending'
       AND (assigned_worker IS NULL OR assigned_worker = '')
-    ORDER BY 
-        CASE priority 
-            WHEN 'critical' THEN 1 
-            WHEN 'high' THEN 2 
-            WHEN 'medium' THEN 3 
-            WHEN 'low' THEN 4 
-            ELSE 5 
+    ORDER BY
+        CASE priority
+            WHEN 'critical' THEN 1
+            WHEN 'high' THEN 2
+            WHEN 'medium' THEN 3
+            WHEN 'low' THEN 4
+            ELSE 5
         END,
         created_at ASC
     LIMIT {MAX_TASKS_PER_CYCLE}
     """
-    
+
     try:
         result = _query(sql)
         tasks = result.get("rows", [])
-        
+
         if tasks:
             logger.info("Found %d pending tasks to route", len(tasks))
-        
+
         return tasks
     except Exception as e:
         logger.error("Failed to fetch pending tasks: %s", str(e))
@@ -184,13 +189,13 @@ def route_pending_tasks(agents: List[Dict[str, Any]]) -> Dict[str, int]:
         Dict with counts of routed and failed assignments
     """
     results = {"routed": 0, "failed": 0, "no_agent": 0}
-    
+
     if not agents:
         logger.warning("No agents available for task routing")
         return results
-    
+
     pending_tasks = fetch_pending_tasks()
-    
+
     for task_record in pending_tasks:
         try:
             # Create SwarmTask for routing
@@ -201,7 +206,7 @@ def route_pending_tasks(agents: List[Dict[str, Any]]) -> Dict[str, int]:
                 "medium": TaskPriority.NORMAL,
                 "low": TaskPriority.LOW,
             }
-            
+
             swarm_task = SwarmTask(
                 task_id=task_record["id"],
                 task_type=task_record.get("task_type", ""),
@@ -209,20 +214,20 @@ def route_pending_tasks(agents: List[Dict[str, Any]]) -> Dict[str, int]:
                 priority=priority_map.get(priority_value, TaskPriority.NORMAL),
                 goal_id=task_record.get("goal_id"),
             )
-            
+
             # Route to best agent
             target_agent = route_task(swarm_task)
-            
+
             if target_agent:
                 # Assign the task
                 from core.orchestration import orchestrator_assign_task
-                
+
                 assign_result = orchestrator_assign_task(
                     task_id=task_record["id"],
                     target_worker_id=target_agent,
                     reason="capability_match"
                 )
-                
+
                 if assign_result.get("success"):
                     results["routed"] += 1
                     logger.info(
@@ -243,7 +248,7 @@ def route_pending_tasks(agents: List[Dict[str, Any]]) -> Dict[str, int]:
                     "No suitable agent found for task: %s",
                     task_record.get("title", task_record["id"])
                 )
-                
+
         except Exception as e:
             results["failed"] += 1
             logger.error(
@@ -251,7 +256,7 @@ def route_pending_tasks(agents: List[Dict[str, Any]]) -> Dict[str, int]:
                 task_record.get("id", "unknown"),
                 str(e)
             )
-    
+
     return results
 
 
@@ -263,50 +268,50 @@ def handle_detected_failures() -> int:
         Number of failures handled
     """
     handled_count = 0
-    
+
     try:
         failed_agents = detect_agent_failures(
             heartbeat_threshold_seconds=HEARTBEAT_TIMEOUT_SECONDS
         )
-        
+
         for agent in failed_agents:
             worker_id = agent.get("worker_id")
-            
+
             if not worker_id:
                 continue
-            
+
             logger.warning(
                 "Detected failed agent: %s (last heartbeat: %s)",
                 worker_id,
                 agent.get("last_heartbeat", "unknown")
             )
-            
+
             try:
                 result = handle_agent_failure(worker_id)
-                
+
                 logger.info(
                     "Handled failure for %s: %d tasks reassigned",
                     worker_id,
                     result.get("tasks_reassigned", 0)
                 )
-                
+
                 if result.get("escalation_id"):
                     logger.warning(
                         "Created escalation %s for stranded tasks",
                         result["escalation_id"]
                     )
-                
+
                 handled_count += 1
-                
+
             except Exception as e:
                 logger.error(
                     "Failed to handle agent failure for %s: %s",
                     worker_id,
                     str(e)
                 )
-        
+
         return handled_count
-        
+
     except Exception as e:
         logger.error("Error detecting agent failures: %s", str(e))
         return 0
@@ -321,16 +326,16 @@ def check_and_escalate_timeouts() -> int:
     """
     try:
         escalated_ids = check_escalation_timeouts()
-        
+
         if escalated_ids:
             logger.info(
                 "Auto-escalated %d timed-out escalations: %s",
                 len(escalated_ids),
                 ", ".join(str(eid)[:8] for eid in escalated_ids[:5])
             )
-        
+
         return len(escalated_ids)
-        
+
     except Exception as e:
         logger.error("Error checking escalation timeouts: %s", str(e))
         return 0
@@ -344,11 +349,11 @@ def sync_shared_memory() -> int:
         Number of agents synced
     """
     synced_count = 0
-    
+
     try:
         # Write orchestrator status to shared memory
         status = get_resource_status()
-        
+
         write_shared_memory(
             key="orchestrator_status",
             value={
@@ -361,21 +366,44 @@ def sync_shared_memory() -> int:
             scope="global",
             ttl_seconds=MEMORY_SYNC_INTERVAL_SECONDS * 2
         )
-        
+
         # Sync orchestrator status to all agents
         synced_count = sync_memory_to_agents(
             key="orchestrator_status",
             scope="global",
             target_agents=None  # Sync to all with read access
         )
-        
+
         if synced_count > 0:
             logger.debug("Synced shared memory to %d agents", synced_count)
-        
+
         return synced_count
-        
+
     except Exception as e:
         logger.error("Error syncing shared memory: %s", str(e))
+        return 0
+
+
+def run_memory_garbage_collection() -> int:
+    """
+    Clean up expired and old shared memory entries.
+
+    Returns:
+        Number of entries deleted
+    """
+    try:
+        deleted_count = garbage_collect_memory(max_age_days=MEMORY_MAX_AGE_DAYS)
+
+        if deleted_count > 0:
+            logger.info(
+                "Memory garbage collection: deleted %d expired entries",
+                deleted_count
+            )
+
+        return deleted_count
+
+    except Exception as e:
+        logger.error("Error during memory garbage collection: %s", str(e))
         return 0
 
 
@@ -388,10 +416,10 @@ def perform_health_check() -> Dict[str, Any]:
     """
     try:
         health = run_health_check()
-        
+
         status = health.get("status", "unknown")
         issues = health.get("issues", [])
-        
+
         if status == "healthy":
             logger.info("Health check: HEALTHY")
         elif status == "warning":
@@ -410,16 +438,16 @@ def perform_health_check() -> Dict[str, Any]:
                 status.upper(),
                 len(issues)
             )
-            
+
             for issue in issues:
                 logger.error(
                     "  Issue: %s [%s]",
                     issue.get("type", "unknown"),
                     issue.get("severity", "unknown")
                 )
-        
+
         return health
-        
+
     except Exception as e:
         logger.error("Health check failed: %s", str(e))
         return {"status": "error", "error": str(e), "issues": []}
@@ -435,22 +463,24 @@ def run_orchestration_cycle() -> None:
     3) Handles failures
     4) Checks escalations
     5) Syncs memory
+    6) Garbage collects expired memory
     """
     global _last_health_check, _last_memory_sync
-    global _last_failure_check, _last_escalation_check, _cycle_count
-    
+    global _last_failure_check, _last_escalation_check
+    global _last_garbage_collect, _cycle_count
+
     current_time = time.time()
     _cycle_count += 1
-    
+
     logger.info("=== Orchestration cycle %d starting ===", _cycle_count)
-    
+
     # Step 1: Discover available agents
     agents = discover_available_agents()
-    
+
     # Step 2: Route pending tasks
     if agents:
         routing_results = route_pending_tasks(agents)
-        
+
         if routing_results["routed"] > 0 or routing_results["failed"] > 0:
             logger.info(
                 "Task routing: %d routed, %d failed, %d no agent",
@@ -458,30 +488,30 @@ def run_orchestration_cycle() -> None:
                 routing_results["failed"],
                 routing_results["no_agent"]
             )
-    
+
     # Step 3: Check for agent failures (periodic)
     if current_time - _last_failure_check >= FAILURE_CHECK_INTERVAL_SECONDS:
         failures_handled = handle_detected_failures()
         _last_failure_check = current_time
-        
+
         if failures_handled > 0:
             logger.info("Handled %d agent failures", failures_handled)
-    
+
     # Step 4: Check escalation timeouts (periodic)
     if current_time - _last_escalation_check >= ESCALATION_CHECK_INTERVAL_SECONDS:
         escalated = check_and_escalate_timeouts()
         _last_escalation_check = current_time
-    
+
     # Step 5: Sync shared memory (periodic)
     if current_time - _last_memory_sync >= MEMORY_SYNC_INTERVAL_SECONDS:
         synced = sync_shared_memory()
         _last_memory_sync = current_time
-    
+
     # Step 6: Health check (periodic)
     if current_time - _last_health_check >= HEALTH_CHECK_INTERVAL_SECONDS:
         health = perform_health_check()
         _last_health_check = current_time
-        
+
         # Log coordination event for tracking
         log_coordination_event(
             "orchestrator_cycle",
@@ -492,7 +522,12 @@ def run_orchestration_cycle() -> None:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
-    
+
+    # Step 7: Garbage collect expired memory (periodic - hourly)
+    if current_time - _last_garbage_collect >= GARBAGE_COLLECT_INTERVAL_SECONDS:
+        gc_deleted = run_memory_garbage_collection()
+        _last_garbage_collect = current_time
+
     logger.info("=== Orchestration cycle %d complete ===", _cycle_count)
 
 
@@ -504,64 +539,69 @@ def main() -> int:
         Exit code (0 for success, non-zero for error)
     """
     global _running, _last_health_check, _last_failure_check
-    global _last_escalation_check, _last_memory_sync
-    
+    global _last_escalation_check, _last_memory_sync, _last_garbage_collect
+
     # Register signal handlers
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
-    
+
     logger.info("=" * 60)
     logger.info("JUGGERNAUT Orchestrator starting")
     logger.info("Worker ID: %s", WORKER_ID)
     logger.info("Orchestration interval: %d seconds", ORCHESTRATION_INTERVAL_SECONDS)
+    logger.info("Memory sync interval: %d seconds", MEMORY_SYNC_INTERVAL_SECONDS)
+    logger.info("Garbage collection interval: %d seconds", GARBAGE_COLLECT_INTERVAL_SECONDS)
     logger.info("=" * 60)
-    
+
     # Initialize timing
     current_time = time.time()
     _last_health_check = current_time
     _last_memory_sync = current_time
     _last_failure_check = current_time
     _last_escalation_check = current_time
-    
+    _last_garbage_collect = current_time
+
     # Initial health check
     logger.info("Running initial health check...")
     initial_health = perform_health_check()
-    
+
     if initial_health.get("status") == "critical":
         logger.warning(
             "System in CRITICAL state at startup - continuing with caution"
         )
-    
+
     # Log startup event
     log_coordination_event(
         "orchestrator_started",
         {
             "worker_id": WORKER_ID,
             "initial_health": initial_health.get("status", "unknown"),
+            "memory_sync_interval": MEMORY_SYNC_INTERVAL_SECONDS,
+            "garbage_collect_interval": GARBAGE_COLLECT_INTERVAL_SECONDS,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
-    
+
     # Main orchestration loop
     logger.info("Entering main orchestration loop...")
-    
+
     try:
         while _running:
             try:
                 run_orchestration_cycle()
             except Exception as e:
                 logger.error("Error in orchestration cycle: %s", str(e))
-            
+
             # Sleep between cycles
             if _running:
                 time.sleep(ORCHESTRATION_INTERVAL_SECONDS)
-                
+
     except KeyboardInterrupt:
         logger.info("Keyboard interrupt received")
-    
+
     # Cleanup
     logger.info("Orchestrator shutting down...")
-    
+
     log_coordination_event(
         "orchestrator_stopped",
         {
@@ -570,7 +610,7 @@ def main() -> int:
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
     )
-    
+
     logger.info("Orchestrator stopped after %d cycles", _cycle_count)
     return 0
 
