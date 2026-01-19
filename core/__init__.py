@@ -133,6 +133,17 @@ from .error_recovery import (
 # PHASE 4: EXPERIMENTATION FRAMEWORK (from experiments.py)
 # =============================================================================
 
+# Phase 4.5b: Learning Application (from learning_application.py)
+from .learning_application import (
+    execute_learning_application_cycle,
+    get_applicable_learnings,
+    apply_learning,
+    increment_applied_count,
+    CONFIDENCE_THRESHOLD_FOR_APPLICATION,
+    MAX_LEARNINGS_PER_CYCLE,
+    DEFAULT_APPLICATION_INTERVAL_SECONDS,
+)
+
 from .experiments import (
     # Phase 4.1: Experiment Design
     create_experiment_template,
@@ -371,6 +382,12 @@ __all__ = [
     "create_rollback_snapshot", "execute_rollback", "check_auto_rollback_triggers",
     
     # Phase 4.5 Self-Improvement
+    
+    # Phase 4.5b Learning Application
+    "execute_learning_application_cycle", "get_applicable_learnings",
+    "apply_learning", "increment_applied_count",
+    "CONFIDENCE_THRESHOLD_FOR_APPLICATION", "MAX_LEARNINGS_PER_CYCLE",
+    "DEFAULT_APPLICATION_INTERVAL_SECONDS",
     "record_learning", "extract_learnings", "get_learnings",
     "get_relevant_learnings", "validate_learning",
     
@@ -429,3 +446,4 @@ __all__ = [
     # Convenience
     "get_worker_dashboard", "get_system_status",
 ]
+
