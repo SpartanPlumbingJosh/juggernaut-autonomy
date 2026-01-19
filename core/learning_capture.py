@@ -170,6 +170,44 @@ def _generate_learning_summary(
         )
 
 
+def _sanitize_task_description(description: str) -> str:
+    """
+    Sanitize task description to remove potential sensitive data.
+
+    Redacts patterns that look like credentials, API keys, SQL queries,
+    connection strings, etc.
+
+    Args:
+        description: Raw task description
+
+    Returns:
+        Sanitized description safe for storage
+    """
+    import re
+
+    if not description:
+        return ""
+
+    sanitized = description
+
+    # Redact patterns that look like credentials/secrets
+    sensitive_patterns = [
+        # API keys and tokens (various formats)
+        (r'(?i)(api[_-]?key|token|secret|password|auth)\s*[=:]\s*[\'"]?[\w\-_.]+[\'"]?', r'\1=<REDACTED>'),
+        # Connection strings
+        (r'(?i)(postgresql|mysql|mongodb|redis)://[^\s]+', r'\1://<REDACTED>'),
+        # Bearer tokens
+        (r'(?i)bearer\s+[\w\-_.]+', 'Bearer <REDACTED>'),
+        # Generic key=value patterns with sensitive keys
+        (r'(?i)(password|secret|token|key|credential)[\'"]?\s*[=:]\s*[\'"]?[^\s,\'"}\]]+', r'\1=<REDACTED>'),
+    ]
+
+    for pattern, replacement in sensitive_patterns:
+        sanitized = re.sub(pattern, replacement, sanitized)
+
+    return sanitized
+
+
 def _build_learning_details(
     task_type: str,
     task_title: str,
@@ -203,9 +241,10 @@ def _build_learning_details(
         "captured_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    # Add description excerpt (first 500 chars)
+    # Add description excerpt (first 500 chars, sanitized)
     if task_description:
-        details["description_excerpt"] = task_description[:500]
+        sanitized_desc = _sanitize_task_description(task_description)
+        details["description_excerpt"] = sanitized_desc[:500]
 
     # Add what worked or what failed
     if success:
@@ -313,12 +352,23 @@ def _sanitize_result_for_storage(result: Dict[str, Any]) -> Dict[str, Any]:
         # Handle nested dicts
         if isinstance(value, dict):
             sanitized[key] = _sanitize_result_for_storage(value)
+        # Recursively sanitize and truncate lists
+        elif isinstance(value, list):
+            sanitized_list = []
+            for item in value[:5]:  # Limit to 5 items
+                if isinstance(item, dict):
+                    sanitized_list.append(_sanitize_result_for_storage(item))
+                elif isinstance(item, list):
+                    # For nested lists, just take first 5 items (no deep recursion)
+                    sanitized_list.append(item[:5] if len(item) > 5 else item)
+                elif isinstance(item, str) and len(item) > 200:
+                    sanitized_list.append(item[:197] + "...")
+                else:
+                    sanitized_list.append(item)
+            sanitized[key] = sanitized_list
         # Truncate long strings
         elif isinstance(value, str) and len(value) > 200:
             sanitized[key] = value[:197] + "..."
-        # Truncate long lists
-        elif isinstance(value, list) and len(value) > 5:
-            sanitized[key] = value[:5]
         else:
             sanitized[key] = value
 
@@ -424,9 +474,9 @@ def save_learning_to_db(
         columns.append("goal_id")
         values.append(escape_value_func(goal_id))
 
-    # Add evidence_task_ids as array containing just this task
+    # Add evidence_task_ids as JSONB array containing just this task
     columns.append("evidence_task_ids")
-    values.append(escape_value_func([task_id]))
+    values.append(f"{escape_value_func([task_id])}::jsonb")
 
     sql = f"""
         INSERT INTO learnings ({', '.join(columns)})
