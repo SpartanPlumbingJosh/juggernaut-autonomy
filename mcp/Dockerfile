@@ -16,11 +16,11 @@ RUN groupadd -r juggernaut && useradd -r -g juggernaut juggernaut
 WORKDIR /app
 
 # Install dependencies first (for caching)
-COPY mcp/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy MCP server code
-COPY mcp/server.py ./server.py
+COPY server.py ./server.py
 
 # Set ownership
 RUN chown -R juggernaut:juggernaut /app
