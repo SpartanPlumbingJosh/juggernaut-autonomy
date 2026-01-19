@@ -45,6 +45,14 @@ from core.notifications import (
     notify_engine_started
 )
 
+# Learning capture for task execution (MED-02)
+try:
+    from core.database import record_learning
+    LEARNING_CAPTURE_AVAILABLE = True
+except ImportError as e:
+    LEARNING_CAPTURE_AVAILABLE = False
+    record_learning = None
+
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
 EXPERIMENTS_AVAILABLE = False
 _experiments_import_error = None
@@ -190,6 +198,87 @@ def sanitize_payload(payload: Dict, max_value_length: int = 1000) -> Dict:
             sanitized[key] = value
     
     return sanitized
+
+
+
+# ============================================================
+# LEARNING CAPTURE (MED-02)
+# ============================================================
+
+def capture_task_learning(
+    task_id: str,
+    task_title: str,
+    task_type: str,
+    succeeded: bool,
+    result: Dict[str, Any],
+    duration_ms: int,
+    worker_id: str
+) -> None:
+    """
+    Capture learnings from task execution for organizational memory.
+    
+    L5 Requirement: Every completed task extracts learnings.
+    
+    Args:
+        task_id: UUID of the completed task
+        task_title: Title of the task
+        task_type: Type of task executed
+        succeeded: Whether task succeeded
+        result: Task result/output
+        duration_ms: Execution duration in milliseconds
+        worker_id: Worker that executed the task
+    """
+    if not LEARNING_CAPTURE_AVAILABLE or record_learning is None:
+        return
+        
+    try:
+        # Determine category and build summary
+        if succeeded:
+            category = "success_pattern"
+            summary = f"Successfully completed {task_type} task: {task_title}"
+        else:
+            category = "failure_pattern"
+            error_msg = result.get("error", "unknown error") if isinstance(result, dict) else str(result)
+            summary = f"Failed {task_type} task: {task_title} - {error_msg[:100]}"
+        
+        # Classify duration
+        duration_secs = duration_ms / 1000
+        if duration_secs < 5:
+            speed = "fast"
+        elif duration_secs < 60:
+            speed = "normal"
+        elif duration_secs < 300:
+            speed = "slow"
+        else:
+            speed = "very_slow"
+        
+        # Build details
+        details = {
+            "task_type": task_type,
+            "duration_ms": duration_ms,
+            "duration_classification": speed,
+            "succeeded": succeeded
+        }
+        
+        if succeeded:
+            details["what_worked"] = f"{task_type} completed successfully in {duration_secs:.1f}s"
+        else:
+            details["what_failed"] = result.get("error") if isinstance(result, dict) else str(result)
+        
+        # Record the learning
+        record_learning(
+            summary=summary,
+            category=category,
+            worker_id=worker_id,
+            task_id=task_id,
+            details=details,
+            confidence=0.8 if succeeded else 0.6
+        )
+        
+    except Exception as e:
+        # Don't let learning capture failure affect task completion
+        log_action("learning.capture_failed", f"Failed to capture learning: {e}", 
+                   level="warn", task_id=task_id)
 
 
 # ============================================================
@@ -1384,6 +1473,17 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             except Exception as notify_err:
                 log_action("notification.failed", f"Failed to send failure notification: {notify_err}",
                            task_id=task.id, level="warning")
+        
+        # Capture learning from task execution (MED-02)
+        capture_task_learning(
+            task_id=task.id,
+            task_title=task.title,
+            task_type=task.task_type,
+            succeeded=task_succeeded,
+            result=result,
+            duration_ms=duration_ms,
+            worker_id=WORKER_ID
+        )
         
         return task_succeeded, result
         
