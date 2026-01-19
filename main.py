@@ -74,6 +74,25 @@ except ImportError as e:
     def get_experiment_dashboard(*args, **kwargs): return {}
 
 
+# Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
+ORCHESTRATION_AVAILABLE = False
+_orchestration_import_error = None
+
+try:
+    from core.orchestration import (
+        discover_agents,
+        orchestrator_assign_task,
+        log_coordination_event,
+    )
+    ORCHESTRATION_AVAILABLE = True
+except ImportError as e:
+    _orchestration_import_error = str(e)
+    # Stub functions for graceful degradation
+    def discover_agents(*args, **kwargs): return []
+    def orchestrator_assign_task(*args, **kwargs): return {"success": False, "error": "orchestration not available"}
+    def log_coordination_event(*args, **kwargs): return None
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -878,6 +897,100 @@ def _execute_http_tool(tool_name: str, params: Dict) -> Dict:
 # TASK EXECUTION (Level 3: Workflow Planning)
 # ============================================================
 
+
+# ============================================================
+# ORCHESTRATOR TASK DELEGATION (L5-01b)
+# ============================================================
+
+# Task type to worker capability mapping
+TASK_TYPE_TO_WORKER: Dict[str, str] = {
+    "tool_execution": "EXECUTOR",
+    "workflow": "EXECUTOR",
+    "content_creation": "EXECUTOR",
+    "metrics_analysis": "ANALYST",
+    "report_generation": "ANALYST",
+    "pattern_detection": "ANALYST",
+    "goal_creation": "STRATEGIST",
+    "opportunity_scoring": "STRATEGIST",
+    "experiment_design": "STRATEGIST",
+    "health_check": "WATCHDOG",
+    "error_detection": "WATCHDOG",
+}
+
+
+def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]:
+    """
+    Delegate a task to a specialized worker via ORCHESTRATOR.
+    
+    This is the core L5 function that enables intelligent task routing
+    to specialized workers based on capabilities and load.
+    
+    Args:
+        task: The Task object to delegate
+    
+    Returns:
+        Tuple of (delegated: bool, worker_id: Optional[str], details: Dict)
+    """
+    if not ORCHESTRATION_AVAILABLE:
+        return False, None, {"error": "orchestration module not available"}
+    
+    # Determine the best worker for this task type
+    target_worker = TASK_TYPE_TO_WORKER.get(task.task_type)
+    
+    if not target_worker:
+        # No specific worker mapping - check if generic task execution is needed
+        agents = discover_agents(capability="task.execute", min_health_score=0.3)
+        if agents:
+            target_worker = agents[0].get("worker_id")
+    
+    if not target_worker:
+        return False, None, {"reason": "no suitable worker for task type", "task_type": task.task_type}
+    
+    # Check if the target worker is healthy and available
+    agents = discover_agents(min_health_score=0.3)
+    target_agent = None
+    for agent in agents:
+        if agent.get("worker_id") == target_worker:
+            target_agent = agent
+            break
+    
+    if not target_agent:
+        return False, None, {"reason": f"worker {target_worker} not available"}
+    
+    # Check worker capacity
+    active_tasks = target_agent.get("active_task_count", 0) or 0
+    max_tasks = target_agent.get("max_concurrent_tasks", 5) or 5
+    
+    if active_tasks >= max_tasks:
+        return False, None, {"reason": f"worker {target_worker} at capacity ({active_tasks}/{max_tasks})"}
+    
+    # Delegate the task via ORCHESTRATOR
+    result = orchestrator_assign_task(
+        task_id=task.id,
+        target_worker_id=target_worker,
+        reason="capability_match"
+    )
+    
+    if result.get("success"):
+        # Log the delegation event
+        log_action(
+            "orchestrator.delegate",
+            f"ORCHESTRATOR delegated task '{task.title}' to {target_worker}",
+            level="info",
+            task_id=task.id,
+            output_data={
+                "target_worker": target_worker,
+                "worker_health": target_agent.get("health_score"),
+                "worker_load": f"{active_tasks}/{max_tasks}",
+                "reason": "capability_match",
+                "log_id": result.get("log_id")
+            }
+        )
+        return True, target_worker, result
+    
+    return False, None, result
+
+
 def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
@@ -1238,6 +1351,29 @@ def autonomy_loop():
                     log_decision("loop.execute", f"Executing task: {task.title}",
                                  f"Priority {task.priority} of {len(tasks)} pending tasks")
                     
+                    # L5: Try to delegate to specialized worker via ORCHESTRATOR first
+                    if ORCHESTRATION_AVAILABLE:
+                        delegated, worker_id, delegate_result = delegate_to_worker(task)
+                        if delegated:
+                            log_decision(
+                                "orchestrator.delegated",
+                                f"Task delegated to {worker_id}",
+                                f"ORCHESTRATOR routing: {delegate_result.get('message', 'capability_match')}"
+                            )
+                            # Task is now assigned to specialized worker - don't execute locally
+                            task_executed = True
+                            break
+                        else:
+                            # Delegation failed - log reason and fall back to local execution
+                            log_action(
+                                "orchestrator.fallback",
+                                f"Delegation failed, executing locally: {delegate_result.get('reason', 'unknown')}",
+                                level="info",
+                                task_id=task.id,
+                                output_data=delegate_result
+                            )
+                    
+                    # Execute task locally (either no ORCHESTRATOR or delegation failed)
                     success, result = execute_task(task)
                     
                     if result.get("waiting_approval"):
