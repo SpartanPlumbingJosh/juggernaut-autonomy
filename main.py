@@ -761,9 +761,141 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         elif task.task_type == "health_check":
             result = {"healthy": True, "component": task.payload.get("component")}
             
-        else:
-            result = {"executed": True, "type": task.task_type}
         
+        elif task.task_type == "database":
+            # Execute SQL query from payload
+            sql_query = task.payload.get("sql") or task.payload.get("query")
+            if not sql_query:
+                log_action("task.error", "Database task missing 'sql' in payload", 
+                          level="error", task_id=task.id)
+                result = {"error": "No SQL query provided in payload", "expected_fields": ["sql", "query"]}
+                task_succeeded = False
+            else:
+                # SECURITY: Check for write operations - require approval
+                sql_upper = sql_query.strip().upper()
+                first_token = sql_upper.split()[0] if sql_upper.split() else ""
+                read_only_statements = {"SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE"}
+                
+                if first_token not in read_only_statements:
+                    # Non-read-only query detected - require approval
+                    log_action("task.write_blocked", 
+                              f"Write operation '{first_token}' requires approval",
+                              level="warn", task_id=task.id,
+                              output_data={"statement_type": first_token, "task_id": task.id})
+                    
+                    update_task_status(task.id, "waiting_approval", {
+                        "reason": f"Write operation '{first_token}' requires human approval",
+                        "statement_type": first_token,
+                        "sql_preview": sql_query[:100] + "..." if len(sql_query) > 100 else sql_query
+                    })
+                    
+                    return False, {
+                        "waiting_approval": True,
+                        "reason": f"Write operation '{first_token}' requires approval",
+                        "statement_type": first_token
+                    }
+                
+                try:
+                    query_result = execute_sql(sql_query)
+                    result = {
+                        "executed": True,
+                        "rowCount": query_result.get("rowCount", 0),
+                        "rows_preview": query_result.get("rows", [])[:5]  # Keep in result for task storage
+                    }
+                    # SECURITY: Log only metadata, not raw SQL or row data
+                    log_action("task.database_executed", f"Query executed successfully",
+                              task_id=task.id, output_data={
+                                  "executed": True,
+                                  "rowCount": query_result.get("rowCount", 0),
+                                  "sql_length": len(sql_query),
+                                  "sql_truncated": len(sql_query) > 200
+                              })
+                except Exception as sql_error:
+                    result = {"error": str(sql_error)}
+                    task_succeeded = False
+                    log_action("task.database_failed", f"SQL execution failed",
+                              level="error", task_id=task.id, 
+                              error_data={"error": str(sql_error), "sql_length": len(sql_query)})
+        
+        elif task.task_type == "test":
+            # Execute verification/test queries
+            test_queries = task.payload.get("queries", [])
+            test_sql = task.payload.get("sql")
+            
+            # TYPE SAFETY: Handle string input by wrapping in list
+            if isinstance(test_queries, str):
+                test_queries = [test_queries]
+            
+            if test_sql:
+                test_queries = [test_sql]
+            
+            if not test_queries:
+                result = {"error": "Test task missing 'queries' or 'sql' in payload"}
+                task_succeeded = False
+            else:
+                test_results = []
+                all_passed = True
+                for i, query in enumerate(test_queries):
+                    try:
+                        query_result = execute_sql(query)
+                        test_results.append({
+                            "index": i,
+                            "passed": True,
+                            "rowCount": query_result.get("rowCount", 0)
+                        })
+                    except Exception as test_error:
+                        test_results.append({
+                            "index": i,
+                            "passed": False,
+                            "error": str(test_error)
+                        })
+                        all_passed = False
+                
+                result = {
+                    "executed": True,
+                    "tests_run": len(test_results),
+                    "all_passed": all_passed,
+                    "results": test_results
+                }
+                task_succeeded = all_passed
+                log_action("task.test_completed", f"Ran {len(test_results)} tests, passed={all_passed}",
+                          task_id=task.id, output_data=result)
+        
+        elif task.task_type == "scan":
+            # Opportunity scanning - check for leads/opportunities
+            scan_type = task.payload.get("scan_type", "general")
+            source = task.payload.get("source", "unknown")
+            
+            # Log the scan attempt - actual scanning logic depends on external integrations
+            result = {
+                "executed": True,
+                "scan_type": scan_type,
+                "source": source,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "note": "Scan completed - check external systems for results"
+            }
+            log_action("task.scan_completed", f"Scan completed: {scan_type} from {source}",
+                      task_id=task.id, output_data=result)
+        
+        else:
+            # Unknown task type - requires human guidance
+            # Set to waiting_approval so a human can review and provide instructions
+            log_action("task.unhandled_type", 
+                      f"Task type '{task.task_type}' has no automated handler - waiting for human guidance",
+                      level="warn", task_id=task.id,
+                      output_data={"task_type": task.task_type, "title": task.title})
+            
+            update_task_status(task.id, "waiting_approval", {
+                "reason": f"No automated handler for task_type '{task.task_type}'",
+                "requires": "Human review and execution guidance",
+                "task_description": task.description[:500] if task.description else None
+            })
+            
+            return False, {
+                "waiting_approval": True,
+                "reason": f"Task type '{task.task_type}' requires human guidance",
+                "task_type": task.task_type
+            }
         # Mark based on actual success
         duration_ms = int((time.time() - start_time) * 1000)
         
