@@ -33,15 +33,19 @@ def handle_opportunity_scan(task, execute_sql, log_action):
     min_score = config.get("min_confidence_score", 0.7)
     create_tasks = config.get("create_tasks_for_high_scoring", True)
     results = {"sources_scanned": 0, "opportunities_found": 0, "opportunities_qualified": 0, "tasks_created": 0}
+    scan_id = None
+    
     try:
         src = execute_sql("SELECT id, name, source_type FROM opportunity_sources WHERE active = true")
         sources = src.get("rows", [])
         if not sources:
             return {"success": True, **results}
+        
         scan_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         cfg = json.dumps(config).replace("'", "''")
         execute_sql(f"INSERT INTO opportunity_scans (id, scan_type, source, scan_config, triggered_by, status, started_at) VALUES ('{scan_id}', 'scheduled', 'all', '{cfg}', 'engine', 'running', '{now}')")
+        
         for source in sources:
             sid, sname, stype = source["id"], source["name"], source["source_type"]
             opps = _gen_opps(sid, stype)
@@ -60,12 +64,21 @@ def handle_opportunity_scan(task, execute_sql, log_action):
                     execute_sql(f"INSERT INTO governance_tasks (id, task_type, title, description, priority, status, payload, created_by) VALUES ('{tid}', 'evaluation', '{title}', 'High-scoring opportunity', 'medium', 'pending', '{pay}', 'engine')")
                     results["tasks_created"] += 1
             results["sources_scanned"] += 1
+        
         rs = json.dumps(results).replace("'", "''")
         execute_sql(f"UPDATE opportunity_scans SET status = 'completed', completed_at = NOW(), opportunities_found = {results['opportunities_found']}, opportunities_qualified = {results['opportunities_qualified']}, results_summary = '{rs}' WHERE id = '{scan_id}'")
         log_action("opportunity_scan.complete", f"Scan done: {results['opportunities_found']} found", "info")
         return {"success": True, "scan_id": scan_id, **results}
+    
     except Exception as e:
         log_action("opportunity_scan.failed", str(e), "error")
+        # Mark scan as failed if it was created
+        if scan_id:
+            try:
+                error_msg = str(e).replace("'", "''")[:500]
+                execute_sql(f"UPDATE opportunity_scans SET status = 'failed', completed_at = NOW(), error_message = '{error_msg}' WHERE id = '{scan_id}'")
+            except Exception:
+                pass  # Best effort to mark failed
         return {"success": False, "error": str(e), **results}
 
 
