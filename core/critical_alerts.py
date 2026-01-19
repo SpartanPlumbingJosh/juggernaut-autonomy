@@ -12,6 +12,7 @@ Uses existing SLACK_WEBHOOK_URL environment variable.
 
 import json
 import logging
+import os
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -25,8 +26,13 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # =============================================================================
 
-NEON_ENDPOINT: str = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING: str = (
+# Database configuration from environment with fallback
+NEON_ENDPOINT: str = os.environ.get(
+    "NEON_HTTP_ENDPOINT",
+    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+)
+NEON_CONNECTION_STRING: str = os.environ.get(
+    "NEON_CONNECTION_STRING",
     "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
     "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/"
     "neondb?sslmode=require"
@@ -35,6 +41,10 @@ NEON_CONNECTION_STRING: str = (
 HIGH_PRIORITY_QUEUE_THRESHOLD: int = 10
 DATABASE_TIMEOUT_SECONDS: int = 30
 BUDGET_WARNING_THRESHOLD: float = 0.8  # 80% of budget
+
+# Module-level cache for slack import
+_slack_module_cache: Optional[Any] = None
+_slack_module_checked: bool = False
 
 
 # =============================================================================
@@ -70,13 +80,6 @@ def _query(sql: str) -> Dict[str, Any]:
         return json.loads(response.read().decode("utf-8"))
 
 
-def _escape_string(value: str) -> str:
-    """Escape single quotes for SQL."""
-    if value is None:
-        return "NULL"
-    return value.replace("'", "''")
-
-
 # =============================================================================
 # SLACK INTEGRATION
 # =============================================================================
@@ -84,16 +87,25 @@ def _escape_string(value: str) -> str:
 def _import_slack_notifications() -> Optional[Any]:
     """
     Import slack_notifications module with graceful degradation.
+    Caches the import result for efficiency.
     
     Returns:
         Module reference or None if unavailable
     """
+    global _slack_module_cache, _slack_module_checked
+    
+    if _slack_module_checked:
+        return _slack_module_cache
+    
     try:
         from core import slack_notifications
-        return slack_notifications
+        _slack_module_cache = slack_notifications
     except ImportError as e:
         logger.warning("slack_notifications module unavailable: %s", e)
-        return None
+        _slack_module_cache = None
+    
+    _slack_module_checked = True
+    return _slack_module_cache
 
 
 def _send_critical_alert(
@@ -199,16 +211,18 @@ def check_and_alert_worker_failures(
     
     try:
         # Query for workers with consecutive failures or missed heartbeats
-        failures_sql = """
+        # Use explicit int cast for defense-in-depth
+        threshold = int(heartbeat_threshold_seconds)
+        failures_sql = f"""
         SELECT worker_id, name, status, last_heartbeat, consecutive_failures
         FROM worker_registry
         WHERE status::text NOT IN ('offline', 'maintenance')
           AND (
             consecutive_failures >= 5 
             OR (last_heartbeat IS NOT NULL 
-                AND last_heartbeat < NOW() - INTERVAL '%d seconds')
+                AND last_heartbeat < NOW() - INTERVAL '{threshold} seconds')
           )
-        """ % heartbeat_threshold_seconds
+        """
         
         result = _query(failures_sql)
         
@@ -436,6 +450,38 @@ def check_and_alert_task_queue_backup(
 # ALERT: DATABASE CONNECTION FAILURES
 # =============================================================================
 
+def _sanitize_error_message(error_message: str) -> str:
+    """
+    Sanitize error messages to remove sensitive information.
+    
+    Args:
+        error_message: Raw error message
+        
+    Returns:
+        Sanitized error message safe for logging/alerting
+    """
+    # Remove potential connection strings and credentials
+    sanitized = error_message
+    
+    # Redact patterns that look like connection strings
+    import re
+    # Pattern for postgresql:// URLs
+    sanitized = re.sub(
+        r'postgresql://[^@]+@[^\s]+',
+        'postgresql://[REDACTED]',
+        sanitized
+    )
+    # Pattern for password-like strings
+    sanitized = re.sub(
+        r'(password|pwd|passwd|secret|token|key)[\s]*[=:]\s*[^\s]+',
+        r'\1=[REDACTED]',
+        sanitized,
+        flags=re.IGNORECASE
+    )
+    
+    return sanitized[:500]  # Truncate long errors
+
+
 def alert_database_failure(
     operation: str,
     error_message: str,
@@ -460,16 +506,19 @@ def alert_database_failure(
         error_message
     )
     
+    # Sanitize error message before including in alert
+    safe_error = _sanitize_error_message(error_message)
+    
     details = {
         "Operation": operation,
         "Database": database,
-        "Error": error_message[:500],  # Truncate long errors
+        "Error": safe_error,
         "Detected At": datetime.now(timezone.utc).isoformat()
     }
     
     return _send_critical_alert(
         title="Database Connection Failure",
-        message=f"Database operation '{operation}' failed: {error_message[:100]}",
+        message=f"Database operation '{operation}' failed: {safe_error[:100]}",
         alert_type="error",
         details=details
     )
@@ -484,7 +533,12 @@ def check_database_connectivity() -> bool:
     """
     try:
         result = _query("SELECT 1 as health_check")
-        return result.get("rows", [{}])[0].get("health_check") == 1
+        rows = result.get("rows", [])
+        if not rows:
+            return False
+        # Handle both integer and string return values
+        health_value = rows[0].get("health_check")
+        return str(health_value) == "1" or health_value == 1
     except Exception as e:
         alert_database_failure("health_check", str(e))
         return False
