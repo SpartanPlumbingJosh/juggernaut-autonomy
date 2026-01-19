@@ -265,9 +265,12 @@ class DashboardData:
             agent_data = query_db(agent_sql)
             status_counts = {r["status"]: int(r["count"]) for r in agent_data.get("rows", [])}
             result["agents"] = {
-                "online": status_counts.get("online", 0),
+                "online": status_counts.get("active", 0),
+                "active": status_counts.get("active", 0),
+                "degraded": status_counts.get("degraded", 0),
+                "paused": status_counts.get("paused", 0),
                 "offline": status_counts.get("offline", 0),
-                "busy": status_counts.get("busy", 0),
+                "maintenance": status_counts.get("maintenance", 0),
                 "total": sum(status_counts.values())
             }
         except Exception as e:
@@ -663,7 +666,7 @@ def get_agent_health() -> Dict[str, Any]:
             })
         
         # Calculate overall health
-        online = sum(1 for a in agents if a["status"] == "online")
+        online = sum(1 for a in agents if a["status"] == "active")
         total_agents = len(agents)
         avg_success = sum(a["success_rate"] for a in agents) / total_agents if total_agents > 0 else 0
         
