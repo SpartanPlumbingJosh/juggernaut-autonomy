@@ -13,14 +13,18 @@ Functions:
 """
 
 import json
+import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 import httpx
 
-# Database configuration
+# Database configuration - use environment variable with fallback
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+NEON_CONNECTION_STRING = os.getenv(
+    "DATABASE_URL",
+    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+)
 
 
 def _execute_sql(query: str, return_results: bool = True) -> Dict[str, Any]:
@@ -329,6 +333,221 @@ def list_experiments(
 
 
 # =============================================================================
+# L4-02: SANDBOX ENFORCEMENT
+# Implements sandboxed innovation boundaries for experiments.
+# High-risk experiments are blocked until approved by Josh.
+# =============================================================================
+
+# Risk levels that require approval before starting
+RISK_LEVELS_REQUIRING_APPROVAL = ["high", "medium"]
+
+# Default sandbox configuration for experiments
+DEFAULT_SANDBOX_CONFIG = {
+    "max_spend": 10.0,      # Maximum spend without approval
+    "scope": "test",        # test, staging, production
+    "affects_production": False
+}
+
+# Authorized approvers for high-risk experiments
+AUTHORIZED_APPROVERS = ["Josh", "josh", "JOSH", "SYSTEM"]
+
+
+def validate_sandbox_before_start(experiment: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate that an experiment can be started based on sandbox boundaries.
+    
+    L4-02 Enforcement Rules:
+    1. High/medium risk experiments with requires_approval=true must have approved_by set
+    2. Experiments affecting production always require approval
+    3. Budget exceeding sandbox max_spend requires approval
+    
+    Args:
+        experiment: Experiment dict from get_experiment()
+        
+    Returns:
+        Dict with valid (bool), errors (list), warnings (list)
+    """
+    errors = []
+    warnings = []
+    
+    risk_level = experiment.get("risk_level", "low")
+    requires_approval = experiment.get("requires_approval", False)
+    approved_by = experiment.get("approved_by")
+    budget_limit = float(experiment.get("budget_limit") or 0)
+    
+    # Parse sandbox_config - handle string, dict, or None
+    sandbox = experiment.get("sandbox_config")
+    if sandbox is None:
+        sandbox = DEFAULT_SANDBOX_CONFIG.copy()
+    elif isinstance(sandbox, str):
+        try:
+            sandbox = json.loads(sandbox)
+        except (json.JSONDecodeError, TypeError):
+            sandbox = DEFAULT_SANDBOX_CONFIG.copy()
+    
+    max_spend = float(sandbox.get("max_spend", 10.0))
+    affects_production = sandbox.get("affects_production", False)
+    scope = sandbox.get("scope", "test")
+    
+    # Rule 1: High/medium risk with requires_approval=true needs approved_by
+    if risk_level in RISK_LEVELS_REQUIRING_APPROVAL and requires_approval:
+        if not approved_by:
+            errors.append(
+                f"Risk level '{risk_level}' requires approval before starting. "
+                f"Use approve_experiment(experiment_id, approver) first."
+            )
+    
+    # Rule 2: Production-affecting experiments always need approval
+    if (affects_production or scope == "production") and not approved_by:
+        errors.append(
+            "Experiments affecting production require approval. "
+            "Set affects_production=false or get approval first."
+        )
+    
+    # Rule 3: Budget exceeding sandbox max_spend needs approval
+    if budget_limit > max_spend and not approved_by:
+        errors.append(
+            f"Budget ${budget_limit:.2f} exceeds sandbox limit ${max_spend:.2f}. "
+            f"Get approval or reduce budget."
+        )
+    
+    # Warnings for approved experiments that exceed limits (for audit trail)
+    if approved_by:
+        if budget_limit > max_spend:
+            warnings.append(
+                f"Approved: Budget ${budget_limit:.2f} exceeds sandbox limit ${max_spend:.2f}"
+            )
+        if affects_production or scope == "production":
+            warnings.append(
+                f"Approved: Experiment affects production (approved by {approved_by})"
+            )
+    
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "risk_level": risk_level,
+        "requires_approval": requires_approval,
+        "is_approved": approved_by is not None,
+        "approved_by": approved_by,
+        "sandbox_config": sandbox
+    }
+
+
+def approve_experiment(
+    experiment_id: str,
+    approved_by: str,
+    approval_notes: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Approve an experiment for execution.
+    Required for high-risk, over-budget, or production-affecting experiments.
+    
+    Args:
+        experiment_id: UUID of experiment to approve
+        approved_by: Who is approving (must be in AUTHORIZED_APPROVERS)
+        approval_notes: Optional notes about the approval
+        
+    Returns:
+        Dict with success status
+    """
+    # Verify experiment exists
+    experiment = get_experiment(experiment_id)
+    if not experiment:
+        return {"success": False, "error": "Experiment not found"}
+    
+    # Validate approver
+    if approved_by not in AUTHORIZED_APPROVERS:
+        return {
+            "success": False, 
+            "error": f"'{approved_by}' is not an authorized approver. "
+                    f"Authorized: {AUTHORIZED_APPROVERS}"
+        }
+    
+    # Check if already approved
+    if experiment.get("approved_by"):
+        return {
+            "success": False,
+            "error": f"Experiment already approved by {experiment['approved_by']}"
+        }
+    
+    # Update approval fields
+    escaped_approver = _escape_string(approved_by)
+    query = f"""
+    UPDATE experiments
+    SET approved_by = '{escaped_approver}',
+        approved_at = NOW(),
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query)
+    
+    # Log the approval event
+    notes_msg = f" Notes: {approval_notes}" if approval_notes else ""
+    log_experiment_event(
+        experiment_id, 
+        "approved", 
+        f"Experiment approved by {approved_by}.{notes_msg}", 
+        approved_by
+    )
+    
+    return {
+        "success": True,
+        "message": f"Experiment approved by {approved_by}",
+        "experiment_id": experiment_id,
+        "approved_at": datetime.utcnow().isoformat()
+    }
+
+
+def revoke_experiment_approval(
+    experiment_id: str,
+    revoked_by: str,
+    reason: str
+) -> Dict[str, Any]:
+    """
+    Revoke approval for an experiment (emergency use).
+    
+    Args:
+        experiment_id: UUID of experiment
+        revoked_by: Who is revoking (must be authorized)
+        reason: Why approval is being revoked
+        
+    Returns:
+        Dict with success status
+    """
+    if revoked_by not in AUTHORIZED_APPROVERS:
+        return {"success": False, "error": "Not authorized to revoke approval"}
+    
+    experiment = get_experiment(experiment_id)
+    if not experiment:
+        return {"success": False, "error": "Experiment not found"}
+    
+    if experiment.get("status") == "running":
+        return {
+            "success": False, 
+            "error": "Cannot revoke approval for running experiment. Pause it first."
+        }
+    
+    query = f"""
+    UPDATE experiments
+    SET approved_by = NULL,
+        approved_at = NULL,
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query)
+    
+    log_experiment_event(
+        experiment_id,
+        "approval_revoked",
+        f"Approval revoked by {revoked_by}. Reason: {reason}",
+        revoked_by
+    )
+    
+    return {"success": True, "message": "Approval revoked"}
+
+
+# =============================================================================
 # PHASE 4.2: EXPERIMENT EXECUTION
 # =============================================================================
 
@@ -336,6 +555,7 @@ def start_experiment(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str
     """
     Start an experiment (move from draft to running).
     
+    L4-02: Validates sandbox boundaries before allowing start.
     Creates an initial rollback snapshot before starting.
     
     Args:
@@ -352,6 +572,34 @@ def start_experiment(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str
     
     if experiment["status"] not in ["draft", "paused"]:
         return {"success": False, "error": f"Cannot start experiment in {experiment['status']} status"}
+    
+    # L4-02: Validate sandbox boundaries before starting
+    validation = validate_sandbox_before_start(experiment)
+    if not validation["valid"]:
+        # Log the blocked start attempt for audit
+        log_experiment_event(
+            experiment_id, 
+            "start_blocked", 
+            f"Start blocked by sandbox enforcement: {'; '.join(validation['errors'])}", 
+            started_by
+        )
+        return {
+            "success": False, 
+            "error": "Sandbox validation failed - experiment cannot start",
+            "validation_errors": validation["errors"],
+            "risk_level": validation["risk_level"],
+            "requires_approval": validation["requires_approval"],
+            "hint": "Use approve_experiment() to approve high-risk experiments"
+        }
+    
+    # Log any warnings for approved experiments exceeding limits
+    if validation["warnings"]:
+        log_experiment_event(
+            experiment_id,
+            "sandbox_warning",
+            f"Started with warnings: {'; '.join(validation['warnings'])}",
+            started_by
+        )
     
     # Create rollback snapshot before starting
     create_rollback_snapshot(experiment_id, "pre_start", started_by)
