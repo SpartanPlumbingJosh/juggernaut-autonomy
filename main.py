@@ -370,14 +370,31 @@ def log_action(
     input_data: Dict = None,
     output_data: Dict = None,
     error_data: Dict = None,
-    duration_ms: int = None
+    duration_ms: int = None,
+    source: str = "autonomy_engine"
 ) -> Optional[str]:
-    """Log an autonomous action to execution_logs with PII sanitization."""
+    """Log an autonomous action to execution_logs with PII sanitization.
+    
+    Args:
+        action: The action type (e.g., 'task.completed', 'decision.priority')
+        message: Human-readable description of the action
+        level: Log level (debug, info, warn, error, critical)
+        task_id: Associated task UUID if applicable
+        input_data: JSON input to the action
+        output_data: JSON output from the action
+        error_data: JSON error details if failed
+        duration_ms: How long the action took
+        source: Source identifier for decision traceability (L2: References & Sourcing)
+                Examples: 'priority_selection', 'risk_assessment', 'tool_execution'
+    
+    Returns:
+        Log entry UUID or None on failure
+    """
     now = datetime.now(timezone.utc).isoformat()
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
-            escape_value(level), escape_value("autonomy_engine"), escape_value(now)]
+            escape_value(level), escape_value(source), escape_value(now)]
     
     if task_id:
         cols.append("task_id")
@@ -407,24 +424,32 @@ def log_action(
 
 
 def log_info(message: str, data: Dict = None):
-    log_action("system.info", message, "info", output_data=data)
+    log_action("system.info", message, "info", output_data=data, source="system_monitor")
     print(f"[INFO] {message}")
 
 
 def log_error(message: str, data: Optional[Dict[str, Any]] = None):
-    log_action("system.error", message, "error", error_data=data)
+    log_action("system.error", message, "error", error_data=data, source="system_monitor")
     print(f"[ERROR] {message}")
 
 
-def log_decision(action: str, decision: str, reasoning: str, data: Optional[Dict[str, Any]] = None, confidence: float = 1.0):
+def log_decision(
+    action: str, 
+    decision: str, 
+    reasoning: str, 
+    data: Optional[Dict[str, Any]] = None, 
+    confidence: float = 1.0,
+    source: str = "decision_engine"
+):
     """Log an autonomous decision (Level 3: Traceable Decisions).
     
     Args:
-        action: The decision action type
+        action: The decision action type (e.g., 'task_selection', 'priority')
         decision: What was decided
-        reasoning: Why it was decided
+        reasoning: Why it was decided - the source/rationale for traceability
         data: Additional context data
         confidence: Confidence level 0.0-1.0 (L2: Uncertainty tracking)
+        source: Source identifier for traceability (L2: References & Sourcing)
     """
     # Flag low confidence decisions
     uncertainty_warning = ""
@@ -435,7 +460,8 @@ def log_decision(action: str, decision: str, reasoning: str, data: Optional[Dict
         f"decision.{action}",
         f"{decision}: {reasoning}{uncertainty_warning}",
         "info" if confidence >= 0.5 else "warn",
-        output_data={"decision": decision, "reasoning": reasoning, "confidence": confidence, **(data or {})}
+        output_data={"decision": decision, "reasoning": reasoning, "confidence": confidence, **(data or {})},
+        source=source
     )
     print(f"[DECISION] {action}: {decision}" + (f" (confidence: {confidence:.0%})" if confidence < 1.0 else ""))
 
@@ -558,7 +584,8 @@ def log_risk_warning(task: Task, risk_score: float, risk_level: str, risk_factor
             "risk_factors": risk_factors,
             "task_type": task.task_type,
             "title": task.title
-        }
+        },
+        source="risk_assessment_engine"
     )
     if risk_level in ("high", "critical"):
         print(f"[RISK WARNING] {task.title}: {risk_level.upper()} ({risk_score:.0%}) - factors: {', '.join(risk_factors)}")
@@ -1055,7 +1082,7 @@ def create_escalation(task_id: str, issue: str, level: str = "medium"):
     """
     try:
         execute_sql(sql)
-        log_action("escalation.created", f"Escalation created: {issue}", task_id=task_id)
+        log_action("escalation.created", f"Escalation created: {issue}", task_id=task_id, source="escalation_engine")
     except Exception as e:
         log_error(f"Failed to create escalation: {e}")
 
@@ -1089,7 +1116,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
     start_time = time.time()
     
     # Log tool execution start (don't capture unused return value)
-    log_action(f"tool.{tool_name}.start", f"Executing tool: {tool_name}", input_data=params)
+    log_action(f"tool.{tool_name}.start", f"Executing tool: {tool_name}", input_data=params, source="tool_executor")
     
     try:
         # Record tool execution
@@ -1138,7 +1165,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         """
         execute_sql(sql)
         
-        log_action(f"tool.{tool_name}.complete", f"Tool completed: {tool_name}",
+        log_action(f"tool.{tool_name}.complete", f"Tool completed: {tool_name}", source="tool_executor",
                    output_data=output, duration_ms=duration_ms)
         
         return True, output
@@ -1162,7 +1189,7 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         except Exception:
             pass  # Don't fail if we can't update the record
         
-        log_action(f"tool.{tool_name}.error", f"Tool failed: {str(e)}",
+        log_action(f"tool.{tool_name}.error", f"Tool failed: {str(e)}", source="tool_executor",
                    level="error", error_data={"error": str(e)}, duration_ms=duration_ms)
         return False, error_output
 
@@ -1300,15 +1327,16 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     # Check permission
     allowed, reason = is_action_allowed(f"task.{task.task_type}")
     if not allowed:
-        log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
+        log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id, source="permission_control")
         return False, {"blocked": True, "reason": reason}
     
     # L2: High-risk tasks require approval even if not explicitly marked
     if should_require_approval_for_risk(risk_score, risk_level) and not task.requires_approval:
-        log_action("risk.approval_required", 
+        log_action("risk.approval_required",
                   f"Task '{task.title}' requires approval due to {risk_level.upper()} risk ({risk_score:.0%})",
                   level="warn", task_id=task.id,
-                  output_data={"risk_score": risk_score, "risk_level": risk_level, "risk_factors": risk_factors})
+                  output_data={"risk_score": risk_score, "risk_level": risk_level, "risk_factors": risk_factors},
+                  source="risk_assessment_engine")
         # Create an approval record so standard workflow can pick it up
         ensure_approval_request(task)
         update_task_status(task.id, "waiting_approval", {
@@ -1331,12 +1359,12 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             if status == "none":
                 ensure_approval_request(task)
             update_task_status(task.id, "waiting_approval")
-            log_action("task.waiting", "Task waiting for approval, checking next", task_id=task.id)
+            log_action("task.waiting", "Task waiting for approval, checking next", task_id=task.id, source="approval_workflow")
             return False, {"waiting_approval": True}
     
     # Dry run mode
     if dry_run or DRY_RUN:
-        log_action("task.dry_run", f"DRY RUN: Would execute: {task.title}", task_id=task.id,
+        log_action("task.dry_run", f"DRY RUN: Would execute: {task.title}", task_id=task.id, source="dry_run_simulator",
                    output_data={"task_type": task.task_type, "payload": task.payload, 
                                "risk_score": risk_score, "risk_level": risk_level})
         return True, {"dry_run": True, "would_execute": task.task_type, "risk_level": risk_level}
@@ -1393,7 +1421,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             else:
                 result = {"error": "Proactive module not available", "import_error": _proactive_import_error}
                 task_succeeded = False
-                log_action("opportunity_scan.unavailable", "Proactive module not available",
+                log_action("opportunity_scan.unavailable", "Proactive module not available", source="module_loader",
                           level="warn", task_id=task.id, error_data=result)
             
         elif task.task_type == "health_check":
@@ -1416,10 +1444,11 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                 
                 if first_token not in read_only_statements:
                     # Non-read-only query detected - require approval
-                    log_action("task.write_blocked", 
+                    log_action("task.write_blocked",
                               f"Write operation '{first_token}' requires approval",
                               level="warn", task_id=task.id,
-                              output_data={"statement_type": first_token, "task_id": task.id})
+                              output_data={"statement_type": first_token, "task_id": task.id},
+                              source="permission_control")
                     
                     update_task_status(task.id, "waiting_approval", {
                         "reason": f"Write operation '{first_token}' requires human approval",
@@ -1441,7 +1470,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                         "rows_preview": query_result.get("rows", [])[:5]  # Keep in result for task storage
                     }
                     # SECURITY: Log only metadata, not raw SQL or row data
-                    log_action("task.database_executed", f"Query executed successfully",
+                    log_action("task.database_executed", f"Query executed successfully", source="database_executor",
                               task_id=task.id, output_data={
                                   "executed": True,
                                   "rowCount": query_result.get("rowCount", 0),
@@ -1451,7 +1480,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                 except Exception as sql_error:
                     result = {"error": str(sql_error)}
                     task_succeeded = False
-                    log_action("task.database_failed", f"SQL execution failed",
+                    log_action("task.database_failed", f"SQL execution failed", source="database_executor",
                               level="error", task_id=task.id, 
                               error_data={"error": str(sql_error), "sql_length": len(sql_query)})
         
@@ -1496,7 +1525,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                     "results": test_results
                 }
                 task_succeeded = all_passed
-                log_action("task.test_completed", f"Ran {len(test_results)} tests, passed={all_passed}",
+                log_action("task.test_completed", f"Ran {len(test_results)} tests, passed={all_passed}", source="test_executor",
                           task_id=task.id, output_data=result)
         
         elif task.task_type == "scan":
@@ -1512,7 +1541,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
                 "note": "Scan completed - check external systems for results"
             }
-            log_action("task.scan_completed", f"Scan completed: {scan_type} from {source}",
+            log_action("task.scan_completed", f"Scan completed: {scan_type} from {source}", source="scan_executor",
                       task_id=task.id, output_data=result)
         
         else:
@@ -1539,7 +1568,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         
         if task_succeeded:
             update_task_status(task.id, "completed", result)
-            log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
+            log_action("task.completed", f"Task completed: {task.title}", task_id=task.id, source="task_execution",
                        output_data=result, duration_ms=duration_ms)
             # MED-02: Capture learning from successful task
             if LEARNING_CAPTURE_AVAILABLE:
@@ -1558,7 +1587,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                         worker_id=WORKER_ID,
                     )
                 except Exception as learn_err:
-                    log_action("learning.capture_error", f"Failed to capture learning: {learn_err}",
+                    log_action("learning.capture_error", f"Failed to capture learning: {learn_err}", source="learning_capture",
                                task_id=task.id, level="warning")
             # Notify Slack (best-effort, don't affect task status)
             try:
@@ -1570,11 +1599,11 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                     details=result.get("summary") if isinstance(result, dict) else None
                 )
             except Exception as notify_err:
-                log_action("notification.failed", f"Failed to send completion notification: {notify_err}",
+                log_action("notification.failed", f"Failed to send completion notification: {notify_err}", source="notification_service",
                            task_id=task.id, level="warning")
         else:
             update_task_status(task.id, "failed", result)
-            log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
+            log_action("task.failed", f"Task failed: {task.title}", task_id=task.id, source="task_execution",
                        level="error", error_data=result, duration_ms=duration_ms)
             # MED-02: Capture learning from failed task
             if LEARNING_CAPTURE_AVAILABLE:
@@ -1593,7 +1622,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                         worker_id=WORKER_ID,
                     )
                 except Exception as learn_err:
-                    log_action("learning.capture_error", f"Failed to capture learning: {learn_err}",
+                    log_action("learning.capture_error", f"Failed to capture learning: {learn_err}", source="learning_capture",
                                task_id=task.id, level="warning")
             # Notify Slack (best-effort, don't affect task status)
             try:
@@ -1604,7 +1633,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                     worker_id=WORKER_ID
                 )
             except Exception as notify_err:
-                log_action("notification.failed", f"Failed to send failure notification: {notify_err}",
+                log_action("notification.failed", f"Failed to send failure notification: {notify_err}", source="notification_service",
                            task_id=task.id, level="warning")
         
         return task_succeeded, result
@@ -1640,7 +1669,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                     retry_count=retries
                 )
             except Exception as notify_err:
-                log_action("notification.failed", f"Failed to send DLQ notification: {notify_err}",
+                log_action("notification.failed", f"Failed to send DLQ notification: {notify_err}", source="notification_service",
                            task_id=task.id, level="warning")
         
         return False, {"error": error_str, "retries": retries}
@@ -1660,25 +1689,25 @@ def autonomy_loop():
     if EXPERIMENTS_AVAILABLE:
         log_info("Experiments framework available", {"status": "enabled"})
     elif _experiments_import_error:
-        log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn")
+        log_action("experiments.unavailable", f"Experiments disabled: {_experiments_import_error}", level="warn", source="module_loader")
     
     # Log proactive framework status (HIGH-05)
     if PROACTIVE_AVAILABLE:
         log_info("Proactive opportunity scanner available", {"status": "enabled"})
     elif _proactive_import_error:
-        log_action("proactive.unavailable", f"Proactive systems disabled: {_proactive_import_error}", level="warn")
+        log_action("proactive.unavailable", f"Proactive systems disabled: {_proactive_import_error}", level="warn", source="module_loader")
     
     # Log error recovery framework status (MED-01)
     if ERROR_RECOVERY_AVAILABLE:
         log_info("Error recovery framework available", {"status": "enabled"})
     elif _error_recovery_import_error:
-        log_action("error_recovery.unavailable", f"Error recovery disabled: {_error_recovery_import_error}", level="warn")
+        log_action("error_recovery.unavailable", f"Error recovery disabled: {_error_recovery_import_error}", level="warn", source="module_loader")
     
     # Log failover framework status (L5-07)
     if FAILOVER_AVAILABLE:
         log_info("Failover and resilience framework available", {"status": "enabled"})
     elif _failover_import_error:
-        log_action("failover.unavailable", f"Failover disabled: {_failover_import_error}", level="warn")
+        log_action("failover.unavailable", f"Failover disabled: {_failover_import_error}", level="warn", source="module_loader")
 
     # Log stale cleanup framework status (CRITICAL-03c)
     if STALE_CLEANUP_AVAILABLE:
