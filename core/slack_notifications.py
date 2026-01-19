@@ -1,7 +1,10 @@
 """
-Slack webhook integration for JUGGERNAUT alerts.
+Slack integration for JUGGERNAUT alerts.
 
-Sends alerts and notifications to Slack channels via incoming webhooks.
+Sends alerts and notifications to Slack channels via:
+1. Incoming webhooks (SLACK_WEBHOOK_URL)
+2. Slack Web API with bot tokens (SLACK_BOT_TOKEN + WAR_ROOM_CHANNEL)
+
 Supports the L5 executive alerting capability.
 """
 
@@ -15,8 +18,11 @@ from urllib.request import Request, urlopen
 # Constants
 DEFAULT_TIMEOUT_SECONDS: int = 10
 SLACK_WEBHOOK_ENV_VAR: str = "SLACK_WEBHOOK_URL"
+SLACK_BOT_TOKEN_ENV_VAR: str = "SLACK_BOT_TOKEN"
+WAR_ROOM_CHANNEL_ENV_VAR: str = "WAR_ROOM_CHANNEL"
 DEFAULT_CHANNEL: str = "#war-room"
 MAX_MESSAGE_LENGTH: int = 4000
+SLACK_API_URL: str = "https://slack.com/api/chat.postMessage"
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -32,6 +38,43 @@ def get_webhook_url() -> Optional[str]:
     return os.environ.get(SLACK_WEBHOOK_ENV_VAR)
 
 
+def get_bot_token() -> Optional[str]:
+    """
+    Retrieve Slack bot token from environment variable.
+    
+    Returns:
+        The bot token if configured, None otherwise.
+    """
+    return os.environ.get(SLACK_BOT_TOKEN_ENV_VAR)
+
+
+def get_war_room_channel() -> Optional[str]:
+    """
+    Retrieve war room channel ID from environment variable.
+    
+    Returns:
+        The channel ID if configured, None otherwise.
+    """
+    return os.environ.get(WAR_ROOM_CHANNEL_ENV_VAR)
+
+
+def _get_slack_config() -> tuple[Optional[str], Optional[str], str]:
+    """
+    Determine which Slack configuration to use.
+    
+    Returns:
+        Tuple of (webhook_url, bot_token, channel).
+        One of webhook_url or bot_token will be set, not both.
+    """
+    webhook_url = get_webhook_url()
+    if webhook_url:
+        return webhook_url, None, DEFAULT_CHANNEL
+    
+    bot_token = get_bot_token()
+    channel = get_war_room_channel() or DEFAULT_CHANNEL
+    return None, bot_token, channel
+
+
 def send_alert(
     message: str,
     channel: Optional[str] = None,
@@ -40,11 +83,14 @@ def send_alert(
     priority: str = "normal"
 ) -> bool:
     """
-    Send an alert message to Slack via webhook.
+    Send an alert message to Slack.
+    
+    Uses webhook if SLACK_WEBHOOK_URL is set, otherwise uses
+    SLACK_BOT_TOKEN with the Slack Web API.
     
     Args:
         message: The alert message to send.
-        channel: Target channel (optional, uses webhook default if not specified).
+        channel: Target channel (optional, uses default if not specified).
         username: Display name for the bot.
         icon_emoji: Emoji icon for the message.
         priority: Alert priority level (critical, high, normal, low).
@@ -52,12 +98,13 @@ def send_alert(
     Returns:
         True if the message was sent successfully, False otherwise.
     """
-    webhook_url = get_webhook_url()
+    webhook_url, bot_token, default_channel = _get_slack_config()
     
-    if not webhook_url:
+    if not webhook_url and not bot_token:
         logger.warning(
-            "Slack webhook URL not configured. Set %s environment variable.",
-            SLACK_WEBHOOK_ENV_VAR
+            "No Slack configuration found. Set %s or %s environment variable.",
+            SLACK_WEBHOOK_ENV_VAR,
+            SLACK_BOT_TOKEN_ENV_VAR
         )
         return False
     
@@ -73,16 +120,25 @@ def send_alert(
     # Format message with priority prefix
     formatted_message = _format_message_with_priority(message, priority)
     
-    payload: dict[str, Any] = {
-        "text": formatted_message,
-        "username": username,
-        "icon_emoji": icon_emoji,
-    }
+    target_channel = channel or default_channel
     
-    if channel:
-        payload["channel"] = channel
-    
-    return _send_webhook_request(webhook_url, payload)
+    if webhook_url:
+        payload: dict[str, Any] = {
+            "text": formatted_message,
+            "username": username,
+            "icon_emoji": icon_emoji,
+        }
+        if channel:
+            payload["channel"] = channel
+        return _send_webhook_request(webhook_url, payload)
+    else:
+        return _send_bot_message(
+            bot_token,  # type: ignore
+            target_channel,
+            formatted_message,
+            username,
+            icon_emoji
+        )
 
 
 def send_structured_alert(
@@ -105,12 +161,13 @@ def send_structured_alert(
     Returns:
         True if sent successfully, False otherwise.
     """
-    webhook_url = get_webhook_url()
+    webhook_url, bot_token, default_channel = _get_slack_config()
     
-    if not webhook_url:
+    if not webhook_url and not bot_token:
         logger.warning(
-            "Slack webhook URL not configured. Set %s environment variable.",
-            SLACK_WEBHOOK_ENV_VAR
+            "No Slack configuration found. Set %s or %s environment variable.",
+            SLACK_WEBHOOK_ENV_VAR,
+            SLACK_BOT_TOKEN_ENV_VAR
         )
         return False
     
@@ -123,23 +180,32 @@ def send_structured_alert(
         for key, value in fields.items()
     ]
     
-    payload: dict[str, Any] = {
-        "attachments": [
-            {
-                "fallback": title,
-                "color": color,
-                "title": title,
-                "fields": attachment_fields,
-            }
-        ],
-        "username": "JUGGERNAUT",
-        "icon_emoji": ":robot_face:",
-    }
+    target_channel = channel or default_channel
     
-    if channel:
-        payload["channel"] = channel
+    attachments = [
+        {
+            "fallback": title,
+            "color": color,
+            "title": title,
+            "fields": attachment_fields,
+        }
+    ]
     
-    return _send_webhook_request(webhook_url, payload)
+    if webhook_url:
+        payload: dict[str, Any] = {
+            "attachments": attachments,
+            "username": "JUGGERNAUT",
+            "icon_emoji": ":robot_face:",
+        }
+        if channel:
+            payload["channel"] = channel
+        return _send_webhook_request(webhook_url, payload)
+    else:
+        return _send_bot_message_with_attachments(
+            bot_token,  # type: ignore
+            target_channel,
+            attachments
+        )
 
 
 def send_system_alert(
@@ -193,7 +259,7 @@ def send_system_alert(
         title=title,
         fields=fields,
         color=color,
-        channel=DEFAULT_CHANNEL,
+        channel=None,  # Uses default war-room
         priority=_alert_type_to_priority(alert_type)
     )
 
@@ -279,7 +345,7 @@ def _send_webhook_request(webhook_url: str, payload: dict[str, Any]) -> bool:
         
         with urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
             if response.status == 200:
-                logger.info("Alert sent to Slack successfully")
+                logger.info("Alert sent to Slack successfully via webhook")
                 return True
             else:
                 logger.error(
@@ -299,4 +365,113 @@ def _send_webhook_request(webhook_url: str, payload: dict[str, Any]) -> bool:
             "Timeout sending Slack alert after %d seconds",
             DEFAULT_TIMEOUT_SECONDS
         )
+        return False
+
+
+def _send_bot_message(
+    bot_token: str,
+    channel: str,
+    text: str,
+    username: str = "JUGGERNAUT",
+    icon_emoji: str = ":robot_face:"
+) -> bool:
+    """
+    Send message using Slack Web API with bot token.
+    
+    Args:
+        bot_token: Slack bot OAuth token.
+        channel: Channel ID or name.
+        text: Message text.
+        username: Display name.
+        icon_emoji: Emoji icon.
+    
+    Returns:
+        True if sent successfully, False otherwise.
+    """
+    payload = {
+        "channel": channel,
+        "text": text,
+        "username": username,
+        "icon_emoji": icon_emoji,
+    }
+    
+    return _send_slack_api_request(bot_token, payload)
+
+
+def _send_bot_message_with_attachments(
+    bot_token: str,
+    channel: str,
+    attachments: list[dict[str, Any]]
+) -> bool:
+    """
+    Send message with attachments using Slack Web API.
+    
+    Args:
+        bot_token: Slack bot OAuth token.
+        channel: Channel ID or name.
+        attachments: List of attachment objects.
+    
+    Returns:
+        True if sent successfully, False otherwise.
+    """
+    payload = {
+        "channel": channel,
+        "attachments": attachments,
+        "username": "JUGGERNAUT",
+        "icon_emoji": ":robot_face:",
+    }
+    
+    return _send_slack_api_request(bot_token, payload)
+
+
+def _send_slack_api_request(bot_token: str, payload: dict[str, Any]) -> bool:
+    """
+    Send request to Slack Web API.
+    
+    Args:
+        bot_token: Slack bot OAuth token.
+        payload: JSON payload to send.
+    
+    Returns:
+        True if request succeeded, False otherwise.
+    """
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        request = Request(
+            SLACK_API_URL,
+            data=data,
+            headers={
+                "Content-Type": "application/json; charset=utf-8",
+                "Authorization": f"Bearer {bot_token}"
+            }
+        )
+        
+        with urlopen(request, timeout=DEFAULT_TIMEOUT_SECONDS) as response:
+            response_body = response.read().decode("utf-8")
+            result = json.loads(response_body)
+            
+            if result.get("ok"):
+                logger.info("Alert sent to Slack successfully via Web API")
+                return True
+            else:
+                logger.error(
+                    "Slack API error: %s",
+                    result.get("error", "unknown error")
+                )
+                return False
+                
+    except HTTPError as e:
+        logger.error("HTTP error sending Slack alert: %s", e)
+        return False
+    except URLError as e:
+        logger.error("URL error sending Slack alert: %s", e)
+        return False
+    except TimeoutError:
+        logger.error(
+            "Timeout sending Slack alert after %d seconds",
+            DEFAULT_TIMEOUT_SECONDS
+        )
+        return False
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse Slack API response: %s", e)
         return False
