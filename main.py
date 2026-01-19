@@ -167,6 +167,19 @@ except ImportError as e:
     def capture_task_learning(*args, **kwargs): return (False, None)
 
 
+# L5-07: Failover and Resilience - Worker failure detection and task reassignment
+FAILOVER_AVAILABLE = False
+_failover_import_error = None
+
+try:
+    from core.failover import process_failover
+    FAILOVER_AVAILABLE = True
+except ImportError as e:
+    _failover_import_error = str(e)
+    # Stub function for graceful degradation
+    def process_failover(*args, **kwargs): return {"failed_workers": [], "tasks_reassigned": 0}
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -1648,6 +1661,12 @@ def autonomy_loop():
     elif _error_recovery_import_error:
         log_action("error_recovery.unavailable", f"Error recovery disabled: {_error_recovery_import_error}", level="warn")
     
+    # Log failover framework status (L5-07)
+    if FAILOVER_AVAILABLE:
+        log_info("Failover and resilience framework available", {"status": "enabled"})
+    elif _failover_import_error:
+        log_action("failover.unavailable", f"Failover disabled: {_failover_import_error}", level="warn")
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -1669,6 +1688,19 @@ def autonomy_loop():
         loop_count += 1
         loop_start = time.time()
         
+        
+        # L5-07: Check for failed workers and reassign tasks at start of each loop
+        if FAILOVER_AVAILABLE:
+            try:
+                failover_result = process_failover()
+                if failover_result.get("tasks_reassigned", 0) > 0:
+                    log_action(
+                        "failover.tasks_reassigned",
+                        f"Reassigned {failover_result['tasks_reassigned']} tasks from failed workers",
+                        data=failover_result
+                    )
+            except Exception as failover_err:
+                log_error(f"Failover check failed: {failover_err}")
         try:
             # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
             approved_tasks = poll_approved_tasks(limit=3)
