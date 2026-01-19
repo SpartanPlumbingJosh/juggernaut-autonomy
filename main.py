@@ -73,6 +73,16 @@ except ImportError as e:
     def conclude_experiment(*args, **kwargs): return False
     def get_experiment_dashboard(*args, **kwargs): return {}
 
+# Real-time Dashboard API
+DASHBOARD_API_AVAILABLE = False
+_dashboard_import_error = None
+try:
+    from api.realtime_dashboard import handle_dashboard_request, record_revenue
+    DASHBOARD_API_AVAILABLE = True
+except ImportError as e:
+    _dashboard_import_error = str(e)
+
+
 
 # Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
 ORCHESTRATION_AVAILABLE = False
@@ -2003,14 +2013,41 @@ START_TIME = datetime.now(timezone.utc)
 
 
 class HealthHandler(BaseHTTPRequestHandler):
+    """HTTP handler for health checks and dashboard API."""
+    
     def log_message(self, format, *args):
         pass  # Suppress default logging
     
+    def send_cors_headers(self):
+        """Add CORS headers to allow dashboard access."""
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
+    
+    def do_OPTIONS(self):
+        """Handle CORS preflight requests."""
+        self.send_response(200)
+        self.send_cors_headers()
+        self.end_headers()
+    
     def do_GET(self):
-        if self.path == "/health":
+        """Handle GET requests."""
+        import urllib.parse
+        
+        # Parse path and query params
+        path = self.path.split('?')[0]
+        query_string = self.path.split('?')[1] if '?' in self.path else ''
+        params = {}
+        if query_string:
+            for param in query_string.split('&'):
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    params[key] = urllib.parse.unquote(value)
+        
+        # Health endpoint
+        if path == "/health":
             uptime = (datetime.now(timezone.utc) - START_TIME).total_seconds()
             
-            # Check database
             db_ok = True
             try:
                 execute_sql("SELECT 1")
@@ -2020,12 +2057,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             status = "healthy" if db_ok else "degraded"
             response = {
                 "status": status,
-                "version": "1.1.0",
+                "version": "1.2.0",
                 "worker_id": WORKER_ID,
                 "uptime_seconds": int(uptime),
                 "database": "connected" if db_ok else "error",
                 "dry_run": DRY_RUN,
                 "loop_interval": LOOP_INTERVAL,
+                "dashboard_api": DASHBOARD_API_AVAILABLE,
                 "experiments": {
                     "available": EXPERIMENTS_AVAILABLE,
                     "dashboard": get_experiment_dashboard() if EXPERIMENTS_AVAILABLE else {}
@@ -2035,23 +2073,111 @@ class HealthHandler(BaseHTTPRequestHandler):
             
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(response).encode())
-            
-        elif self.path == "/":
+        
+        # Root endpoint
+        elif path == "/":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps({
                 "service": "JUGGERNAUT Autonomy Engine",
                 "status": "running",
-                "version": "1.1.0",
-                "endpoints": ["/", "/health"]
+                "version": "1.2.0",
+                "endpoints": [
+                    "/", "/health",
+                    "/api/dashboard/stats",
+                    "/api/dashboard/opportunities",
+                    "/api/dashboard/activity",
+                    "/api/dashboard/revenue",
+                    "/api/dashboard/workers",
+                    "/api/dashboard/experiments",
+                    "/api/dashboard/tasks"
+                ]
             }).encode())
+        
+        # Dashboard API endpoints
+        elif path.startswith("/api/dashboard/"):
+            if not DASHBOARD_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Dashboard API not available: {_dashboard_import_error}"
+                }).encode())
+                return
             
+            endpoint = path.replace("/api/dashboard/", "")
+            result = handle_dashboard_request(endpoint, params)
+            
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result, default=str).encode())
+        
         else:
             self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
             self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
+    
+    def do_POST(self):
+        """Handle POST requests (for recording revenue)."""
+        path = self.path.split('?')[0]
+        
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = {}
+        if content_length > 0:
+            body_bytes = self.rfile.read(content_length)
+            try:
+                body = json.loads(body_bytes.decode('utf-8'))
+            except json.JSONDecodeError:
+                pass
+        
+        if path == "/api/dashboard/revenue":
+            if not DASHBOARD_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": "Dashboard API not available"}).encode())
+                return
+            
+            if "amount" not in body or "source" not in body:
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": "Missing required fields: amount, source"}).encode())
+                return
+            
+            result = record_revenue(
+                amount=float(body["amount"]),
+                source=body["source"],
+                description=body.get("description", ""),
+                opportunity_id=body.get("opportunity_id"),
+                metadata=body.get("metadata")
+            )
+            
+            self.send_response(200 if result.get("success") else 400)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result).encode())
+        
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
 
 
 def run_health_server():
