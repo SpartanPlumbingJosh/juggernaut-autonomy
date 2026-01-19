@@ -13,10 +13,15 @@ Functions:
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+
 import httpx
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
@@ -1003,10 +1008,14 @@ def conclude_experiment(
     conclusion: str,
     results_summary: Dict[str, Any],
     status: str = "completed",
-    concluded_by: str = "SYSTEM"
+    concluded_by: str = "SYSTEM",
+    auto_rollback: bool = True
 ) -> Dict[str, Any]:
     """
     Conclude an experiment with final results.
+    
+    Automatically triggers rollback when status is 'failed' and auto_rollback
+    is True (default behavior).
     
     Args:
         experiment_id: Experiment to conclude
@@ -1014,9 +1023,10 @@ def conclude_experiment(
         results_summary: Summary of results
         status: Final status (completed, failed, cancelled)
         concluded_by: Who concluded it
+        auto_rollback: If True, automatically rollback on failure (default: True)
     
     Returns:
-        Dict with status
+        Dict with status and rollback info if applicable
     """
     query = f"""
     UPDATE experiments
@@ -1034,7 +1044,26 @@ def conclude_experiment(
     # Trigger learning extraction
     extract_learnings(experiment_id)
     
-    return {"success": True, "message": f"Experiment concluded as {status}"}
+    result = {"success": True, "message": f"Experiment concluded as {status}"}
+    
+    # Auto-trigger rollback on failure
+    if status == "failed" and auto_rollback:
+        logger.info(f"Experiment {experiment_id} failed - triggering automatic rollback")
+        rollback_result = execute_rollback(
+            experiment_id=experiment_id,
+            reason=f"Auto-rollback triggered by experiment failure: {conclusion}",
+            triggered_by=concluded_by
+        )
+        result["rollback_triggered"] = True
+        result["rollback_result"] = rollback_result
+        log_experiment_event(
+            experiment_id,
+            "auto_rollback",
+            f"Automatic rollback executed on failure. Rollback success: {rollback_result.get('success', False)}",
+            concluded_by
+        )
+    
+    return result
 
 
 # =============================================================================
@@ -1213,6 +1242,153 @@ def check_auto_rollback_triggers(experiment_id: str) -> Dict[str, Any]:
         "should_rollback": False,
         "triggers": []
     }
+
+
+def fail_experiment(
+    experiment_id: str,
+    failure_reason: str,
+    results_summary: Optional[Dict[str, Any]] = None,
+    failed_by: str = "SYSTEM",
+    auto_rollback: bool = True
+) -> Dict[str, Any]:
+    """
+    Mark an experiment as failed and automatically trigger rollback.
+    
+    This is a convenience function that wraps conclude_experiment with
+    failure-specific defaults and ensures rollback is triggered.
+    
+    Args:
+        experiment_id: Experiment to fail
+        failure_reason: Why the experiment failed
+        results_summary: Optional summary of results at failure
+        failed_by: Who marked it as failed
+        auto_rollback: If True, automatically rollback (default: True)
+    
+    Returns:
+        Dict with failure status and rollback result
+    """
+    logger.info(f"Failing experiment {experiment_id}: {failure_reason}")
+    
+    return conclude_experiment(
+        experiment_id=experiment_id,
+        conclusion=failure_reason,
+        results_summary=results_summary or {"failure_reason": failure_reason},
+        status="failed",
+        concluded_by=failed_by,
+        auto_rollback=auto_rollback
+    )
+
+
+def process_auto_rollback_for_running_experiments(
+    triggered_by: str = "SCHEDULER"
+) -> Dict[str, Any]:
+    """
+    Check all running experiments for auto-rollback triggers and execute rollbacks.
+    
+    This function should be called periodically by the scheduler to ensure
+    experiments that meet failure criteria are automatically rolled back.
+    
+    Checks each running experiment for:
+    - Budget exhaustion
+    - Failure criteria met
+    - Scheduled end passed
+    
+    Args:
+        triggered_by: Who/what is triggering this check (default: SCHEDULER)
+    
+    Returns:
+        Dict with summary of experiments checked and any rollbacks executed
+    """
+    logger.info("Starting auto-rollback check for running experiments")
+    
+    # Get all running experiments
+    running_experiments = list_experiments(status="running")
+    
+    results = {
+        "success": True,
+        "experiments_checked": len(running_experiments),
+        "rollbacks_triggered": 0,
+        "rollback_details": []
+    }
+    
+    for experiment in running_experiments:
+        experiment_id = experiment.get("id")
+        if not experiment_id:
+            continue
+        
+        # Check if rollback should be triggered
+        trigger_check = check_auto_rollback_triggers(experiment_id)
+        
+        if trigger_check.get("should_rollback"):
+            triggers = trigger_check.get("triggers", [])
+            trigger_reason = f"Auto-rollback: {', '.join(triggers)}"
+            
+            logger.info(
+                f"Auto-rollback triggered for experiment {experiment_id}: {triggers}"
+            )
+            
+            # Execute the rollback by failing the experiment
+            rollback_result = fail_experiment(
+                experiment_id=experiment_id,
+                failure_reason=trigger_reason,
+                results_summary={"auto_rollback_triggers": triggers},
+                failed_by=triggered_by,
+                auto_rollback=True
+            )
+            
+            results["rollbacks_triggered"] += 1
+            results["rollback_details"].append({
+                "experiment_id": experiment_id,
+                "experiment_name": experiment.get("name"),
+                "triggers": triggers,
+                "rollback_success": rollback_result.get("rollback_result", {}).get("success", False)
+            })
+    
+    logger.info(
+        f"Auto-rollback check complete: {results['experiments_checked']} checked, "
+        f"{results['rollbacks_triggered']} rollbacks triggered"
+    )
+    
+    return results
+
+
+def get_rollback_history(
+    experiment_id: Optional[str] = None,
+    limit: int = 50
+) -> List[Dict[str, Any]]:
+    """
+    Get rollback history, optionally filtered by experiment.
+    
+    Args:
+        experiment_id: Optional filter by experiment
+        limit: Maximum results to return
+    
+    Returns:
+        List of rollback records with details
+    """
+    where_clause = f"WHERE experiment_id = '{experiment_id}'" if experiment_id else ""
+    
+    query = f"""
+    SELECT 
+        r.id,
+        r.experiment_id,
+        e.name as experiment_name,
+        r.rollback_type,
+        r.rollback_executed,
+        r.rollback_executed_at,
+        r.triggered_by,
+        r.trigger_reason,
+        r.rollback_result,
+        r.created_at
+    FROM experiment_rollbacks r
+    LEFT JOIN experiments e ON r.experiment_id = e.id
+    {where_clause}
+    ORDER BY r.created_at DESC
+    LIMIT {limit}
+    """
+    
+    result = _execute_sql(query)
+    return result.get("rows", [])
 
 
 # =============================================================================
@@ -1570,6 +1746,9 @@ __all__ = [
     "create_rollback_snapshot",
     "execute_rollback",
     "check_auto_rollback_triggers",
+    "fail_experiment",
+    "process_auto_rollback_for_running_experiments",
+    "get_rollback_history",
     
     # Phase 4.5: Self-Improvement
     "record_learning",
