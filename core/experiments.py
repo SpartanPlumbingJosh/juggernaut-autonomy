@@ -339,7 +339,7 @@ def list_experiments(
 
 def start_experiment(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str, Any]:
     """
-    Start an experiment (move from draft to running).
+    Start an experiment (move from draft, paused, or approved to running).
     
     Creates an initial rollback snapshot before starting.
     
@@ -355,7 +355,7 @@ def start_experiment(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str
     if not experiment:
         return {"success": False, "error": "Experiment not found"}
     
-    if experiment["status"] not in ["draft", "paused"]:
+    if experiment["status"] not in ["draft", "paused", "approved"]:
         return {"success": False, "error": f"Cannot start experiment in {experiment['status']} status"}
     
     # Create rollback snapshot before starting
@@ -366,6 +366,7 @@ def start_experiment(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str
     UPDATE experiments
     SET status = 'running',
         start_date = COALESCE(start_date, NOW()),
+        current_iteration = CASE WHEN current_iteration = 0 THEN 1 ELSE current_iteration END,
         updated_at = NOW()
     WHERE id = '{experiment_id}'
     """
@@ -1776,3 +1777,4 @@ __all__ = [
     "log_experiment_event",
     "get_experiment_dashboard",
 ]
+
