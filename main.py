@@ -45,6 +45,19 @@ from core.notifications import (
     notify_engine_started
 )
 
+# L2: Persistent Memory System
+MEMORY_AVAILABLE = False
+_memory_import_error = None
+
+try:
+    from core.database import write_memory, read_memories
+    MEMORY_AVAILABLE = True
+except ImportError as e:
+    _memory_import_error = str(e)
+    # Stub functions for graceful degradation
+    def write_memory(*args, **kwargs): return None
+    def read_memories(*args, **kwargs): return []
+
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
 EXPERIMENTS_AVAILABLE = False
 _experiments_import_error = None
@@ -1125,6 +1138,119 @@ def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]
     return False, None, result
 
 
+
+
+# ============================================================
+# L2: PERSISTENT MEMORY SYSTEM
+# ============================================================
+
+def recall_relevant_memories(task_title: str, task_type: str, limit: int = 5) -> List[Dict]:
+    """
+    Recall memories relevant to the current task.
+    
+    L2 Requirement: Multi-Turn Memory - Tracks 5-10 previous exchanges
+    
+    Args:
+        task_title: Title of the task to find relevant memories for
+        task_type: Type of task (code, audit, verification, etc.)
+        limit: Maximum memories to return
+    
+    Returns:
+        List of relevant memory records
+    """
+    if not MEMORY_AVAILABLE:
+        return []
+    
+    try:
+        # Get recent memories of same task type
+        type_memories = read_memories(
+            category=task_type,
+            limit=limit // 2,
+            min_importance=0.5
+        )
+        
+        # Get high-importance memories
+        important_memories = read_memories(
+            min_importance=0.7,
+            limit=limit // 2
+        )
+        
+        # Combine and deduplicate
+        all_memories = {m.get("id"): m for m in type_memories}
+        for m in important_memories:
+            if m.get("id") not in all_memories:
+                all_memories[m.get("id")] = m
+        
+        memories = list(all_memories.values())[:limit]
+        
+        if memories:
+            log_action("memory.recalled", 
+                      f"Recalled {len(memories)} relevant memories for task",
+                      output_data={"count": len(memories), "task_type": task_type})
+        
+        return memories
+    except Exception as e:
+        log_action("memory.recall_error", f"Failed to recall memories: {e}", level="warn")
+        return []
+
+
+def store_task_memory(task_id: str, task_title: str, task_type: str, 
+                      outcome: str, result: Dict, importance: float = 0.6) -> Optional[str]:
+    """
+    Store a memory about task execution for future reference.
+    
+    L2 Requirement: Persistent memory that survives restarts.
+    
+    Args:
+        task_id: UUID of the completed task
+        task_title: Title of the task
+        task_type: Type of task
+        outcome: 'completed' or 'failed'
+        result: Task execution result
+        importance: Memory importance (0.0-1.0)
+    
+    Returns:
+        Memory UUID or None on failure
+    """
+    if not MEMORY_AVAILABLE:
+        return None
+    
+    try:
+        # Create memory content summarizing the task
+        summary = result.get("summary") if isinstance(result, dict) else str(result)[:200]
+        
+        content = f"Task '{task_title}' ({task_type}) {outcome}"
+        if summary:
+            content += f": {summary}"
+        
+        # Increase importance for failures (learnings from mistakes)
+        if outcome == "failed":
+            importance = min(importance + 0.2, 1.0)
+        
+        memory_id = write_memory(
+            category=task_type,
+            content=content,
+            importance=importance,
+            worker_id=WORKER_ID,
+            metadata={
+                "task_id": task_id,
+                "outcome": outcome,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        
+        if memory_id:
+            log_action("memory.stored", 
+                      f"Stored memory for task {task_title}",
+                      task_id=task_id,
+                      output_data={"memory_id": memory_id, "importance": importance})
+        
+        return memory_id
+    except Exception as e:
+        log_action("memory.store_error", f"Failed to store memory: {e}", level="warn")
+        return None
+
+
 def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
@@ -1132,6 +1258,13 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     # L2: Assess risk before execution
     risk_score, risk_level, risk_factors = assess_task_risk(task)
     log_risk_warning(task, risk_score, risk_level, risk_factors)
+    
+    # L2: Recall relevant memories for context
+    relevant_memories = recall_relevant_memories(task.title, task.task_type)
+    if relevant_memories:
+        log_action("memory.context", 
+                  f"Using {len(relevant_memories)} memories for context",
+                  task_id=task.id)
     
     # L2: Log decision with confidence based on risk
     confidence = 1.0 - (risk_score * 0.5)  # Higher risk = lower confidence
@@ -1357,6 +1490,9 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
+            
+            # L2: Store task completion as memory
+            store_task_memory(task.id, task.title, task.task_type, "completed", result)
             # Notify Slack (best-effort, don't affect task status)
             try:
                 notify_task_completed(
@@ -1373,6 +1509,9 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
             update_task_status(task.id, "failed", result)
             log_action("task.failed", f"Task failed: {task.title}", task_id=task.id,
                        level="error", error_data=result, duration_ms=duration_ms)
+            
+            # L2: Store task failure as learning memory (higher importance)
+            store_task_memory(task.id, task.title, task.task_type, "failed", result, importance=0.8)
             # Notify Slack (best-effort, don't affect task status)
             try:
                 notify_task_failed(
