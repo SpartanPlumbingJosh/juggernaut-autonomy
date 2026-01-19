@@ -1,5 +1,5 @@
 """
-JUGGERNAUT MCP Server - Using official MCP library
+JUGGERNAUT MCP Server - Using official MCP library (v3)
 
 SSE-based Model Context Protocol server for Claude.ai integration.
 """
@@ -14,9 +14,9 @@ import aiohttp
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
-from starlette.routing import Route
+from starlette.routing import Route, Mount
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 import uvicorn
 
 from mcp.server import Server
@@ -226,17 +226,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 sse_transport = SseServerTransport("/messages")
 
 
-async def handle_sse(request: Request):
-    """Handle SSE connection with auth."""
-    token = request.query_params.get('token')
-    if token != MCP_AUTH_TOKEN:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+# Create ASGI app for SSE endpoint
+async def handle_sse(scope, receive, send):
+    """Handle SSE connection as ASGI app."""
+    # Extract token from query string
+    query_string = scope.get("query_string", b"").decode()
+    params = dict(p.split("=") for p in query_string.split("&") if "=" in p)
+    token = params.get("token", "")
     
-    async with sse_transport.connect_sse(
-        request.scope,
-        request.receive,
-        request._send
-    ) as streams:
+    if token != MCP_AUTH_TOKEN:
+        response = Response("Unauthorized", status_code=401)
+        await response(scope, receive, send)
+        return
+    
+    async with sse_transport.connect_sse(scope, receive, send) as streams:
         await mcp.run(
             streams[0],
             streams[1],
@@ -244,17 +247,20 @@ async def handle_sse(request: Request):
         )
 
 
-async def handle_messages(request: Request):
-    """Handle POST messages for SSE."""
-    token = request.query_params.get('token')
-    if token != MCP_AUTH_TOKEN:
-        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+# Create ASGI app for messages endpoint
+async def handle_messages(scope, receive, send):
+    """Handle POST messages as ASGI app."""
+    # Extract token from query string
+    query_string = scope.get("query_string", b"").decode()
+    params = dict(p.split("=") for p in query_string.split("&") if "=" in p)
+    token = params.get("token", "")
     
-    await sse_transport.handle_post_message(
-        request.scope,
-        request.receive,
-        request._send
-    )
+    if token != MCP_AUTH_TOKEN:
+        response = Response("Unauthorized", status_code=401)
+        await response(scope, receive, send)
+        return
+    
+    await sse_transport.handle_post_message(scope, receive, send)
 
 
 async def health(request: Request):
@@ -262,13 +268,18 @@ async def health(request: Request):
     return JSONResponse({"status": "healthy", "tools": 5})
 
 
+# Build routes
+routes = [
+    Route("/health", health, methods=["GET"]),
+    Mount("/mcp", routes=[
+        Route("/sse", handle_sse, methods=["GET"]),
+    ]),
+    Route("/messages", handle_messages, methods=["POST"]),
+]
+
 # Create app with CORS
 app = Starlette(
-    routes=[
-        Route("/mcp/sse", handle_sse, methods=["GET"]),
-        Route("/messages", handle_messages, methods=["POST"]),
-        Route("/health", health, methods=["GET"]),
-    ],
+    routes=routes,
     middleware=[
         Middleware(
             CORSMiddleware,
