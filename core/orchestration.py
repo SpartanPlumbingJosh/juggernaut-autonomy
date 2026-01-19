@@ -1713,6 +1713,7 @@ def worker_report_task_status(
                 _query(f"""
                     UPDATE worker_registry 
                     SET tasks_completed = tasks_completed + 1,
+                        consecutive_failures = 0,
                         last_heartbeat = NOW()
                     WHERE worker_id = {_format_value(worker_id)}
                 """)
