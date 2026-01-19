@@ -297,15 +297,156 @@ def log_error(message: str, data: Dict = None):
     print(f"[ERROR] {message}")
 
 
-def log_decision(action: str, decision: str, reasoning: str, data: Dict = None):
-    """Log an autonomous decision (Level 3: Traceable Decisions)."""
+def log_decision(action: str, decision: str, reasoning: str, data: Dict = None, confidence: float = 1.0):
+    """Log an autonomous decision (Level 3: Traceable Decisions).
+    
+    Args:
+        action: The decision action type
+        decision: What was decided
+        reasoning: Why it was decided
+        data: Additional context data
+        confidence: Confidence level 0.0-1.0 (L2: Uncertainty tracking)
+    """
+    # Flag low confidence decisions
+    uncertainty_warning = ""
+    if confidence < 0.7:
+        uncertainty_warning = f" [LOW CONFIDENCE: {confidence:.0%}]"
+    
     log_action(
         f"decision.{action}",
-        f"{decision}: {reasoning}",
-        "info",
-        output_data={"decision": decision, "reasoning": reasoning, **(data or {})}
+        f"{decision}: {reasoning}{uncertainty_warning}",
+        "info" if confidence >= 0.5 else "warn",
+        output_data={"decision": decision, "reasoning": reasoning, "confidence": confidence, **(data or {})}
     )
-    print(f"[DECISION] {action}: {decision}")
+    print(f"[DECISION] {action}: {decision}" + (f" (confidence: {confidence:.0%})" if confidence < 1.0 else ""))
+
+
+# ============================================================
+# RISK ASSESSMENT (Level 2: Uncertainty/Risk Warnings)
+# ============================================================
+
+# Risk level thresholds
+RISK_THRESHOLDS = {
+    "low": 0.3,      # Actions with risk < 0.3 proceed automatically
+    "medium": 0.6,   # Actions with 0.3 <= risk < 0.6 get logged warnings
+    "high": 0.8,     # Actions with 0.6 <= risk < 0.8 require extra scrutiny
+    "critical": 1.0  # Actions with risk >= 0.8 require approval
+}
+
+# Risk factors for different task types
+TASK_TYPE_RISK = {
+    "database": 0.5,        # Database operations have inherent risk
+    "tool_execution": 0.4,  # Tool execution depends on the tool
+    "workflow": 0.5,        # Multi-step workflows can cascade failures
+    "financial": 0.9,       # Financial operations are high risk
+    "deployment": 0.8,      # Deployments affect production
+    "scan": 0.1,            # Read-only scanning is low risk
+    "test": 0.2,            # Tests are generally safe
+    "health_check": 0.1,    # Health checks are read-only
+    "opportunity_scan": 0.1,# Scanning is read-only
+    "research": 0.2,        # Research tasks are low risk
+    "code": 0.6,            # Code changes require review
+    "verification": 0.2,    # Verification is generally safe
+}
+
+# Payload factors that increase risk
+RISK_AMPLIFIERS = {
+    "DELETE": 0.3,      # SQL DELETE statements
+    "DROP": 0.4,        # SQL DROP statements
+    "TRUNCATE": 0.4,    # SQL TRUNCATE statements
+    "UPDATE": 0.2,      # SQL UPDATE statements
+    "INSERT": 0.1,      # SQL INSERT statements
+    "production": 0.3,  # Affects production
+    "financial": 0.3,   # Financial impact
+    "customer": 0.2,    # Affects customers
+    "api_key": 0.2,     # Involves credentials
+    "deploy": 0.3,      # Deployment related
+}
+
+
+def assess_task_risk(task: Task) -> Tuple[float, str, List[str]]:
+    """
+    Assess the risk level of a task before execution.
+    
+    Returns:
+        (risk_score, risk_level, risk_factors)
+        - risk_score: 0.0 to 1.0
+        - risk_level: "low", "medium", "high", "critical"
+        - risk_factors: List of factors contributing to risk
+    """
+    risk_factors = []
+    base_risk = TASK_TYPE_RISK.get(task.task_type, 0.5)
+    risk_factors.append(f"task_type:{task.task_type}={base_risk:.1f}")
+    
+    # Check payload for risk amplifiers
+    payload_str = str(task.payload).upper() if task.payload else ""
+    description_str = (task.description or "").upper()
+    combined_text = payload_str + " " + description_str
+    
+    amplifier_total = 0.0
+    for keyword, amplifier in RISK_AMPLIFIERS.items():
+        if keyword.upper() in combined_text:
+            amplifier_total += amplifier
+            risk_factors.append(f"keyword:{keyword}=+{amplifier:.1f}")
+    
+    # Check for SQL in payload
+    if task.payload:
+        sql_query = task.payload.get("sql") or task.payload.get("query") or ""
+        if sql_query:
+            sql_upper = sql_query.upper().strip()
+            first_token = sql_upper.split()[0] if sql_upper.split() else ""
+            
+            # Read-only queries are safer
+            if first_token in {"SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE"}:
+                amplifier_total -= 0.2  # Reduce risk for read-only
+                risk_factors.append("sql:read_only=-0.2")
+            elif first_token in {"DELETE", "DROP", "TRUNCATE"}:
+                amplifier_total += 0.3
+                risk_factors.append(f"sql:{first_token}=+0.3")
+    
+    # Check priority - high priority tasks might be rushed
+    if task.priority >= 4:  # high/critical
+        amplifier_total += 0.1
+        risk_factors.append("priority:high=+0.1")
+    
+    # Calculate final risk score (capped at 1.0)
+    final_risk = min(1.0, max(0.0, base_risk + amplifier_total))
+    
+    # Determine risk level
+    if final_risk < RISK_THRESHOLDS["low"]:
+        risk_level = "low"
+    elif final_risk < RISK_THRESHOLDS["medium"]:
+        risk_level = "medium"
+    elif final_risk < RISK_THRESHOLDS["high"]:
+        risk_level = "high"
+    else:
+        risk_level = "critical"
+    
+    return final_risk, risk_level, risk_factors
+
+
+def log_risk_warning(task: Task, risk_score: float, risk_level: str, risk_factors: List[str]):
+    """Log a risk warning for a task (L2: Risk Warnings)."""
+    log_action(
+        "risk.assessment",
+        f"Task '{task.title}' assessed as {risk_level.upper()} risk ({risk_score:.0%})",
+        level="warn" if risk_level in ("high", "critical") else "info",
+        task_id=task.id,
+        output_data={
+            "risk_score": risk_score,
+            "risk_level": risk_level,
+            "risk_factors": risk_factors,
+            "task_type": task.task_type,
+            "title": task.title
+        }
+    )
+    if risk_level in ("high", "critical"):
+        print(f"[RISK WARNING] {task.title}: {risk_level.upper()} ({risk_score:.0%}) - factors: {', '.join(risk_factors)}")
+
+
+def should_require_approval_for_risk(risk_score: float, risk_level: str) -> bool:
+    """Determine if a task should require approval based on risk level."""
+    return risk_level == "critical" or risk_score >= RISK_THRESHOLDS["high"]
 
 
 # ============================================================
@@ -730,17 +871,36 @@ def _execute_http_tool(tool_name: str, params: Dict) -> Dict:
 # ============================================================
 
 def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
-    """Execute a single task with full Level 3 compliance."""
+    """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
     
+    # L2: Assess risk before execution
+    risk_score, risk_level, risk_factors = assess_task_risk(task)
+    log_risk_warning(task, risk_score, risk_level, risk_factors)
+    
+    # L2: Log decision with confidence based on risk
+    confidence = 1.0 - (risk_score * 0.5)  # Higher risk = lower confidence
     log_decision("task.execute", task.title, f"Priority {task.priority}, type {task.task_type}",
-                 {"task_id": task.id})
+                 {"task_id": task.id, "risk_score": risk_score, "risk_level": risk_level},
+                 confidence=confidence)
     
     # Check permission
     allowed, reason = is_action_allowed(f"task.{task.task_type}")
     if not allowed:
         log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
         return False, {"blocked": True, "reason": reason}
+    
+    # L2: High-risk tasks require approval even if not explicitly marked
+    if should_require_approval_for_risk(risk_score, risk_level) and not task.requires_approval:
+        log_action("risk.approval_required", 
+                  f"Task '{task.title}' requires approval due to {risk_level.upper()} risk ({risk_score:.0%})",
+                  level="warn", task_id=task.id,
+                  output_data={"risk_score": risk_score, "risk_level": risk_level, "risk_factors": risk_factors})
+        update_task_status(task.id, "waiting_approval", {
+            "reason": f"High risk task ({risk_level}: {risk_score:.0%})",
+            "risk_factors": risk_factors
+        })
+        return False, {"waiting_approval": True, "risk_triggered": True, "risk_score": risk_score, "risk_level": risk_level}
     
     # Check approval (read-only check)
     requires_approval, approval_id, status = check_approval_status(task)
@@ -762,8 +922,9 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     # Dry run mode
     if dry_run or DRY_RUN:
         log_action("task.dry_run", f"DRY RUN: Would execute: {task.title}", task_id=task.id,
-                   output_data={"task_type": task.task_type, "payload": task.payload})
-        return True, {"dry_run": True, "would_execute": task.task_type}
+                   output_data={"task_type": task.task_type, "payload": task.payload, 
+                               "risk_score": risk_score, "risk_level": risk_level})
+        return True, {"dry_run": True, "would_execute": task.task_type, "risk_level": risk_level}
     
     try:
         # Execute based on task type
