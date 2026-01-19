@@ -1,0 +1,23 @@
+{
+  "builds": [
+    {
+      "src": "api/*.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/v1/(.*)",
+      "dest": "/api/vercel_handler.py",
+      "headers": {
+        "Access-Control-Allow-Origin": "*"
+      }
+    }
+  ],
+  "functions": {
+    "api/*.py": {
+      "runtime": "python3.12",
+      "maxDuration": 30
+    }
+  }
+}
