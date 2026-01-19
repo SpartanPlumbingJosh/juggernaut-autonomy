@@ -37,6 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from uuid import uuid4
 
 # Slack notifications for #war-room
 from core.notifications import (
@@ -836,6 +837,105 @@ def claim_task(task_id: str) -> bool:
     try:
         result = execute_sql(sql)
         return len(result.get("rows", [])) > 0
+    except Exception:
+        return False
+
+
+
+def allocate_task_resources(task_id: str, task_title: str, priority: str) -> Dict[str, Any]:
+    """
+    Create a resource allocation record when a task is claimed.
+    
+    This implements L5 Resource Allocation - tracks time/budget allocation
+    for tasks to enable constraint enforcement and ROI analysis.
+    
+    Args:
+        task_id: The task being allocated resources.
+        task_title: Task title for logging.
+        priority: Task priority for scoring.
+        
+    Returns:
+        Dict with allocation_id, success status, and message.
+    """
+    # Calculate priority score (1=critical, 2=high, 3=medium, 4=low)
+    priority_scores = {"critical": 1.0, "high": 2.0, "medium": 3.0, "low": 4.0}
+    priority_score = priority_scores.get(priority, 3.0)
+    
+    # Default allocation: estimate 30 minutes per task
+    estimated_minutes = 30
+    
+    allocation_id = str(uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+    
+    sql = f"""
+        INSERT INTO resource_allocations (
+            id, resource_type, task_id, allocated_amount, used_amount,
+            unit, priority_score, status, created_at, updated_at
+        ) VALUES (
+            {escape_value(allocation_id)},
+            'time',
+            {escape_value(task_id)},
+            {estimated_minutes},
+            0,
+            'minutes',
+            {priority_score},
+            'active',
+            {escape_value(now)},
+            {escape_value(now)}
+        )
+        RETURNING id
+    """
+    
+    try:
+        result = execute_sql(sql)
+        if result.get("rows"):
+            log_action(
+                "resource.allocated",
+                f"Allocated {estimated_minutes} minutes for task: {task_title}",
+                level="info",
+                task_id=task_id,
+                output_data={"allocation_id": allocation_id, "priority_score": priority_score}
+            )
+            return {"success": True, "allocation_id": allocation_id, "minutes": estimated_minutes}
+        else:
+            return {"success": False, "error": "No rows returned from INSERT"}
+    except Exception as e:
+        log_action(
+            "resource.allocation_failed",
+            f"Failed to allocate resources: {str(e)}",
+            level="warn",
+            task_id=task_id
+        )
+        return {"success": False, "error": str(e)}
+
+
+def update_resource_usage(task_id: str, minutes_used: int) -> bool:
+    """
+    Update the used_amount for a task's resource allocation.
+    
+    Called when a task completes to record actual time spent.
+    
+    Args:
+        task_id: The task that completed.
+        minutes_used: Actual time spent on the task.
+        
+    Returns:
+        True if update succeeded.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    
+    sql = f"""
+        UPDATE resource_allocations
+        SET used_amount = {minutes_used},
+            status = 'completed',
+            updated_at = {escape_value(now)}
+        WHERE task_id = {escape_value(task_id)}
+          AND status = 'active'
+    """
+    
+    try:
+        result = execute_sql(sql)
+        return result.get("rowCount", 0) > 0
     except Exception:
         return False
 
@@ -2193,6 +2293,12 @@ def autonomy_loop():
                     if not claim_task(task.id):
                         continue  # Someone else claimed it, try next
                     
+                    # FIX-09: Allocate resources for the claimed task
+                    allocation = allocate_task_resources(task.id, task.title, task.priority)
+                    if not allocation.get("success"):
+                        log_action("resource.skip", f"Resource allocation failed but continuing: {allocation.get('error')}", 
+                                   level="warn", task_id=task.id)
+                    
                     log_decision("loop.execute", f"Executing task: {task.title}",
                                  f"Priority {task.priority} of {len(tasks)} pending tasks")
                     
@@ -2235,6 +2341,12 @@ def autonomy_loop():
                     if result.get("waiting_approval"):
                         # Task is waiting for approval, try next task
                         continue
+                    
+                    # FIX-09: Update resource usage with estimated time
+                    if success and allocation.get("allocation_id"):
+                        # Estimate time based on result - could be enhanced with actual timing
+                        estimated_time = 15 if task.task_type == "verification" else 30
+                        update_resource_usage(task.id, estimated_time)
                     
                     # Task was executed (success or failure), we're done for this loop
                     task_executed = True
