@@ -1,0 +1,26 @@
+# CodeRabbit Configuration
+# https://docs.coderabbit.ai/guides/configuration
+
+language: en-US
+
+reviews:
+  # Fail the status check when changes are requested
+  request_changes_workflow: true
+  
+  # Enable high-level summary in reviews
+  high_level_summary: true
+  poem: false
+  
+  # Auto-review settings
+  auto_review:
+    enabled: true
+    drafts: false
+  
+  # Path filters - review everything except lock files
+  path_filters:
+    - "!**/.lock"
+    - "!**/lock.json"
+    - "!**/package-lock.json"
+
+chat:
+  auto_reply: true
