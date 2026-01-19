@@ -74,25 +74,6 @@ except ImportError as e:
     def get_experiment_dashboard(*args, **kwargs): return {}
 
 
-# Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
-ORCHESTRATION_AVAILABLE = False
-_orchestration_import_error = None
-
-try:
-    from core.orchestration import (
-        discover_agents,
-        orchestrator_assign_task,
-        log_coordination_event,
-    )
-    ORCHESTRATION_AVAILABLE = True
-except ImportError as e:
-    _orchestration_import_error = str(e)
-    # Stub functions for graceful degradation
-    def discover_agents(*args, **kwargs): return []
-    def orchestrator_assign_task(*args, **kwargs): return {"success": False, "error": "orchestration not available"}
-    def log_coordination_event(*args, **kwargs): return None
-
-
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -148,6 +129,7 @@ class Task:
     assigned_to: Optional[str]
     created_at: str
     requires_approval: bool = False
+    depends_on: Optional[List[str]] = None  # L3-02b: Task IDs this depends on
 
 
 # ============================================================
@@ -537,7 +519,8 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
     """Get pending tasks ordered by priority, respecting retry backoff."""
     sql = f"""
         SELECT id, task_type, title, description, priority, status, 
-               payload, assigned_worker, created_at, requires_approval
+               payload, assigned_worker, created_at, requires_approval,
+               depends_on
         FROM governance_tasks 
         WHERE status IN ('pending', 'in_progress')
         AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
@@ -555,6 +538,19 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
                 priority_num = priority_map.get(priority_val.lower(), 2)
             else:
                 priority_num = int(priority_val) if priority_val else 2
+            # L3-02b: Parse depends_on field
+            depends_on_raw = row.get("depends_on")
+            depends_on_list = None
+            if depends_on_raw:
+                if isinstance(depends_on_raw, list):
+                    depends_on_list = depends_on_raw
+                elif isinstance(depends_on_raw, str):
+                    try:
+                        parsed = json.loads(depends_on_raw)
+                        depends_on_list = parsed if isinstance(parsed, list) else None
+                    except (json.JSONDecodeError, TypeError):
+                        depends_on_list = None
+            
             tasks.append(Task(
                 id=row["id"],
                 task_type=row.get("task_type", "unknown"),
@@ -565,7 +561,8 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
                 payload=row.get("payload") or {},
                 assigned_to=row.get("assigned_worker"),
                 created_at=row.get("created_at", ""),
-                requires_approval=row.get("requires_approval", False)
+                requires_approval=row.get("requires_approval", False),
+                depends_on=depends_on_list  # L3-02b: Dependency list
             ))
         # Sort by priority (desc) then created_at (asc) using Python's priority_map values
         tasks.sort(key=lambda t: (-t.priority, t.created_at))
@@ -574,6 +571,49 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
         log_error(f"Failed to get tasks: {e}")
         return []
 
+
+
+def check_dependencies_met(depends_on: Optional[List[str]]) -> Tuple[bool, List[str]]:
+    """
+    Check if all dependency tasks are completed.
+    
+    Args:
+        depends_on: List of task IDs that must be completed first
+        
+    Returns:
+        Tuple of (all_met: bool, unmet_ids: List[str])
+    """
+    if not depends_on:
+        return True, []
+    
+    # Query status of all dependency tasks
+    ids_sql = ", ".join([escape_value(tid) for tid in depends_on])
+    sql = f"""
+        SELECT id, status 
+        FROM governance_tasks 
+        WHERE id IN ({ids_sql})
+    """
+    
+    try:
+        result = execute_sql(sql)
+        rows = result.get("rows", [])
+        
+        # Build map of id -> status
+        status_map = {row["id"]: row.get("status", "unknown") for row in rows}
+        
+        # Check which dependencies are not completed
+        unmet = []
+        for dep_id in depends_on:
+            status = status_map.get(dep_id)
+            if status != "completed":
+                unmet.append(dep_id)
+        
+        return len(unmet) == 0, unmet
+        
+    except Exception as e:
+        log_error(f"Failed to check dependencies: {e}", {"depends_on": depends_on})
+        # On error, assume dependencies not met (safer)
+        return False, depends_on
 
 def get_due_scheduled_tasks() -> List[Dict]:
     """Get scheduled tasks that are due to run."""
@@ -896,100 +936,6 @@ def _execute_http_tool(tool_name: str, params: Dict) -> Dict:
 # ============================================================
 # TASK EXECUTION (Level 3: Workflow Planning)
 # ============================================================
-
-
-# ============================================================
-# ORCHESTRATOR TASK DELEGATION (L5-01b)
-# ============================================================
-
-# Task type to worker capability mapping
-TASK_TYPE_TO_WORKER: Dict[str, str] = {
-    "tool_execution": "EXECUTOR",
-    "workflow": "EXECUTOR",
-    "content_creation": "EXECUTOR",
-    "metrics_analysis": "ANALYST",
-    "report_generation": "ANALYST",
-    "pattern_detection": "ANALYST",
-    "goal_creation": "STRATEGIST",
-    "opportunity_scoring": "STRATEGIST",
-    "experiment_design": "STRATEGIST",
-    "health_check": "WATCHDOG",
-    "error_detection": "WATCHDOG",
-}
-
-
-def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]:
-    """
-    Delegate a task to a specialized worker via ORCHESTRATOR.
-    
-    This is the core L5 function that enables intelligent task routing
-    to specialized workers based on capabilities and load.
-    
-    Args:
-        task: The Task object to delegate
-    
-    Returns:
-        Tuple of (delegated: bool, worker_id: Optional[str], details: Dict)
-    """
-    if not ORCHESTRATION_AVAILABLE:
-        return False, None, {"error": "orchestration module not available"}
-    
-    # Determine the best worker for this task type
-    target_worker = TASK_TYPE_TO_WORKER.get(task.task_type)
-    
-    if not target_worker:
-        # No specific worker mapping - check if generic task execution is needed
-        agents = discover_agents(capability="task.execute", min_health_score=0.3)
-        if agents:
-            target_worker = agents[0].get("worker_id")
-    
-    if not target_worker:
-        return False, None, {"reason": "no suitable worker for task type", "task_type": task.task_type}
-    
-    # Check if the target worker is healthy and available
-    agents = discover_agents(min_health_score=0.3)
-    target_agent = None
-    for agent in agents:
-        if agent.get("worker_id") == target_worker:
-            target_agent = agent
-            break
-    
-    if not target_agent:
-        return False, None, {"reason": f"worker {target_worker} not available"}
-    
-    # Check worker capacity
-    active_tasks = target_agent.get("active_task_count", 0) or 0
-    max_tasks = target_agent.get("max_concurrent_tasks", 5) or 5
-    
-    if active_tasks >= max_tasks:
-        return False, None, {"reason": f"worker {target_worker} at capacity ({active_tasks}/{max_tasks})"}
-    
-    # Delegate the task via ORCHESTRATOR
-    result = orchestrator_assign_task(
-        task_id=task.id,
-        target_worker_id=target_worker,
-        reason="capability_match"
-    )
-    
-    if result.get("success"):
-        # Log the delegation event
-        log_action(
-            "orchestrator.delegate",
-            f"ORCHESTRATOR delegated task '{task.title}' to {target_worker}",
-            level="info",
-            task_id=task.id,
-            output_data={
-                "target_worker": target_worker,
-                "worker_health": target_agent.get("health_score"),
-                "worker_load": f"{active_tasks}/{max_tasks}",
-                "reason": "capability_match",
-                "log_id": result.get("log_id")
-            }
-        )
-        return True, target_worker, result
-    
-    return False, None, result
-
 
 def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
@@ -1336,6 +1282,28 @@ def autonomy_loop():
                 task_executed = False
                 
                 for task in tasks:
+                    # L3-02b: Check dependencies BEFORE claiming
+                    deps_met, unmet_deps = check_dependencies_met(task.depends_on)
+                    if not deps_met:
+                        log_action(
+                            "task.blocked", 
+                            f"Task blocked: waiting on {len(unmet_deps)} dependencies",
+                            level="info",
+                            task_id=task.id,
+                            input_data={"unmet_dependencies": unmet_deps[:5]}  # Log first 5
+                        )
+                        continue  # Skip to next task
+                    
+                    # L3-02b: Log unblock if task had dependencies that are now met
+                    if task.depends_on:
+                        log_action(
+                            "task.unblocked",
+                            f"Task unblocked: all {len(task.depends_on)} dependencies completed",
+                            level="info", 
+                            task_id=task.id,
+                            input_data={"dependencies": task.depends_on[:5]}  # Log first 5
+                        )
+                    
                     # Check permission BEFORE claiming (Level 3: Permission enforcement)
                     # This prevents claiming tasks that the worker is forbidden from executing
                     allowed, reason = is_action_allowed(f"task.{task.task_type}")
@@ -1351,29 +1319,6 @@ def autonomy_loop():
                     log_decision("loop.execute", f"Executing task: {task.title}",
                                  f"Priority {task.priority} of {len(tasks)} pending tasks")
                     
-                    # L5: Try to delegate to specialized worker via ORCHESTRATOR first
-                    if ORCHESTRATION_AVAILABLE:
-                        delegated, worker_id, delegate_result = delegate_to_worker(task)
-                        if delegated:
-                            log_decision(
-                                "orchestrator.delegated",
-                                f"Task delegated to {worker_id}",
-                                f"ORCHESTRATOR routing: {delegate_result.get('message', 'capability_match')}"
-                            )
-                            # Task is now assigned to specialized worker - don't execute locally
-                            task_executed = True
-                            break
-                        else:
-                            # Delegation failed - log reason and fall back to local execution
-                            log_action(
-                                "orchestrator.fallback",
-                                f"Delegation failed, executing locally: {delegate_result.get('reason', 'unknown')}",
-                                level="info",
-                                task_id=task.id,
-                                output_data=delegate_result
-                            )
-                    
-                    # Execute task locally (either no ORCHESTRATOR or delegation failed)
                     success, result = execute_task(task)
                     
                     if result.get("waiting_approval"):
