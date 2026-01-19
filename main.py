@@ -263,7 +263,7 @@ def capture_task_learning(
         if succeeded:
             details["what_worked"] = f"{task_type} completed successfully in {duration_secs:.1f}s"
         else:
-            details["what_failed"] = result.get("error") if isinstance(result, dict) else str(result)
+            details["what_failed"] = (result.get("error") if isinstance(result, dict) else str(result)) or "unknown error"
         
         # Record the learning
         record_learning(
