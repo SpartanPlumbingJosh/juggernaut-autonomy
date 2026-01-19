@@ -4,9 +4,13 @@ Phase 2.5: Dead letter queue, alerting, graceful degradation
 """
 
 import json
+import logging
 import urllib.request
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
+
+# Configure module logger
+logger = logging.getLogger(__name__)
 
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
@@ -87,7 +91,7 @@ def move_to_dead_letter(
             """)
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to move to dead letter queue: {e}")
+        logger.error("Failed to move to dead letter queue: %s", e)
     return None
 
 
@@ -114,7 +118,7 @@ def get_dead_letter_items(
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get dead letter items: {e}")
+        logger.error("Failed to get dead letter items: %s", e)
         return []
 
 
@@ -138,7 +142,7 @@ def resolve_dead_letter(
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to resolve dead letter: {e}")
+        logger.error("Failed to resolve dead letter: %s", e)
         return False
 
 
@@ -203,7 +207,7 @@ def retry_dead_letter(dlq_id: str, modified_params: Dict = None) -> Optional[str
             return new_task_id
     
     except Exception as e:
-        print(f"Failed to retry dead letter: {e}")
+        logger.error("Failed to retry dead letter: %s", e)
     return None
 
 
@@ -247,7 +251,7 @@ def create_alert(
         if result.get("rows"):
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to create alert: {e}")
+        logger.error("Failed to create alert: %s", e)
     return None
 
 
@@ -275,7 +279,7 @@ def get_open_alerts(severity: str = None, limit: int = 50) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get alerts: {e}")
+        logger.error("Failed to get alerts: %s", e)
         return []
 
 
@@ -292,7 +296,7 @@ def acknowledge_alert(alert_id: str, acknowledged_by: str = "SYSTEM") -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to acknowledge alert: {e}")
+        logger.error("Failed to acknowledge alert: %s", e)
         return False
 
 
@@ -310,7 +314,7 @@ def resolve_alert(alert_id: str, resolved_by: str = "SYSTEM", notes: str = None)
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to resolve alert: {e}")
+        logger.error("Failed to resolve alert: %s", e)
         return False
 
 
@@ -348,7 +352,7 @@ def check_repeated_failures(worker_id: str, threshold: int = 3) -> bool:
         return False
     
     except Exception as e:
-        print(f"Failed to check failures: {e}")
+        logger.error("Failed to check failures: %s", e)
         return False
 
 
@@ -386,7 +390,7 @@ def get_fallback_worker(
         if rows:
             return rows[0].get("worker_id")
     except Exception as e:
-        print(f"Failed to find fallback worker: {e}")
+        logger.error("Failed to find fallback worker: %s", e)
     return None
 
 
@@ -415,7 +419,7 @@ def enable_degraded_mode(worker_id: str, reason: str) -> bool:
             )
             return True
     except Exception as e:
-        print(f"Failed to enable degraded mode: {e}")
+        logger.error("Failed to enable degraded mode: %s", e)
     return False
 
 
@@ -433,7 +437,7 @@ def disable_degraded_mode(worker_id: str) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to disable degraded mode: {e}")
+        logger.error("Failed to disable degraded mode: %s", e)
     return False
 
 
@@ -455,7 +459,7 @@ def circuit_breaker_open(service: str, failure_count: int, window_minutes: int =
         if rows and rows[0].get("failure_count", 0) >= failure_count:
             return True
     except Exception as e:
-        print(f"Failed to check circuit breaker: {e}")
+        logger.error("Failed to check circuit breaker: %s", e)
     return False
 
 
