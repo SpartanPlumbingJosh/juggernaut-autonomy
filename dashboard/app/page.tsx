@@ -437,6 +437,85 @@ function SystemAlertsSection({ data }: { data: any }) {
 }
 
 // ============================================================
+// TASK QUEUE SECTION
+// ============================================================
+
+function TaskQueueSection({ data }: { data: any }) {
+  if (!data?.tasks) return <div className="animate-pulse bg-gray-200 h-48 rounded-lg" />;
+
+  const priorityColors: Record<string, string> = {
+    critical: 'bg-purple-100 text-purple-800 border-purple-200',
+    high: 'bg-red-100 text-red-800 border-red-200',
+    medium: 'bg-yellow-100 text-yellow-800 border-yellow-200',
+    low: 'bg-gray-100 text-gray-800 border-gray-200'
+  };
+
+  return (
+    <div className="bg-white rounded-lg border p-6">
+      <SectionHeader 
+        title="Task Queue" 
+        subtitle={`${data.pending || 0} pending, ${data.in_progress || 0} in progress, ${data.total || 0} total`}
+      />
+      
+      {/* Task counts */}
+      <div className="grid grid-cols-4 gap-2 mb-4">
+        <div className="text-center p-2 bg-yellow-50 rounded">
+          <p className="text-lg font-bold text-yellow-600">{data.pending || 0}</p>
+          <p className="text-xs text-yellow-700">Pending</p>
+        </div>
+        <div className="text-center p-2 bg-blue-50 rounded">
+          <p className="text-lg font-bold text-blue-600">{data.in_progress || 0}</p>
+          <p className="text-xs text-blue-700">In Progress</p>
+        </div>
+        <div className="text-center p-2 bg-green-50 rounded">
+          <p className="text-lg font-bold text-green-600">{data.completed || 0}</p>
+          <p className="text-xs text-green-700">Completed</p>
+        </div>
+        <div className="text-center p-2 bg-red-50 rounded">
+          <p className="text-lg font-bold text-red-600">{data.failed || 0}</p>
+          <p className="text-xs text-red-700">Failed</p>
+        </div>
+      </div>
+
+      {/* Task list */}
+      <div className="space-y-3">
+        {data.tasks.slice(0, 10).map((task: any) => (
+          <div 
+            key={task.id} 
+            className={`p-3 rounded-lg border ${priorityColors[task.priority] || 'bg-gray-50 border-gray-200'}`}
+          >
+            <div className="flex items-start justify-between">
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Clock className="w-4 h-4 flex-shrink-0" />
+                  <span className="font-medium text-sm truncate">{task.title}</span>
+                  <StatusBadge status={task.status} />
+                  <span className="text-xs px-2 py-0.5 rounded bg-white/50">{task.task_type}</span>
+                </div>
+                {task.description && (
+                  <p className="text-xs text-gray-600 mt-1 line-clamp-2">{task.description.substring(0, 100)}...</p>
+                )}
+                {task.assigned_worker && (
+                  <p className="text-xs text-gray-500 mt-1">Assigned: {task.assigned_worker}</p>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {data.tasks.length === 0 && (
+        <div className="text-center py-8 text-gray-500">
+          <CheckCircle className="w-12 h-12 mx-auto mb-2 text-green-500" />
+          <p>No tasks in queue</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ============================================================
 // MAIN DASHBOARD COMPONENT
 // ============================================================
 
@@ -478,6 +557,12 @@ export default function Dashboard() {
     `${API_BASE}/v1/system_alerts?limit=10&k=${refreshKey}`,
     fetcher,
     { refreshInterval: 15000 }
+  );
+
+  const { data: tasks } = useSWR(
+    `${API_BASE}/v1/tasks?limit=20&k=${refreshKey}`,
+    fetcher,
+    { refreshInterval: 30000 }
   );
 
   const handleRefresh = () => setRefreshKey(k => k + 1);
@@ -534,6 +619,7 @@ export default function Dashboard() {
             <ExperimentSection data={experiments} />
             <PendingApprovalsSection data={approvals} />
             <SystemAlertsSection data={alerts} />
+            <TaskQueueSection data={tasks} />
           </div>
         </div>
       </main>
