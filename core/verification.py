@@ -23,7 +23,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field
 
-from core.database import get_db_connection, execute_query
+from core.database import execute_query
 from core.notifications import SlackNotifier
 
 
