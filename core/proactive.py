@@ -48,11 +48,14 @@ def start_scan(
         [scan_id, scan_type, source, json.dumps(config), triggered_by]
     )
     
+    if not result.get("rows"):
+        return {"success": False, "error": "Failed to create scan record"}
+    
     log_execution(
         worker_id=triggered_by,
         action="scan.start",
         message=f"Started {scan_type} scan from {source}",
-        details={"scan_id": scan_id, "config": config}
+        output_data={"scan_id": scan_id, "config": config}
     )
     
     return {
@@ -110,7 +113,7 @@ def complete_scan(
         worker_id="SCANNER",
         action="scan.complete",
         message=f"Completed scan {scan_id}: found={opportunities_found}, qualified={opportunities_qualified}",
-        details={"scan_id": scan_id, "results": results_summary}
+        output_data={"scan_id": scan_id, "results": results_summary}
     )
     
     return {
@@ -148,7 +151,7 @@ def fail_scan(scan_id: str, error_message: str) -> Dict[str, Any]:
         action="scan.failed",
         message=f"Scan {scan_id} failed: {error_message}",
         level="error",
-        details={"scan_id": scan_id, "error": error_message}
+        output_data={"scan_id": scan_id, "error": error_message}
     )
     
     return {"success": bool(result.get("rows")), "error": error_message}
@@ -265,11 +268,14 @@ def identify_opportunity(
          description, json.dumps(metadata), created_by]
     )
     
+    if not result.get("rows"):
+        return {"success": False, "error": "Failed to create opportunity record"}
+    
     log_execution(
         worker_id=created_by,
         action="opportunity.identify",
         message=f"Identified {opportunity_type} opportunity: {description[:100]}",
-        details={"opportunity_id": opportunity_id, "estimated_value": estimated_value}
+        output_data={"opportunity_id": opportunity_id, "estimated_value": estimated_value}
     )
     
     return {
@@ -351,20 +357,30 @@ def score_opportunity(
     if not result.get("rows"):
         return {"success": False, "error": "Opportunity not found"}
     
-    # Record score in history
-    query_db(
+    # Record score in history (non-critical, just log if fails)
+    history_result = query_db(
         """
         INSERT INTO opportunity_scores_history (opportunity_id, score, scoring_model, factors)
         VALUES ($1, $2, $3, $4)
+        RETURNING opportunity_id
         """,
         [opportunity_id, final_score, model_id or "default", json.dumps(scoring_factors)]
     )
+    
+    if not history_result.get("rows") and not history_result.get("rowCount"):
+        log_execution(
+            worker_id="SCORER",
+            action="opportunity.score_history_failed",
+            message=f"Failed to record score history for {opportunity_id}",
+            level="warn",
+            output_data={"opportunity_id": opportunity_id, "score": final_score}
+        )
     
     log_execution(
         worker_id="SCORER",
         action="opportunity.score",
         message=f"Scored opportunity {opportunity_id}: {final_score}",
-        details={"opportunity_id": opportunity_id, "score": final_score, "factors": scoring_factors}
+        output_data={"opportunity_id": opportunity_id, "score": final_score, "factors": scoring_factors}
     )
     
     return {
@@ -616,7 +632,7 @@ def identify_opportunity_with_dedup(
             worker_id=kwargs.get("created_by", "SCANNER"),
             action="opportunity.duplicate",
             message=f"Duplicate opportunity detected: {description[:100]}",
-            details=dup_check
+            output_data=dup_check
         )
         return {
             "success": True,
@@ -757,7 +773,7 @@ def scan_servicetitan_opportunities(
         worker_id="SCANNER",
         action="scan.servicetitan",
         message=f"Scanning ServiceTitan for: {', '.join(scan_targets)}",
-        details={"scan_id": scan_id, "targets": scan_targets}
+        output_data={"scan_id": scan_id, "targets": scan_targets}
     )
     
     # Placeholder for actual ServiceTitan API integration
@@ -793,7 +809,7 @@ def scan_angi_leads(
         worker_id="SCANNER",
         action="scan.angi",
         message="Scanning Angi leads",
-        details={"scan_id": scan_id}
+        output_data={"scan_id": scan_id}
     )
     
     # Would integrate with Angi MCP tool
@@ -827,7 +843,7 @@ def scan_market_trends(
         worker_id="SCANNER",
         action="scan.market",
         message=f"Scanning market for: {search_terms}",
-        details={"scan_id": scan_id, "terms": search_terms}
+        output_data={"scan_id": scan_id, "terms": search_terms}
     )
     
     # Would use web search tool to find opportunities
@@ -872,3 +888,4 @@ __all__ = [
     "scan_angi_leads",
     "scan_market_trends",
 ]
+
