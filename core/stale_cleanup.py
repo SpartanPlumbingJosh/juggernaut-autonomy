@@ -23,6 +23,31 @@ NEON_CONNECTION_STRING = os.getenv(
 logger = logging.getLogger(__name__)
 
 
+def _validate_threshold(threshold_minutes: int | None) -> int:
+    """Validate and normalize threshold_minutes parameter.
+    
+    Args:
+        threshold_minutes: Minutes threshold or None for default
+        
+    Returns:
+        Validated positive integer threshold
+        
+    Raises:
+        ValueError: If threshold is not a positive integer
+    """
+    if threshold_minutes is None:
+        threshold_minutes = os.getenv(
+            "STALE_THRESHOLD_MINUTES", str(DEFAULT_STALE_THRESHOLD_MINUTES)
+        )
+    try:
+        threshold_minutes = int(threshold_minutes)
+    except (TypeError, ValueError) as e:
+        raise ValueError("threshold_minutes must be a positive integer") from e
+    if threshold_minutes <= 0:
+        raise ValueError("threshold_minutes must be a positive integer")
+    return threshold_minutes
+
+
 def execute_sql(sql: str) -> dict[str, Any]:
     """Execute SQL against Neon database via HTTP API.
     
@@ -73,6 +98,7 @@ def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[d
     """Find and reset tasks stuck in 'in_progress' status.
     
     Uses a single atomic UPDATE with RETURNING to avoid race conditions.
+    Captures previous assigned_worker and started_at values before clearing.
     
     Args:
         threshold_minutes: Minutes after which a task is considered stale.
@@ -80,13 +106,14 @@ def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[d
     
     Returns:
         Tuple of (count of reset tasks, list of reset task details)
+        
+    Raises:
+        ValueError: If threshold_minutes is not a positive integer
     """
-    if threshold_minutes is None:
-        threshold_minutes = int(
-            os.getenv("STALE_THRESHOLD_MINUTES", str(DEFAULT_STALE_THRESHOLD_MINUTES))
-        )
+    threshold_minutes = _validate_threshold(threshold_minutes)
     
     # Single atomic UPDATE with RETURNING to avoid TOCTOU race
+    # Capture previous values before clearing by embedding in metadata
     reset_sql = f"""
         UPDATE governance_tasks
         SET 
@@ -95,11 +122,15 @@ def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[d
             started_at = NULL,
             metadata = COALESCE(metadata, '{{}}'::jsonb) || jsonb_build_object(
                 'stale_reset_at', NOW()::text,
-                'stale_reset_reason', 'Task exceeded {threshold_minutes} minute threshold'
+                'stale_reset_reason', 'Task exceeded {threshold_minutes} minute threshold',
+                'previous_assigned_worker', assigned_worker,
+                'previous_started_at', started_at::text
             )
         WHERE status = 'in_progress'
           AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes'
-        RETURNING id, title, task_type, assigned_worker, started_at;
+        RETURNING id, title, task_type, 
+                  (metadata->>'previous_assigned_worker') as previous_worker,
+                  (metadata->>'previous_started_at') as previous_started;
     """
     
     try:
@@ -112,7 +143,7 @@ def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[d
             for task in reset_tasks:
                 logger.info(
                     f"  - {task.get('id')}: {task.get('title')} "
-                    f"(was assigned to {task.get('assigned_worker')})"
+                    f"(was assigned to {task.get('previous_worker')})"
                 )
         else:
             logger.debug("No stale tasks found to reset")
@@ -135,11 +166,11 @@ def get_stale_task_count(threshold_minutes: int | None = None) -> int:
     
     Returns:
         Number of stale tasks, or -1 if query fails (error is logged)
+        
+    Raises:
+        ValueError: If threshold_minutes is not a positive integer
     """
-    if threshold_minutes is None:
-        threshold_minutes = int(
-            os.getenv("STALE_THRESHOLD_MINUTES", str(DEFAULT_STALE_THRESHOLD_MINUTES))
-        )
+    threshold_minutes = _validate_threshold(threshold_minutes)
     
     count_sql = f"""
         SELECT COUNT(*) as stale_count
