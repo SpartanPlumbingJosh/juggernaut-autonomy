@@ -38,6 +38,24 @@ from dataclasses import dataclass
 from enum import Enum
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
+# Phase 4: Experimentation Framework (wired up by HIGH-06)
+try:
+    from core.experiments import (
+        create_experiment,
+        get_experiment,
+        list_experiments,
+        start_experiment,
+        pause_experiment,
+        record_result,
+        conclude_experiment,
+        get_experiment_dashboard,
+    )
+    EXPERIMENTS_AVAILABLE = True
+except ImportError:
+    EXPERIMENTS_AVAILABLE = False
+    print("[WARN] core.experiments not available - experiments disabled")
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
