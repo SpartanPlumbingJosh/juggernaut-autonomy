@@ -132,6 +132,9 @@ def query_db(sql: str, params: Optional[List] = None) -> Dict[str, Any]:
     return _db.query(sql)
 
 
+# Alias for backward compatibility - monitoring.py imports this name
+execute_query = query_db
+
 
 # ============================================================
 # LOGGING FUNCTIONS
