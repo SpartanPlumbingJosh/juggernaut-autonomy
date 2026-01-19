@@ -9,6 +9,10 @@ import urllib.error
 from typing import Any, Dict, List, Optional, Callable
 from datetime import datetime, timezone
 import traceback
+import logging
+
+# Configure module logger
+logger = logging.getLogger(__name__)
 
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
@@ -149,7 +153,7 @@ def register_tool(tool: Tool) -> bool:
         _query(sql)
         return True
     except Exception as e:
-        print(f"Failed to register tool in DB: {e}")
+        logger.error("Failed to register tool in DB: %s", e)
         return False
 
 
@@ -171,7 +175,7 @@ def list_tools(category: str = None, status: str = "active") -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to list tools: {e}")
+        logger.error("Failed to list tools: %s", e)
         return []
 
 
@@ -187,7 +191,7 @@ def find_tools_by_permission(permission: str) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to find tools: {e}")
+        logger.error("Failed to find tools: %s", e)
         return []
 
 
@@ -346,7 +350,7 @@ def _log_execution_start(tool_name: str, params: Dict, worker_id: str, task_id: 
         if result.get("rows"):
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to log execution start: {e}")
+        logger.error("Failed to log execution start: %s", e)
     return None
 
 
@@ -371,7 +375,7 @@ def _log_execution_result(execution_id: str, result: ToolResult, start_time: dat
     try:
         _query(sql)
     except Exception as e:
-        print(f"Failed to log execution result: {e}")
+        logger.error("Failed to log execution result: %s", e)
 
 
 def _log_execution_error(execution_id: str, error: str, traceback: str):
@@ -390,7 +394,7 @@ def _log_execution_error(execution_id: str, error: str, traceback: str):
     try:
         _query(sql)
     except Exception as e:
-        print(f"Failed to log execution error: {e}")
+        logger.error("Failed to log execution error: %s", e)
 
 
 # ============================================================
@@ -422,7 +426,7 @@ def get_tool_executions(
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get executions: {e}")
+        logger.error("Failed to get executions: %s", e)
         return []
 
 
@@ -452,7 +456,7 @@ def get_execution_stats(worker_id: str = None, days: int = 7) -> Dict[str, Any]:
             "tools": result.get("rows", [])
         }
     except Exception as e:
-        print(f"Failed to get stats: {e}")
+        logger.error("Failed to get stats: %s", e)
         return {"error": str(e)}
 
 
