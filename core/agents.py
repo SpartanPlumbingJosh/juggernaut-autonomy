@@ -10,6 +10,11 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
 
+import logging
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
 NEON_CONNECTION_STRING = "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
@@ -116,7 +121,7 @@ def register_worker(
         if result.get("rows"):
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to register worker: {e}")
+        logger.error("Failed to register worker: %s", e)
     return None
 
 
@@ -131,7 +136,7 @@ def update_worker_status(worker_id: str, status: str) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to update worker status: {e}")
+        logger.error("Failed to update worker status: %s", e)
         return False
 
 
@@ -146,7 +151,7 @@ def worker_heartbeat(worker_id: str) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to send heartbeat: {e}")
+        logger.error("Failed to send heartbeat: %s", e)
         return False
 
 
@@ -158,7 +163,7 @@ def get_worker(worker_id: str) -> Optional[Dict]:
         rows = result.get("rows", [])
         return rows[0] if rows else None
     except Exception as e:
-        print(f"Failed to get worker: {e}")
+        logger.error("Failed to get worker: %s", e)
         return None
 
 
@@ -177,7 +182,7 @@ def list_workers(status: str = None, worker_type: str = None) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to list workers: {e}")
+        logger.error("Failed to list workers: %s", e)
         return []
 
 
@@ -194,7 +199,7 @@ def find_workers_by_capability(capability: str) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to find workers: {e}")
+        logger.error("Failed to find workers: %s", e)
         return []
 
 
@@ -224,7 +229,7 @@ def record_worker_task_outcome(worker_id: str, success: bool, cost_cents: int = 
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to record outcome: {e}")
+        logger.error("Failed to record outcome: %s", e)
         return False
 
 
@@ -276,7 +281,7 @@ def create_goal(
         if result.get("rows"):
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to create goal: {e}")
+        logger.error("Failed to create goal: %s", e)
     return None
 
 
@@ -288,7 +293,7 @@ def get_goal(goal_id: str) -> Optional[Dict]:
         rows = result.get("rows", [])
         return rows[0] if rows else None
     except Exception as e:
-        print(f"Failed to get goal: {e}")
+        logger.error("Failed to get goal: %s", e)
         return None
 
 
@@ -307,7 +312,7 @@ def list_goals(status: str = None, assigned_to: str = None, limit: int = 50) -> 
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to list goals: {e}")
+        logger.error("Failed to list goals: %s", e)
         return []
 
 
@@ -322,7 +327,7 @@ def get_sub_goals(parent_goal_id: str) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get sub-goals: {e}")
+        logger.error("Failed to get sub-goals: %s", e)
         return []
 
 
@@ -345,7 +350,7 @@ def update_goal_status(goal_id: str, status: str, progress: float = None, outcom
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to update goal: {e}")
+        logger.error("Failed to update goal: %s", e)
         return False
 
 
@@ -362,7 +367,7 @@ def assign_goal(goal_id: str, worker_id: str) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to assign goal: {e}")
+        logger.error("Failed to assign goal: %s", e)
         return False
 
 
@@ -457,7 +462,7 @@ def create_task(
         if result.get("rows"):
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to create task: {e}")
+        logger.error("Failed to create task: %s", e)
     return None
 
 
@@ -469,7 +474,7 @@ def get_task(task_id: str) -> Optional[Dict]:
         rows = result.get("rows", [])
         return rows[0] if rows else None
     except Exception as e:
-        print(f"Failed to get task: {e}")
+        logger.error("Failed to get task: %s", e)
         return None
 
 
@@ -512,7 +517,7 @@ def list_tasks(
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to list tasks: {e}")
+        logger.error("Failed to list tasks: %s", e)
         return []
 
 
@@ -537,7 +542,7 @@ def get_pending_tasks(worker_id: str = None, limit: int = 20) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get pending tasks: {e}")
+        logger.error("Failed to get pending tasks: %s", e)
         return []
 
 
@@ -554,7 +559,7 @@ def assign_task(task_id: str, worker_id: str) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to assign task: {e}")
+        logger.error("Failed to assign task: %s", e)
         return False
 
 
@@ -571,7 +576,7 @@ def start_task(task_id: str) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to start task: {e}")
+        logger.error("Failed to start task: %s", e)
         return False
 
 
@@ -589,7 +594,7 @@ def complete_task(task_id: str, result_data: Dict = None, actual_cost_cents: int
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to complete task: {e}")
+        logger.error("Failed to complete task: %s", e)
         return False
 
 
@@ -625,7 +630,7 @@ def fail_task(task_id: str, error_message: str, retry: bool = True) -> bool:
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to fail task: {e}")
+        logger.error("Failed to fail task: %s", e)
         return False
 
 
@@ -642,7 +647,7 @@ def get_tasks_ready_for_retry() -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get retry tasks: {e}")
+        logger.error("Failed to get retry tasks: %s", e)
         return []
 
 
@@ -697,7 +702,7 @@ def request_approval(
         if result.get("rows"):
             return result["rows"][0].get("id")
     except Exception as e:
-        print(f"Failed to request approval: {e}")
+        logger.error("Failed to request approval: %s", e)
     return None
 
 
@@ -716,7 +721,7 @@ def get_pending_approvals(limit: int = 50) -> List[Dict]:
         result = _query(sql)
         return result.get("rows", [])
     except Exception as e:
-        print(f"Failed to get pending approvals: {e}")
+        logger.error("Failed to get pending approvals: %s", e)
         return []
 
 
@@ -734,7 +739,7 @@ def approve(approval_id: str, decided_by: str = "JOSH", notes: str = None) -> bo
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to approve: {e}")
+        logger.error("Failed to approve: %s", e)
         return False
 
 
@@ -752,7 +757,7 @@ def reject(approval_id: str, decided_by: str = "JOSH", notes: str = None) -> boo
         result = _query(sql)
         return result.get("rowCount", 0) > 0
     except Exception as e:
-        print(f"Failed to reject: {e}")
+        logger.error("Failed to reject: %s", e)
         return False
 
 
@@ -764,7 +769,7 @@ def check_approval_status(approval_id: str) -> Optional[str]:
         rows = result.get("rows", [])
         return rows[0].get("decision") if rows else None
     except Exception as e:
-        print(f"Failed to check approval: {e}")
+        logger.error("Failed to check approval: %s", e)
         return None
 
 
@@ -781,7 +786,7 @@ def is_task_approved(task_id: str) -> bool:
         rows = result.get("rows", [])
         return rows[0].get("decision") == "approved" if rows else True  # No approval needed = approved
     except Exception as e:
-        print(f"Failed to check task approval: {e}")
+        logger.error("Failed to check task approval: %s", e)
         return False
 
 
@@ -911,19 +916,19 @@ def get_system_status() -> Dict[str, Any]:
             "pending_approvals": int(approvals_result.get("rows", [{}])[0].get("count", 0))
         }
     except Exception as e:
-        print(f"Failed to get system status: {e}")
+        logger.error("Failed to get system status: %s", e)
         return {"error": str(e)}
 
 
 if __name__ == "__main__":
-    print("Testing Agent Framework...")
+    logger.info("Testing Agent Framework...")
     
     # Test system status
     status = get_system_status()
-    print(f"\nSystem Status: {json.dumps(status, indent=2)}")
+    logger.info("System Status: %s", json.dumps(status, indent=2))
     
     # List workers
     workers = list_workers()
-    print(f"\nWorkers: {len(workers)}")
+    logger.info("Workers: %s", len(workers))
     for w in workers:
-        print(f"  - {w['worker_id']}: {w['status']}")
+        logger.info("  - %s: %s", w['worker_id'], w['status'])
