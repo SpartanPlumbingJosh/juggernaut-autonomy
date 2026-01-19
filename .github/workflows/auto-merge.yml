@@ -1,0 +1,110 @@
+# Auto-merge workflow for CodeRabbit approved PRs
+# Triggers when CodeRabbit approves and all checks pass
+
+name: Auto Merge on CodeRabbit Approval
+
+on:
+  pull_request_review:
+    types: [submitted]
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    name: Auto Merge PR
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'pull_request_review' && 
+       github.event.review.state == 'approved' &&
+       github.event.review.user.login == 'coderabbitai[bot]') ||
+      (github.event_name == 'check_suite' &&
+       github.event.check_suite.conclusion == 'success')
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get PR info
+        id: pr-info
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request_review" ]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          else
+            # For check_suite, find associated PR
+            PR_NUMBER=$(gh pr list --state open --json number,headRefName \
+              --jq ".[] | select(.headRefName == \"${{ github.event.check_suite.head_branch }}\") | .number")
+          fi
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+
+      - name: Check CodeRabbit approval
+        id: check-approval
+        if: steps.pr-info.outputs.pr_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.pr-info.outputs.pr_number }}"
+          
+          # Get reviews and check for CodeRabbit approval
+          APPROVED=$(gh api repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews \
+            --jq '[.[] | select(.state == "APPROVED" and .user.login == "coderabbitai[bot]")] | length')
+          
+          if [ "$APPROVED" -gt 0 ]; then
+            echo "coderabbit_approved=true" >> $GITHUB_OUTPUT
+          else
+            echo "coderabbit_approved=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Wait for checks to complete
+        id: wait-checks
+        if: steps.check-approval.outputs.coderabbit_approved == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.pr-info.outputs.pr_number }}"
+          MAX_ATTEMPTS=30
+          ATTEMPT=0
+          
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            # Get check status (exclude this workflow)
+            STATUS=$(gh pr checks $PR_NUMBER --json name,state \
+              --jq '[.[] | select(.name != "Auto Merge PR")] | 
+                    if all(.state == "SUCCESS" or .state == "SKIPPED") then "success"
+                    elif any(.state == "FAILURE") then "failure"
+                    else "pending" end')
+            
+            if [ "$STATUS" == "success" ]; then
+              echo "all_checks_passed=true" >> $GITHUB_OUTPUT
+              exit 0
+            elif [ "$STATUS" == "failure" ]; then
+              echo "all_checks_passed=false" >> $GITHUB_OUTPUT
+              echo "::warning::Some checks failed"
+              exit 0
+            fi
+            
+            ATTEMPT=$((ATTEMPT + 1))
+            echo "Waiting for checks... attempt $ATTEMPT/$MAX_ATTEMPTS"
+            sleep 10
+          done
+          
+          echo "all_checks_passed=false" >> $GITHUB_OUTPUT
+          echo "::warning::Timeout waiting for checks"
+
+      - name: Auto-merge PR
+        if: >
+          steps.check-approval.outputs.coderabbit_approved == 'true' &&
+          steps.wait-checks.outputs.all_checks_passed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUMBER="${{ steps.pr-info.outputs.pr_number }}"
+          
+          echo "Merging PR #$PR_NUMBER..."
+          gh pr merge $PR_NUMBER --squash --auto
+          
+          echo "::notice::Successfully merged PR #$PR_NUMBER"
