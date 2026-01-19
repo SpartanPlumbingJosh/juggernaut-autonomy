@@ -222,6 +222,23 @@ except ImportError as e:
     def reset_stale_tasks(*args, **kwargs): return (0, [])
 
 
+# SCALE-03: Auto-Scaling Integration
+AUTO_SCALING_AVAILABLE = False
+_auto_scaling_import_error = None
+
+try:
+    from core.auto_scaling import AutoScaler, ScalingConfig, create_auto_scaler
+    AUTO_SCALING_AVAILABLE = True
+except ImportError as e:
+    _auto_scaling_import_error = str(e)
+    # Stub class for graceful degradation
+    class AutoScaler:
+        def execute_scaling(self): return {"action": "no_action", "reason": "auto_scaling not available"}
+    class ScalingConfig:
+        pass
+    def create_auto_scaler(*args, **kwargs): return None
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -244,6 +261,10 @@ PORT = int(os.getenv("PORT", "8000"))
 # Retry configuration
 RETRY_BASE_DELAY_SECONDS = 60  # 1 minute base delay
 RETRY_MAX_DELAY_SECONDS = 3600  # 1 hour max delay
+
+# Auto-scaling configuration (SCALE-03)
+ENABLE_AUTO_SCALING = os.getenv("ENABLE_AUTO_SCALING", "false").lower() == "true"
+AUTO_SCALING_INTERVAL_SECONDS = int(os.getenv("AUTO_SCALING_INTERVAL_SECONDS", "300"))  # 5 minutes default
 
 # Sensitive keys to redact from logs
 SENSITIVE_KEYS = frozenset([
@@ -1947,6 +1968,29 @@ def autonomy_loop():
     elif _stale_cleanup_import_error:
         log_action("stale_cleanup.unavailable", f"Stale cleanup disabled: {_stale_cleanup_import_error}", level="warn")
     
+    # Log auto-scaling framework status (SCALE-03)
+    if AUTO_SCALING_AVAILABLE and ENABLE_AUTO_SCALING:
+        log_info("Auto-scaling enabled", {"status": "enabled", "interval_seconds": AUTO_SCALING_INTERVAL_SECONDS})
+    elif AUTO_SCALING_AVAILABLE and not ENABLE_AUTO_SCALING:
+        log_info("Auto-scaling available but disabled", {"status": "disabled", "enable_with": "ENABLE_AUTO_SCALING=true"})
+    elif _auto_scaling_import_error:
+        log_action("auto_scaling.unavailable", f"Auto-scaling disabled: {_auto_scaling_import_error}", level="warn")
+    
+    # Initialize auto-scaler if enabled (SCALE-03)
+    auto_scaler = None
+    last_auto_scale_time = time.time()
+    if AUTO_SCALING_AVAILABLE and ENABLE_AUTO_SCALING:
+        try:
+            auto_scaler = create_auto_scaler(
+                db_endpoint=NEON_ENDPOINT,
+                connection_string=DATABASE_URL,
+                config=ScalingConfig(enabled=True)
+            )
+            log_info("Auto-scaler initialized", {"db_endpoint": NEON_ENDPOINT})
+        except Exception as as_init_err:
+            log_error(f"Failed to initialize auto-scaler: {as_init_err}")
+            auto_scaler = None
+    
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
@@ -1999,6 +2043,48 @@ def autonomy_loop():
                     f"Failed to reset stale tasks: {stale_err}",
                     level="error"
                 )
+
+        # SCALE-03: Execute auto-scaling at configurable intervals
+        if auto_scaler is not None:
+            time_since_last_scale = time.time() - last_auto_scale_time
+            if time_since_last_scale >= AUTO_SCALING_INTERVAL_SECONDS:
+                try:
+                    scaling_result = auto_scaler.execute_scaling()
+                    last_auto_scale_time = time.time()
+                    
+                    # Log scaling action if anything happened
+                    if scaling_result.get("action") != "no_action":
+                        log_action(
+                            "auto_scaling.executed",
+                            f"Auto-scaling: {scaling_result.get('action')} - {scaling_result.get('reason')}",
+                            level="info",
+                            output_data={
+                                "action": scaling_result.get("action"),
+                                "reason": scaling_result.get("reason"),
+                                "current_workers": scaling_result.get("current_workers"),
+                                "queue_depth": scaling_result.get("queue_depth"),
+                                "workers_added": len(scaling_result.get("workers_added", [])),
+                                "workers_removed": len(scaling_result.get("workers_removed", [])),
+                                "errors": scaling_result.get("errors", [])
+                            }
+                        )
+                    elif loop_count % 10 == 0:  # Log no_action every 10 loops
+                        log_action(
+                            "auto_scaling.check",
+                            f"Auto-scaling check: {scaling_result.get('reason')}",
+                            level="info",
+                            output_data={
+                                "current_workers": scaling_result.get("current_workers"),
+                                "queue_depth": scaling_result.get("queue_depth")
+                            }
+                        )
+                except Exception as as_err:
+                    log_action(
+                        "auto_scaling.error",
+                        f"Auto-scaling failed: {as_err}",
+                        level="error",
+                        error_data={"error": str(as_err)}
+                    )
 
         # L5-WIRE-04: Check escalation timeouts each loop
         if ORCHESTRATION_AVAILABLE:
@@ -2452,4 +2538,5 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
 
