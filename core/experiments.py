@@ -329,6 +329,136 @@ def list_experiments(
 
 
 # =============================================================================
+# L4-02: SANDBOX ENFORCEMENT
+# =============================================================================
+
+# Risk levels that require approval before starting
+RISK_LEVELS_REQUIRING_APPROVAL = ["high", "medium"]
+
+# Default sandbox limits for unverified experiments
+DEFAULT_SANDBOX_LIMITS = {
+    "max_spend": 10.0,
+    "scope": "test",
+    "affects_production": False
+}
+
+
+def validate_sandbox_before_start(experiment: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Validate that an experiment can be started based on sandbox boundaries.
+    
+    L4-02 Enforcement Rules:
+    1. High-risk experiments require approval (approved_by must be set)
+    2. Medium-risk experiments require approval if budget > $25 or affects production
+    3. Experiments affecting production always require approval
+    4. Budget must not exceed sandbox max_spend without approval
+    
+    Args:
+        experiment: Experiment dict from get_experiment()
+        
+    Returns:
+        Dict with valid (bool), errors (list), warnings (list)
+    """
+    errors = []
+    warnings = []
+    
+    risk_level = experiment.get("risk_level", "low")
+    requires_approval = experiment.get("requires_approval", False)
+    approved_by = experiment.get("approved_by")
+    budget_limit = float(experiment.get("budget_limit", 0) or 0)
+    
+    # Parse sandbox_config
+    sandbox = experiment.get("sandbox_config", DEFAULT_SANDBOX_LIMITS)
+    if isinstance(sandbox, str):
+        sandbox = json.loads(sandbox)
+    if sandbox is None:
+        sandbox = DEFAULT_SANDBOX_LIMITS
+    
+    max_spend = float(sandbox.get("max_spend", 10.0))
+    affects_production = sandbox.get("affects_production", False)
+    scope = sandbox.get("scope", "test")
+    
+    # Rule 1: High/medium risk with requires_approval=true needs approved_by
+    if risk_level in RISK_LEVELS_REQUIRING_APPROVAL and requires_approval and not approved_by:
+        errors.append(f"Risk level '{risk_level}' requires approval before starting. "
+                     f"Use approve_experiment() first.")
+    
+    # Rule 2: Production-affecting experiments always need approval
+    if (affects_production or scope == "production") and not approved_by:
+        errors.append("Experiments affecting production require approval. "
+                     "Set affects_production=false or get approval first.")
+    
+    # Rule 3: Budget exceeding sandbox max_spend needs approval
+    if budget_limit > max_spend and not approved_by:
+        errors.append(f"Budget ${budget_limit:.2f} exceeds sandbox limit ${max_spend:.2f}. "
+                     f"Get approval or reduce budget.")
+    
+    # Warnings for approved experiments that exceed limits
+    if approved_by:
+        if budget_limit > max_spend:
+            warnings.append(f"Approved: Budget ${budget_limit:.2f} exceeds sandbox limit ${max_spend:.2f}")
+        if affects_production or scope == "production":
+            warnings.append(f"Approved: Experiment affects production (approved by {approved_by})")
+    
+    return {
+        "valid": len(errors) == 0,
+        "errors": errors,
+        "warnings": warnings,
+        "risk_level": risk_level,
+        "requires_approval": requires_approval,
+        "is_approved": approved_by is not None,
+        "sandbox_config": sandbox
+    }
+
+
+def approve_experiment(
+    experiment_id: str,
+    approved_by: str,
+    approval_notes: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Approve an experiment for execution (required for high-risk or over-budget experiments).
+    
+    Args:
+        experiment_id: UUID of experiment to approve
+        approved_by: Who is approving (should be Josh for production)
+        approval_notes: Optional notes about the approval
+        
+    Returns:
+        Dict with success status
+    """
+    # Verify experiment exists
+    experiment = get_experiment(experiment_id)
+    if not experiment:
+        return {"success": False, "error": "Experiment not found"}
+    
+    # Update approval fields
+    query = f"""
+    UPDATE experiments
+    SET approved_by = '{_escape_string(approved_by)}',
+        approved_at = NOW(),
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query)
+    
+    # Log the approval
+    notes_msg = f" Notes: {approval_notes}" if approval_notes else ""
+    log_experiment_event(
+        experiment_id, 
+        "approved", 
+        f"Experiment approved by {approved_by}.{notes_msg}", 
+        approved_by
+    )
+    
+    return {
+        "success": True,
+        "message": f"Experiment approved by {approved_by}",
+        "experiment_id": experiment_id
+    }
+
+
+# =============================================================================
 # PHASE 4.2: EXPERIMENT EXECUTION
 # =============================================================================
 
@@ -352,6 +482,33 @@ def start_experiment(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str
     
     if experiment["status"] not in ["draft", "paused"]:
         return {"success": False, "error": f"Cannot start experiment in {experiment['status']} status"}
+    
+    # L4-02: Validate sandbox boundaries before starting
+    validation = validate_sandbox_before_start(experiment)
+    if not validation["valid"]:
+        # Log the blocked start attempt
+        log_experiment_event(
+            experiment_id, 
+            "start_blocked", 
+            f"Start blocked: {'; '.join(validation['errors'])}", 
+            started_by
+        )
+        return {
+            "success": False, 
+            "error": "Sandbox validation failed",
+            "validation_errors": validation["errors"],
+            "risk_level": validation["risk_level"],
+            "requires_approval": validation["requires_approval"]
+        }
+    
+    # Log any warnings for approved experiments exceeding limits
+    if validation["warnings"]:
+        log_experiment_event(
+            experiment_id,
+            "sandbox_warning",
+            f"Approved with warnings: {'; '.join(validation['warnings'])}",
+            started_by
+        )
     
     # Create rollback snapshot before starting
     create_rollback_snapshot(experiment_id, "pre_start", started_by)
