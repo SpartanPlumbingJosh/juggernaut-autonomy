@@ -1688,16 +1688,29 @@ def log_experiment_event(
 
 def get_experiment_dashboard(experiment_id: Optional[str] = None) -> Dict[str, Any]:
     """
-    Get comprehensive dashboard data for an experiment.
+    Get comprehensive dashboard data for an experiment or summary of all experiments.
     
     Args:
-        experiment_id: Experiment to get dashboard for. If None, returns empty dashboard.
+        experiment_id: Experiment to get dashboard for. If None, returns summary of all experiments.
     
     Returns:
-        Dict with all experiment data, or empty dict if no experiment_id provided
+        Dict with experiment data or summary dashboard
     """
+    # If no experiment_id provided, return summary dashboard
     if experiment_id is None:
-        return {}
+        try:
+            active_experiments = list_experiments(status="running")
+            all_experiments = list_experiments()
+            return {
+                "success": True,
+                "summary": True,
+                "total_experiments": len(all_experiments) if all_experiments else 0,
+                "active_experiments": len(active_experiments) if active_experiments else 0,
+                "recent_experiments": all_experiments[:10] if all_experiments else [],
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to get experiment summary: {str(e)}"}
+    
     experiment = get_experiment(experiment_id)
     if not experiment:
         return {"success": False, "error": "Experiment not found"}
