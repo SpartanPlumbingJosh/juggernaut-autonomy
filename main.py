@@ -49,7 +49,7 @@ from core.notifications import (
 try:
     from core.database import record_learning
     LEARNING_CAPTURE_AVAILABLE = True
-except ImportError as e:
+except ImportError:
     LEARNING_CAPTURE_AVAILABLE = False
     record_learning = None
 
@@ -1490,6 +1490,17 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         error_str = str(e)
+        
+        # Capture learning from failed task execution (MED-02)
+        capture_task_learning(
+            task_id=task.id,
+            task_title=task.title,
+            task_type=task.task_type,
+            succeeded=False,
+            result={"error": error_str, "exception_type": type(e).__name__},
+            duration_ms=duration_ms,
+            worker_id=WORKER_ID
+        )
         
         # Get retry count (may be string from DB, so cast safely)
         sql = f"SELECT COALESCE(attempt_count, 0) as retries FROM governance_tasks WHERE id = {escape_value(task.id)}"
