@@ -330,7 +330,8 @@ class TestHypothesisTracking:
         )
         
         assert result["success"] is True
-        assert result.get("new_iteration", 2) >= 1
+        # The actual function returns "iteration" key
+        assert result.get("iteration", 2) >= 1
 
 
 # =============================================================================
@@ -351,15 +352,15 @@ class TestRollbackFunctionality:
         
         mock_execute_sql.return_value = {"success": True, "rowCount": 1}
         
+        # Actual signature: create_rollback_snapshot(experiment_id, rollback_type, created_by)
         result = create_rollback_snapshot(
             experiment_id=mock_experiment_data["id"],
-            snapshot_type="checkpoint",
-            snapshot_data={"state": "pre_change", "metrics": {"revenue": 450}},
-            description="Pre-change snapshot"
+            rollback_type="checkpoint",
+            created_by="test-system"
         )
         
         assert result["success"] is True
-        assert "snapshot_id" in result
+        assert "rollback_id" in result
     
     def test_execute_rollback(
         self,
@@ -369,16 +370,14 @@ class TestRollbackFunctionality:
         """Test executing a rollback to previous snapshot."""
         from core.experiments import execute_rollback
         
-        snapshot_id = str(uuid.uuid4())
-        
         # Mock calls: get snapshot, update experiment, log rollback
         mock_execute_sql.side_effect = [
             {
                 "success": True,
                 "rows": [{
-                    "id": snapshot_id,
+                    "id": str(uuid.uuid4()),
                     "experiment_id": mock_experiment_data["id"],
-                    "snapshot_data": {"state": "previous"}
+                    "pre_experiment_state": {"state": "previous"}
                 }],
                 "rowCount": 1
             },
@@ -386,11 +385,11 @@ class TestRollbackFunctionality:
             {"success": True, "rowCount": 1}   # Log rollback
         ]
         
+        # Actual signature: execute_rollback(experiment_id, reason, triggered_by)
         result = execute_rollback(
             experiment_id=mock_experiment_data["id"],
-            snapshot_id=snapshot_id,
             reason="Test rollback",
-            executed_by="test-system"
+            triggered_by="test-system"
         )
         
         assert result["success"] is True
@@ -460,19 +459,21 @@ class TestBudgetLimitEnforcement:
         
         mock_execute_sql.return_value = {
             "success": True,
-            "rows": [{"budget_spent": 25.0}],
+            "rows": [{"budget_spent": 25.0, "budget_limit": 100.0}],
             "rowCount": 1
         }
         
+        # Actual signature: record_experiment_cost(experiment_id, amount, description, cost_type="api")
         result = record_experiment_cost(
             experiment_id=mock_experiment_data["id"],
             amount=25.0,
-            cost_type="api_call",
-            description="Test API call cost"
+            description="Test API call cost",
+            cost_type="api_call"
         )
         
         assert result["success"] is True
-        assert result.get("new_total", 25.0) >= 25.0
+        # Returns budget_spent, not new_total
+        assert result.get("budget_spent", 25.0) >= 25.0
     
     def test_budget_limit_not_exceeded(
         self,
@@ -492,11 +493,13 @@ class TestBudgetLimitEnforcement:
         result = record_experiment_cost(
             experiment_id=mock_experiment_data["id"],
             amount=30.0,
+            description="Compute costs",
             cost_type="compute"
         )
         
         assert result["success"] is True
-        assert result.get("budget_exceeded", False) is False
+        # budget_exhausted is the correct key, not budget_exceeded
+        assert result.get("budget_exhausted", False) is False
     
     def test_budget_limit_exceeded_triggers_warning(
         self,
@@ -516,11 +519,12 @@ class TestBudgetLimitEnforcement:
         result = record_experiment_cost(
             experiment_id=mock_experiment_data["id"],
             amount=60.0,
+            description="Large compute job",
             cost_type="compute"
         )
         
-        # Either succeeds with warning or returns budget_exceeded flag
-        assert result["success"] is True or "budget_exceeded" in result
+        # Either succeeds with budget_exhausted flag or returns success
+        assert result["success"] is True or result.get("budget_exhausted") is True
     
     def test_create_experiment_with_zero_budget(
         self,
@@ -646,14 +650,15 @@ class TestLearningsExtraction:
         
         mock_execute_sql.return_value = {"success": True, "rowCount": 1}
         
+        # Actual signature: record_learning(summary, category, details, worker_id, goal_id, 
+        #                                   task_id, experiment_id, evidence_task_ids, confidence, tags)
         result = record_learning(
+            summary="Higher conversion with personalization",
+            category="success_pattern",
+            details={"description": "Personalized offers increase conversion by 15%"},
             experiment_id=mock_experiment_data["id"],
-            learning_type="pattern",
-            title="Higher conversion with personalization",
-            description="Personalized offers increase conversion by 15%",
-            confidence_score=0.85,
-            impact_assessment="high",
-            applicable_contexts=["digital_products", "saas"]
+            confidence=0.85,
+            tags=["digital_products", "saas"]
         )
         
         assert result["success"] is True
@@ -672,9 +677,9 @@ class TestLearningsExtraction:
             "rows": [
                 {
                     "id": str(uuid.uuid4()),
-                    "learning_type": "pattern",
-                    "title": "Test learning",
-                    "confidence_score": 0.8
+                    "category": "success_pattern",
+                    "summary": "Test learning",
+                    "confidence": 0.8
                 }
             ],
             "rowCount": 1
@@ -734,15 +739,15 @@ class TestEdgeCasesAndErrors:
         
         mock_execute_sql.return_value = {
             "success": True,
-            "rows": [{"budget_spent": -10.0}],
+            "rows": [{"budget_spent": -10.0, "budget_limit": 100.0}],
             "rowCount": 1
         }
         
         result = record_experiment_cost(
             experiment_id=mock_experiment_data["id"],
             amount=-10.0,
-            cost_type="refund",
-            description="Cost refund"
+            description="Cost refund",
+            cost_type="refund"
         )
         
         # Should succeed - refunds are valid
