@@ -1,0 +1,11 @@
+# JUGGERNAUT L1-L5 Integration Tests
+# Required dependencies
+
+# Test framework
+pytest>=7.4.0
+
+# HTTP client for Neon database
+httpx>=0.25.0
+
+# Type checking (optional but recommended)
+mypy>=1.5.0
