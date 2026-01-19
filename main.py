@@ -119,6 +119,40 @@ except ImportError as e:
     def score_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
     def handle_opportunity_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
 
+# Phase 2.5: Error Recovery System (MED-01)
+ERROR_RECOVERY_AVAILABLE = False
+_error_recovery_import_error = None
+
+try:
+    from core.error_recovery import (
+        move_to_dead_letter,
+        get_dead_letter_items,
+        resolve_dead_letter,
+        retry_dead_letter,
+        create_alert,
+        get_open_alerts,
+        acknowledge_alert,
+        resolve_alert,
+        check_repeated_failures,
+        get_system_health,
+    )
+    ERROR_RECOVERY_AVAILABLE = True
+except ImportError as e:
+    _error_recovery_import_error = str(e)
+    # Stub functions for graceful degradation
+    def move_to_dead_letter(*args, **kwargs): return None
+    def get_dead_letter_items(*args, **kwargs): return []
+    def resolve_dead_letter(*args, **kwargs): return False
+    def retry_dead_letter(*args, **kwargs): return None
+    def create_alert(*args, **kwargs): return None
+    def get_open_alerts(*args, **kwargs): return []
+    def acknowledge_alert(*args, **kwargs): return False
+    def resolve_alert(*args, **kwargs): return False
+    def check_repeated_failures(*args, **kwargs): return False
+    def get_system_health(*args, **kwargs): return {}
+
+
+
 
 # ============================================================
 # CONFIGURATION
@@ -892,8 +926,60 @@ def schedule_task_retry(task_id: str, retry_count: int, error: str):
         log_error(f"Failed to schedule retry: {e}")
 
 
-def send_to_dlq(task_id: str, error: str, attempts: int):
-    """Send failed task to dead letter queue."""
+def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
+    """
+    Send failed task to dead letter queue.
+    
+    Uses error_recovery module's move_to_dead_letter for full task snapshots
+    when available, falls back to simple insert otherwise.
+    
+    Args:
+        task_id: The task ID to move to DLQ
+        error: Error message describing the failure
+        attempts: Number of retry attempts made
+        
+    Returns:
+        DLQ entry ID if successful, None otherwise
+    """
+    # Use sophisticated error_recovery if available
+    if ERROR_RECOVERY_AVAILABLE:
+        dlq_id = move_to_dead_letter(
+            task_id=task_id,
+            reason="max_retries_exceeded",
+            final_error=error,
+            metadata={
+                "attempts": attempts,
+                "worker_id": WORKER_ID,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
+        if dlq_id:
+            log_action(
+                "dlq.added", 
+                f"Task {task_id} sent to DLQ after {attempts} attempts",
+                task_id=task_id, 
+                error_data={"error": error, "attempts": attempts, "dlq_id": dlq_id}
+            )
+            # Create alert for visibility
+            create_alert(
+                alert_type="task_failure",
+                severity="error",
+                title=f"Task permanently failed: {task_id}",
+                message=f"Task failed after {attempts} attempts. Error: {error[:200]}",
+                source=WORKER_ID,
+                related_id=task_id,
+                metadata={"attempts": attempts, "dlq_id": dlq_id}
+            )
+            return dlq_id
+        log_action(
+            "dlq.failed",
+            f"Failed to add task {task_id} to DLQ via error_recovery",
+            level="error",
+            task_id=task_id
+        )
+        return None
+    
+    # Fallback to simple insert if error_recovery unavailable
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO dead_letter_queue (
@@ -905,10 +991,16 @@ def send_to_dlq(task_id: str, error: str, attempts: int):
     """
     try:
         execute_sql(sql)
-        log_action("dlq.added", f"Task {task_id} sent to DLQ after {attempts} attempts", 
-                   task_id=task_id, error_data={"error": error, "attempts": attempts})
+        log_action(
+            "dlq.added", 
+            f"Task {task_id} sent to DLQ after {attempts} attempts (fallback)", 
+            task_id=task_id, 
+            error_data={"error": error, "attempts": attempts}
+        )
+        return task_id  # Return task_id as proxy for success
     except Exception as e:
         log_error(f"Failed to send to DLQ: {e}")
+        return None
 
 
 def create_escalation(task_id: str, issue: str, level: str = "medium"):
@@ -1498,6 +1590,12 @@ def autonomy_loop():
         log_info("Proactive opportunity scanner available", {"status": "enabled"})
     elif _proactive_import_error:
         log_action("proactive.unavailable", f"Proactive systems disabled: {_proactive_import_error}", level="warn")
+    
+    # Log error recovery framework status (MED-01)
+    if ERROR_RECOVERY_AVAILABLE:
+        log_info("Error recovery framework available", {"status": "enabled"})
+    elif _error_recovery_import_error:
+        log_action("error_recovery.unavailable", f"Error recovery disabled: {_error_recovery_import_error}", level="warn")
     
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
