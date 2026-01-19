@@ -1,0 +1,472 @@
+"""
+BRAIN-03: Brain API Endpoints
+
+REST API endpoints for the JUGGERNAUT brain consultation service.
+
+Endpoints:
+    POST /api/brain/consult - Consult the brain with a question
+    GET /api/brain/history - Get conversation history for a session
+    DELETE /api/brain/clear - Clear conversation history for a session
+
+Authentication:
+    All endpoints require a 'token' query parameter matching MCP_AUTH_TOKEN env var.
+
+CORS:
+    All endpoints include CORS headers for cross-origin requests.
+"""
+
+import json
+import logging
+import os
+from typing import Any, Dict, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
+
+# Configure module logger
+logger = logging.getLogger(__name__)
+
+# Auth token from environment
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+
+# CORS headers for all responses
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Max-Age": "86400",
+}
+
+
+def _make_response(
+    status_code: int,
+    body: Dict[str, Any],
+    extra_headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    Create a standardized API response.
+
+    Args:
+        status_code: HTTP status code.
+        body: Response body as dictionary.
+        extra_headers: Additional headers to include.
+
+    Returns:
+        Response dictionary with statusCode, headers, and body.
+    """
+    headers = {**CORS_HEADERS}
+    if extra_headers:
+        headers.update(extra_headers)
+
+    return {
+        "statusCode": status_code,
+        "headers": {**headers, "Content-Type": "application/json"},
+        "body": json.dumps(body),
+    }
+
+
+def _error_response(status_code: int, message: str) -> Dict[str, Any]:
+    """
+    Create an error response.
+
+    Args:
+        status_code: HTTP status code.
+        message: Error message.
+
+    Returns:
+        Error response dictionary.
+    """
+    return _make_response(status_code, {"error": message, "success": False})
+
+
+def _validate_auth(query_params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+    """
+    Validate authentication token.
+
+    Args:
+        query_params: Query parameters from request.
+
+    Returns:
+        Tuple of (is_valid, error_message).
+    """
+    if not MCP_AUTH_TOKEN:
+        logger.warning("MCP_AUTH_TOKEN not configured - auth disabled")
+        return True, None
+
+    token = query_params.get("token", [""])[0] if isinstance(
+        query_params.get("token"), list
+    ) else query_params.get("token", "")
+
+    if not token:
+        return False, "Missing authentication token"
+
+    if token != MCP_AUTH_TOKEN:
+        return False, "Invalid authentication token"
+
+    return True, None
+
+
+def _get_brain_service():
+    """
+    Get or create BrainService instance.
+
+    Returns:
+        BrainService instance.
+
+    Raises:
+        ImportError: If brain module not available.
+    """
+    try:
+        from core.brain import BrainService
+        return BrainService()
+    except ImportError as e:
+        logger.error("Failed to import BrainService: %s", str(e))
+        raise
+
+
+def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle POST /api/brain/consult request.
+
+    Accepts:
+        {
+            "question": "Your question here",
+            "session_id": "optional-session-id",
+            "context": {"optional": "context data"}
+        }
+
+    Returns:
+        {
+            "success": true,
+            "response": "AI response text",
+            "session_id": "session-id-used",
+            "memories_used": [...],
+            "cost_cents": 0.05,
+            "input_tokens": 150,
+            "output_tokens": 200,
+            "model": "anthropic/claude-sonnet-4-20250514"
+        }
+
+    Args:
+        body: Request body.
+        query_params: Query parameters.
+
+    Returns:
+        API response dictionary.
+    """
+    # Validate auth
+    is_valid, error = _validate_auth(query_params)
+    if not is_valid:
+        return _error_response(401, error)
+
+    # Validate request body
+    question = body.get("question")
+    if not question:
+        return _error_response(400, "Missing required field: question")
+
+    session_id = body.get("session_id")
+    context = body.get("context")
+
+    try:
+        brain = _get_brain_service()
+        result = brain.consult(
+            question=question,
+            session_id=session_id,
+            context=context,
+            include_memories=True
+        )
+
+        return _make_response(200, {
+            "success": True,
+            "response": result.get("response", ""),
+            "session_id": result.get("session_id", ""),
+            "memories_used": result.get("memories_used", []),
+            "cost_cents": result.get("cost_cents", 0),
+            "input_tokens": result.get("input_tokens", 0),
+            "output_tokens": result.get("output_tokens", 0),
+            "model": result.get("model", "")
+        })
+
+    except ImportError:
+        return _error_response(503, "Brain service not available")
+    except Exception as e:
+        logger.exception("Error in brain consult: %s", str(e))
+        return _error_response(500, f"Internal error: {str(e)}")
+
+
+def handle_history(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle GET /api/brain/history request.
+
+    Query params:
+        session_id: Required session ID to get history for.
+
+    Returns:
+        {
+            "success": true,
+            "session_id": "session-id",
+            "history": [
+                {"role": "user", "content": "..."},
+                {"role": "assistant", "content": "..."}
+            ],
+            "message_count": 10
+        }
+
+    Args:
+        query_params: Query parameters.
+
+    Returns:
+        API response dictionary.
+    """
+    # Validate auth
+    is_valid, error = _validate_auth(query_params)
+    if not is_valid:
+        return _error_response(401, error)
+
+    # Get session_id from query params
+    session_id = query_params.get("session_id", [""])[0] if isinstance(
+        query_params.get("session_id"), list
+    ) else query_params.get("session_id", "")
+
+    if not session_id:
+        return _error_response(400, "Missing required parameter: session_id")
+
+    try:
+        brain = _get_brain_service()
+        result = brain.get_history(session_id)
+
+        return _make_response(200, {
+            "success": True,
+            "session_id": result.get("session_id", session_id),
+            "history": result.get("history", []),
+            "message_count": result.get("message_count", 0)
+        })
+
+    except ImportError:
+        return _error_response(503, "Brain service not available")
+    except Exception as e:
+        logger.exception("Error getting history: %s", str(e))
+        return _error_response(500, f"Internal error: {str(e)}")
+
+
+def handle_clear(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Handle DELETE /api/brain/clear request.
+
+    Query params:
+        session_id: Required session ID to clear.
+
+    Returns:
+        {
+            "success": true,
+            "session_id": "session-id",
+            "messages_deleted": 10
+        }
+
+    Args:
+        query_params: Query parameters.
+
+    Returns:
+        API response dictionary.
+    """
+    # Validate auth
+    is_valid, error = _validate_auth(query_params)
+    if not is_valid:
+        return _error_response(401, error)
+
+    # Get session_id from query params
+    session_id = query_params.get("session_id", [""])[0] if isinstance(
+        query_params.get("session_id"), list
+    ) else query_params.get("session_id", "")
+
+    if not session_id:
+        return _error_response(400, "Missing required parameter: session_id")
+
+    try:
+        brain = _get_brain_service()
+        result = brain.clear_history(session_id)
+
+        return _make_response(200, {
+            "success": True,
+            "session_id": result.get("session_id", session_id),
+            "messages_deleted": result.get("messages_deleted", 0)
+        })
+
+    except ImportError:
+        return _error_response(503, "Brain service not available")
+    except Exception as e:
+        logger.exception("Error clearing history: %s", str(e))
+        return _error_response(500, f"Internal error: {str(e)}")
+
+
+def handle_options() -> Dict[str, Any]:
+    """
+    Handle OPTIONS request for CORS preflight.
+
+    Returns:
+        Response with CORS headers.
+    """
+    return _make_response(200, {"success": True})
+
+
+def route_request(
+    method: str,
+    path: str,
+    body: Optional[Dict[str, Any]] = None,
+    query_params: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Route incoming request to appropriate handler.
+
+    Args:
+        method: HTTP method (GET, POST, DELETE, OPTIONS).
+        path: Request path (e.g., /api/brain/consult).
+        body: Request body for POST requests.
+        query_params: Query parameters.
+
+    Returns:
+        API response dictionary.
+    """
+    body = body or {}
+    query_params = query_params or {}
+
+    # Handle OPTIONS for all paths (CORS preflight)
+    if method == "OPTIONS":
+        return handle_options()
+
+    # Normalize path
+    path = path.rstrip("/")
+
+    # Route to handlers
+    if path == "/api/brain/consult":
+        if method == "POST":
+            return handle_consult(body, query_params)
+        return _error_response(405, f"Method {method} not allowed for {path}")
+
+    elif path == "/api/brain/history":
+        if method == "GET":
+            return handle_history(query_params)
+        return _error_response(405, f"Method {method} not allowed for {path}")
+
+    elif path == "/api/brain/clear":
+        if method == "DELETE":
+            return handle_clear(query_params)
+        return _error_response(405, f"Method {method} not allowed for {path}")
+
+    return _error_response(404, f"Endpoint not found: {path}")
+
+
+# =============================================================================
+# HTTP Server Integration
+# =============================================================================
+
+
+def create_flask_routes(app):
+    """
+    Register brain API routes with a Flask app.
+
+    Args:
+        app: Flask application instance.
+    """
+    from flask import request, jsonify
+
+    @app.route("/api/brain/consult", methods=["POST", "OPTIONS"])
+    def flask_consult():
+        if request.method == "OPTIONS":
+            resp = handle_options()
+        else:
+            body = request.get_json(force=True, silent=True) or {}
+            query_params = {k: v for k, v in request.args.items()}
+            resp = handle_consult(body, query_params)
+
+        response = jsonify(json.loads(resp["body"]))
+        response.status_code = resp["statusCode"]
+        for key, value in resp["headers"].items():
+            response.headers[key] = value
+        return response
+
+    @app.route("/api/brain/history", methods=["GET", "OPTIONS"])
+    def flask_history():
+        if request.method == "OPTIONS":
+            resp = handle_options()
+        else:
+            query_params = {k: v for k, v in request.args.items()}
+            resp = handle_history(query_params)
+
+        response = jsonify(json.loads(resp["body"]))
+        response.status_code = resp["statusCode"]
+        for key, value in resp["headers"].items():
+            response.headers[key] = value
+        return response
+
+    @app.route("/api/brain/clear", methods=["DELETE", "OPTIONS"])
+    def flask_clear():
+        if request.method == "OPTIONS":
+            resp = handle_options()
+        else:
+            query_params = {k: v for k, v in request.args.items()}
+            resp = handle_clear(query_params)
+
+        response = jsonify(json.loads(resp["body"]))
+        response.status_code = resp["statusCode"]
+        for key, value in resp["headers"].items():
+            response.headers[key] = value
+        return response
+
+    logger.info("Registered brain API routes with Flask")
+
+
+def create_http_handler():
+    """
+    Create a simple HTTP request handler for brain API.
+
+    Returns:
+        Handler function for HTTP server.
+    """
+    def handler(environ, start_response):
+        """WSGI handler for brain API."""
+        method = environ.get("REQUEST_METHOD", "GET")
+        path = environ.get("PATH_INFO", "/")
+        query_string = environ.get("QUERY_STRING", "")
+
+        # Parse query params
+        query_params = parse_qs(query_string)
+
+        # Parse body for POST
+        body = {}
+        if method == "POST":
+            try:
+                content_length = int(environ.get("CONTENT_LENGTH", 0))
+                if content_length > 0:
+                    body_bytes = environ["wsgi.input"].read(content_length)
+                    body = json.loads(body_bytes.decode("utf-8"))
+            except (ValueError, json.JSONDecodeError) as e:
+                logger.warning("Failed to parse request body: %s", str(e))
+
+        # Route request
+        response = route_request(method, path, body, query_params)
+
+        # Build response
+        status = f"{response['statusCode']} OK"
+        if response["statusCode"] >= 400:
+            status = f"{response['statusCode']} Error"
+
+        headers = [(k, v) for k, v in response["headers"].items()]
+        start_response(status, headers)
+
+        return [response["body"].encode("utf-8")]
+
+    return handler
+
+
+# =============================================================================
+# Exports
+# =============================================================================
+
+__all__ = [
+    "handle_consult",
+    "handle_history",
+    "handle_clear",
+    "handle_options",
+    "route_request",
+    "create_flask_routes",
+    "create_http_handler",
+]
