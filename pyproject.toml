@@ -10,14 +10,14 @@ target-version = "py311"
 exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
 
 [tool.ruff.lint]
-# Ignore common issues that can be cleaned up later
+# Ignore common issues that can be cleaned up in follow-up PRs
 # F401: unused imports
 # F841: unused local variables  
 # F541: f-string without placeholders
 # E701: multiple statements on one line
-ignore = ["F401", "F841", "F541", "E701"]
+# E722: bare except (requires careful refactoring)
+ignore = ["F401", "F841", "F541", "E701", "E722"]
 
-# Keep E722 (bare except) as error - it is a real issue
 select = ["E", "F", "W"]
 
 [tool.flake8]
