@@ -154,8 +154,7 @@ def log_execution(
     tokens_used: int = None,
     cost_cents: int = None,
     details: Dict = None,
-    source: str = "system",
-    details: Dict = None
+    source: str = "system"
 ) -> Optional[str]:
     """
     Log an execution event.
