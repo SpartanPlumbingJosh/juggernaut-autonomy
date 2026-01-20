@@ -20,7 +20,7 @@ from .database import query_db, escape_sql_value
 logger = logging.getLogger(__name__)
 
 # Configuration constants
-DEFAULT_MODEL = "anthropic/claude-3.5-sonnet"  # Valid OpenRouter model ID
+DEFAULT_MODEL = "openrouter/auto"  # Smart router - auto-selects best model
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 MAX_CONVERSATION_HISTORY = 20
 MAX_MEMORIES_TO_RECALL = 10
@@ -28,6 +28,7 @@ DEFAULT_MAX_TOKENS = 4096
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
+    "openrouter/auto": {"input": 5.0, "output": 15.0},  # Average estimate for smart router
     "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
