@@ -154,7 +154,8 @@ def log_execution(
     tokens_used: int = None,
     cost_cents: int = None,
     details: Dict = None,
-    source: str = "system"
+    source: str = "system",
+    details: Dict = None
 ) -> Optional[str]:
     """
     Log an execution event.
@@ -211,6 +212,12 @@ def log_execution(
         data["tokens_used"] = tokens_used
     if cost_cents is not None:
         data["cost_cents"] = cost_cents
+    if details:
+        # Merge details into output_data for backward compatibility
+        if output_data:
+            data["output_data"] = {**output_data, "details": details}
+        else:
+            data["output_data"] = {"details": details}
     
     try:
         return _db.insert("execution_logs", data)
