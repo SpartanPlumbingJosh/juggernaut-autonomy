@@ -391,6 +391,40 @@ def start_task_run(
     }
 
 
+def _parse_timestamp_to_naive(timestamp: Any) -> datetime:
+    """
+    Parse a timestamp (string or datetime) to a naive datetime for comparison.
+    
+    Handles various formats including timezone-aware strings from the database.
+    
+    Args:
+        timestamp: String or datetime object
+        
+    Returns:
+        Naive datetime object
+    """
+    if timestamp is None:
+        return None
+    
+    if isinstance(timestamp, str):
+        # Remove timezone info for naive comparison with datetime.utcnow()
+        ts_clean = timestamp.replace("Z", "").replace("+00:00", "")
+        # Handle other positive timezone offsets like +05:00
+        if "+" in ts_clean:
+            ts_clean = ts_clean.split("+")[0]
+        # Handle negative timezone offsets like -05:00 (but not date separators)
+        if "T" in ts_clean and "-" in ts_clean.split("T")[-1]:
+            time_part = ts_clean.split("T")[-1]
+            if "-" in time_part:
+                ts_clean = ts_clean.rsplit("-", 1)[0]
+        return datetime.fromisoformat(ts_clean)
+    else:
+        # Handle datetime objects - strip timezone if present
+        if hasattr(timestamp, 'tzinfo') and timestamp.tzinfo is not None:
+            return timestamp.replace(tzinfo=None)
+        return timestamp
+
+
 def complete_task_run(
     run_id: str,
     result: Optional[Dict] = None
@@ -405,8 +439,6 @@ def complete_task_run(
     Returns:
         Dict with completion status
     """
-    import time
-    
     # Get run info to calculate duration
     run_info = execute_query(
         "SELECT task_id, started_at FROM scheduled_task_runs WHERE id = $1",
@@ -420,8 +452,12 @@ def complete_task_run(
     task_id = run["task_id"]
     started_at = run["started_at"]
     
-    # Calculate duration
-    duration_ms = int((datetime.utcnow() - datetime.fromisoformat(started_at.replace("Z", "+00:00").replace("+00:00", ""))).total_seconds() * 1000) if started_at else 0
+    # Calculate duration using helper function for proper timestamp handling
+    if started_at:
+        started_dt = _parse_timestamp_to_naive(started_at)
+        duration_ms = int((datetime.utcnow() - started_dt).total_seconds() * 1000)
+    else:
+        duration_ms = 0
     
     # Update run record
     execute_query(
@@ -541,13 +577,14 @@ def fail_task_run(
             )
             disabled = True
             
-            # Create alert
+            # Create alert - FIXED: Added title parameter, changed component to source
             from .error_recovery import create_alert
             create_alert(
                 alert_type="scheduled_task_disabled",
                 severity="high",
+                title=f"Scheduled task '{task['name']}' disabled",
                 message=f"Scheduled task '{task['name']}' disabled after {task['consecutive_failures']} failures",
-                component="scheduler",
+                source="scheduler",
                 metadata={"task_id": task_id, "last_error": error_message}
             )
         else:
@@ -799,7 +836,7 @@ def resolve_conflict(
         )
         if task.get("rows"):
             t = task["rows"][0]
-            current_next = datetime.fromisoformat(t["next_run_at"].replace("Z", "+00:00").replace("+00:00", ""))
+            current_next = _parse_timestamp_to_naive(t["next_run_at"])
             
             if t["schedule_type"] == "cron":
                 new_next = calculate_next_cron_run(t["cron_expression"], current_next)
