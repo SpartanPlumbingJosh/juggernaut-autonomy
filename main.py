@@ -1536,7 +1536,7 @@ def resume_approved_task(task: Task) -> Tuple[bool, Dict[str, Any]]:
     update_task_status(task.id, "in_progress", {"approval_resumed": True})
     
     # Execute the task
-    return execute_task(task)
+    return execute_task(task, approval_bypassed=True)
 
 
 # ============================================================
@@ -1900,7 +1900,7 @@ def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]
     return False, None, result
 
 
-def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
+def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = False) -> Tuple[bool, Dict]:
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
     
@@ -1921,7 +1921,14 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         return False, {"blocked": True, "reason": reason}
     
     # L2: High-risk tasks require approval even if not explicitly marked
-    if should_require_approval_for_risk(risk_score, risk_level) and not task.requires_approval:
+    # Log if approval was bypassed (already approved in prior step)
+    if approval_bypassed and should_require_approval_for_risk(risk_score, risk_level):
+        log_action("approval.bypassed", 
+                  f"Task '{task.title}' bypassing risk approval (already approved)",
+                  task_id=task.id,
+                  output_data={"risk_score": risk_score, "risk_level": risk_level, "reason": "prior_approval"})
+
+    if should_require_approval_for_risk(risk_score, risk_level) and not task.requires_approval and not approval_bypassed:
         log_action("risk.approval_required", 
                   f"Task '{task.title}' requires approval due to {risk_level.upper()} risk ({risk_score:.0%})",
                   level="warn", task_id=task.id,
