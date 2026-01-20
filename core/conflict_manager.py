@@ -167,7 +167,7 @@ def ensure_tables_exist() -> bool:
         expires_at TIMESTAMPTZ NOT NULL,
         status VARCHAR(50) DEFAULT 'active',
         metadata JSONB DEFAULT '{}',
-        created_at TIMESTAMPTZ DEFAULT NOW(),
+        created_at TIMESTAMPTZ DEFAULT NOW()
         -- Partial unique index created below
     );
     """
@@ -772,4 +772,5 @@ def get_conflict_stats(days: int = 7) -> Dict[str, Any]:
     except (urllib.error.HTTPError, urllib.error.URLError) as e:
         logger.error("Failed to get conflict stats: %s", str(e))
         return {"period_days": days, "error": str(e)}
+
 
