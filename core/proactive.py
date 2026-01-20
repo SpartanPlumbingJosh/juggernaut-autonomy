@@ -3,6 +3,9 @@ Phase 5.1: Opportunity Scanner - Proactive Systems
 
 This module provides market scanning, opportunity identification, scoring,
 duplicate detection, and scan scheduling capabilities.
+
+FIX-11: Added source_description support for L2-02 References and Sourcing.
+Opportunities now track where they were identified (data source, scan type, etc.)
 """
 
 import hashlib
@@ -12,6 +15,38 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from .database import query_db, log_execution
+
+
+# FIX-11: Source reference helper for L2-02 References and Sourcing
+def build_opportunity_source(
+    scan_type: str,
+    source: str,
+    scan_id: Optional[str] = None,
+    additional_context: Optional[str] = None
+) -> str:
+    """
+    Build a standardized source description for opportunities.
+    
+    Args:
+        scan_type: Type of scan that found the opportunity
+        source: Data source (web, api, servicetitan, etc.)
+        scan_id: Optional scan ID reference
+        additional_context: Optional additional context
+        
+    Returns:
+        Formatted source description string
+    """
+    parts = [f"{scan_type} scan", f"source={source}"]
+    
+    if scan_id:
+        parts.append(f"scan_id={scan_id}")
+    
+    if additional_context:
+        context = additional_context[:100] if len(additional_context) > 100 else additional_context
+        parts.append(f"context={context}")
+    
+    return " | ".join(parts)
+
 
 # =============================================================================
 # SCAN MANAGEMENT
@@ -246,6 +281,8 @@ def identify_opportunity(
         created_by: Who/what identified this opportunity
         source_description: L2-02 compliant source reference (e.g., "market_scan:google_trends")
         
+        source_description: Human-readable description of data source (FIX-11)
+        
     Returns:
         Dict with opportunity_id and details
     """
@@ -258,16 +295,17 @@ def identify_opportunity(
         INSERT INTO opportunities (
             id, source_id, external_id, opportunity_type, category,
             estimated_value, confidence_score, status, stage,
-            customer_name, customer_contact, description, metadata, created_by
+            customer_name, customer_contact, description, metadata, created_by,
+            source_description
         ) VALUES (
             $1, $2, $3, $4, $5, $6, 0.5, 'new', 'identified',
-            $7, $8, $9, $10, $11
+            $7, $8, $9, $10, $11, $12
         )
         RETURNING id, opportunity_type, category, estimated_value, status
         """,
         [opportunity_id, source_id, external_id, opportunity_type, category,
          estimated_value, customer_name, json.dumps(customer_contact),
-         description, json.dumps(metadata), created_by]
+         description, json.dumps(metadata), created_by, source_description]
     )
     
     if not result.get("rows"):
@@ -890,4 +928,5 @@ __all__ = [
     "scan_angi_leads",
     "scan_market_trends",
 ]
+
 

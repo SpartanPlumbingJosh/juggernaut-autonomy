@@ -9,6 +9,7 @@ Features:
 - Categorizes learnings by type (success_pattern, failure_pattern, etc.)
 - Stores learnings in the learnings table for future reference
 - Calculates confidence scores based on task outcomes
+- Tracks source references for L2-02 References and Sourcing (FIX-11)
 """
 
 import json
@@ -32,8 +33,49 @@ CONFIDENCE_VERY_LOW = 0.3
 DURATION_FAST_THRESHOLD_MS = 1000
 DURATION_SLOW_THRESHOLD_MS = 10000
 
+# Source type constants for standardized source references
+SOURCE_TYPE_TASK = "task_execution"
+SOURCE_TYPE_SCAN = "opportunity_scan"
+SOURCE_TYPE_MANUAL = "manual_entry"
+SOURCE_TYPE_EXTERNAL = "external_data"
+SOURCE_TYPE_WORKER = "worker_observation"
+
 # Configure module logger
 logger = logging.getLogger(__name__)
+
+
+def build_source_reference(
+    source_type: str,
+    source_id: Optional[str] = None,
+    worker_id: Optional[str] = None,
+    additional_context: Optional[str] = None,
+) -> str:
+    """
+    Build a standardized source reference string.
+
+    Args:
+        source_type: Type of source (task_execution, opportunity_scan, etc.)
+        source_id: Optional ID of the source entity (task_id, scan_id, etc.)
+        worker_id: Optional ID of the worker that captured this
+        additional_context: Optional additional context about the source
+
+    Returns:
+        Formatted source reference string
+    """
+    parts = [source_type]
+
+    if source_id:
+        parts.append(f"id={source_id}")
+
+    if worker_id:
+        parts.append(f"worker={worker_id}")
+
+    if additional_context:
+        # Truncate context if too long
+        context = additional_context[:100] if len(additional_context) > 100 else additional_context
+        parts.append(f"context={context}")
+
+    return " | ".join(parts)
 
 
 def extract_learning_from_task(
@@ -45,6 +87,7 @@ def extract_learning_from_task(
     result: Dict[str, Any],
     duration_ms: int,
     worker_id: str,
+    source: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Extract learning insights from a completed task execution.
@@ -58,6 +101,7 @@ def extract_learning_from_task(
         result: Result dictionary from task execution
         duration_ms: Execution duration in milliseconds
         worker_id: ID of the worker that executed the task
+        source: Optional explicit source reference (if not provided, auto-generated)
 
     Returns:
         Dictionary containing extracted learning with keys:
@@ -65,6 +109,7 @@ def extract_learning_from_task(
         - summary: Brief summary of the learning
         - details: Detailed learning information as dict
         - confidence: Confidence score (0.0 to 1.0)
+        - source: Source reference string
     """
     category = _determine_learning_category(success, result, duration_ms)
     summary = _generate_learning_summary(
@@ -85,11 +130,21 @@ def extract_learning_from_task(
     )
     confidence = _calculate_confidence(success, result, duration_ms)
 
+    # Build source reference if not explicitly provided
+    if not source:
+        source = build_source_reference(
+            source_type=SOURCE_TYPE_TASK,
+            source_id=task_id,
+            worker_id=worker_id,
+            additional_context=task_type,
+        )
+
     return {
         "category": category,
         "summary": summary,
         "details": details,
         "confidence": confidence,
+        "source": source,
     }
 
 
@@ -486,6 +541,11 @@ def save_learning_to_db(
     columns.append("evidence_task_ids")
     values.append(f"{escape_value_func([task_id])}::jsonb")
 
+    # FIX-11: Add source reference for L2-02 References and Sourcing
+    if learning.get("source"):
+        columns.append("source")
+        values.append(escape_value_func(learning["source"]))
+
     sql = f"""
         INSERT INTO learnings ({', '.join(columns)})
         VALUES ({', '.join(values)})
@@ -524,6 +584,7 @@ def capture_task_learning(
     duration_ms: int,
     worker_id: str,
     goal_id: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Main entry point to capture learning from a completed task.
@@ -545,6 +606,7 @@ def capture_task_learning(
         duration_ms: Execution duration in milliseconds
         worker_id: ID of the worker that executed the task
         goal_id: Optional goal ID if task was part of a goal
+        source: Optional explicit source reference (auto-generated if not provided)
 
     Returns:
         Tuple of (success: bool, learning_id: Optional[str])
@@ -567,7 +629,7 @@ def capture_task_learning(
         return False, None
 
     try:
-        # Extract learning from the task
+        # Extract learning from the task with source tracking
         learning = extract_learning_from_task(
             task_id=task_id,
             task_type=task_type,
@@ -577,6 +639,7 @@ def capture_task_learning(
             result=result,
             duration_ms=duration_ms,
             worker_id=worker_id,
+            source=source,
         )
 
         # Build source string for L2-02 compliance
@@ -602,6 +665,7 @@ def capture_task_learning(
                     "learning_id": learning_id,
                     "category": learning["category"],
                     "confidence": learning["confidence"],
+                    "source": learning.get("source", ""),
                 },
             )
         else:
