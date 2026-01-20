@@ -390,6 +390,86 @@ class Task:
 # SECURITY UTILITIES
 # ============================================================
 
+def auto_approve_timed_out_tasks():
+    """
+    Auto-approve low/medium risk tasks that have been waiting for approval too long.
+    HIGH/CRITICAL risk tasks are escalated instead.
+    
+    Timeout: 30 minutes for auto-approval consideration
+    """
+    try:
+        # Find tasks waiting for approval with old approval requests
+        stale_query = """
+            SELECT t.id, t.title, t.task_type, t.priority, t.risk_level,
+                   a.id as approval_id, a.created_at as approval_created
+            FROM governance_tasks t
+            JOIN approvals a ON t.id = a.task_id
+            WHERE t.status = 'waiting_approval'
+              AND a.status = 'pending'
+              AND a.created_at < NOW() - INTERVAL '30 minutes'
+            ORDER BY a.created_at ASC
+            LIMIT 10
+        """
+        
+        result = execute_sql(stale_query)
+        auto_approved = []
+        escalated = []
+        
+        for row in result.get("rows", []):
+            task_id = row["id"]
+            approval_id = row["approval_id"]
+            risk_level = row.get("risk_level", "low")
+            
+            if risk_level in ("high", "critical"):
+                # Escalate high-risk tasks instead of auto-approving
+                try:
+                    execute_sql(f"""
+                        INSERT INTO escalations (task_id, escalated_by, reason, status)
+                        VALUES ('{task_id}', 'SYSTEM_TIMEOUT', 
+                               'Task waiting for approval > 30 minutes (high risk - requires human review)',
+                               'pending')
+                        ON CONFLICT DO NOTHING
+                    """)
+                    escalated.append(task_id)
+                    log_action("escalation.timeout_created",
+                              f"High-risk task {task_id} escalated due to approval timeout",
+                              task_id=task_id)
+                except Exception:
+                    pass
+            else:
+                # Auto-approve low/medium risk tasks
+                try:
+                    execute_sql(f"""
+                        UPDATE approvals 
+                        SET status = 'approved', 
+                            decision = 'auto_approved',
+                            decided_by = 'SYSTEM_TIMEOUT',
+                            decided_at = NOW(),
+                            notes = 'Auto-approved after 30 minute timeout (low/medium risk)'
+                        WHERE id = '{approval_id}'
+                    """)
+                    
+                    execute_sql(f"""
+                        UPDATE governance_tasks
+                        SET status = 'pending',
+                            updated_at = NOW()
+                        WHERE id = '{task_id}'
+                    """)
+                    
+                    auto_approved.append(task_id)
+                    log_action("approval.auto_timeout",
+                              f"Task {task_id} auto-approved after timeout",
+                              task_id=task_id)
+                except Exception as e:
+                    log_error(f"Failed to auto-approve task {task_id}: {e}")
+        
+        return {"auto_approved": auto_approved, "escalated": escalated}
+        
+    except Exception as e:
+        log_error(f"Auto-approval timeout check failed: {e}")
+        return {"error": str(e)}
+
+
 def sanitize_payload(payload: Dict, max_value_length: int = 1000) -> Dict:
     """
     Sanitize payload to remove sensitive information before logging.
@@ -1964,7 +2044,19 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         
         elif task.task_type == "evaluation":
             # Execute evaluation logic from payload
-            eval_type = task.payload.get("eval_type", "query")
+            # Auto-detect eval_type if not explicitly set
+            explicit_type = task.payload.get("eval_type")
+            if explicit_type:
+                eval_type = explicit_type
+            elif task.payload.get("opp_id"):
+                eval_type = "opportunity"
+            elif task.payload.get("sql") or task.payload.get("query"):
+                eval_type = "query"
+            elif task.payload.get("metric_value") is not None:
+                eval_type = "metric"
+            else:
+                eval_type = "query"  # Default fallback
+            
             eval_sql = task.payload.get("sql") or task.payload.get("query")
             criteria = task.payload.get("criteria", {})
             
@@ -2057,10 +2149,92 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                     log_action("task.evaluation_completed",
                               f"Metric evaluation: {metric_name}={metric_value}, passed={passed}",
                               task_id=task.id, output_data=result)
+            elif eval_type == "opportunity":
+                # Evaluate an opportunity from the opportunities table
+                opp_id = task.payload.get("opp_id")
+                source = task.payload.get("src", "unknown")
+                
+                if not opp_id:
+                    result = {"error": "Opportunity evaluation requires 'opp_id' in payload"}
+                    task_succeeded = False
+                else:
+                    try:
+                        opp_result = execute_sql(f"""
+                            SELECT id, opportunity_type, category, estimated_value,
+                                   confidence_score, status, description, source_description
+                            FROM opportunities WHERE id = '{opp_id}'
+                        """)
+                        
+                        if opp_result.get("rowCount", 0) == 0:
+                            result = {
+                                "error": f"Opportunity not found: {opp_id}",
+                                "eval_type": eval_type,
+                                "opp_id": opp_id
+                            }
+                            task_succeeded = False
+                        else:
+                            opp = opp_result["rows"][0]
+                            
+                            # Score the opportunity
+                            score = 100
+                            notes = []
+                            
+                            # Check confidence score
+                            confidence = float(opp.get("confidence_score") or 0)
+                            if confidence < 0.5:
+                                score -= 30
+                                notes.append(f"Low confidence: {confidence:.2f}")
+                            elif confidence < 0.7:
+                                score -= 15
+                                notes.append(f"Medium confidence: {confidence:.2f}")
+                            
+                            # Check estimated value
+                            est_value = float(opp.get("estimated_value") or 0)
+                            if est_value < 1000:
+                                score -= 20
+                                notes.append(f"Low estimated value: ${est_value:.2f}")
+                            
+                            # Check status
+                            opp_status = opp.get("status", "unknown")
+                            if opp_status in ("closed", "lost", "expired"):
+                                score -= 50
+                                notes.append(f"Unfavorable status: {opp_status}")
+                            
+                            # Determine pass/fail
+                            threshold = criteria.get("pass_threshold", 50)
+                            passed = score >= threshold
+                            
+                            result = {
+                                "executed": True,
+                                "eval_type": eval_type,
+                                "opportunity_id": opp_id,
+                                "opportunity_type": opp.get("opportunity_type"),
+                                "category": opp.get("category"),
+                                "estimated_value": est_value,
+                                "confidence": confidence,
+                                "status": opp_status,
+                                "score": score,
+                                "passed": passed,
+                                "threshold": threshold,
+                                "notes": notes,
+                                "source": source
+                            }
+                            task_succeeded = passed
+                            log_action("task.evaluation_completed",
+                                      f"Opportunity evaluation: {opp_id}, score={score}, passed={passed}",
+                                      task_id=task.id, output_data=result)
+                                      
+                    except Exception as opp_error:
+                        result = {"error": str(opp_error), "eval_type": eval_type, "opp_id": opp_id}
+                        task_succeeded = False
+                        log_action("task.evaluation_failed", f"Opportunity eval failed: {str(opp_error)}",
+                                  level="error", task_id=task.id, error_data=result)
+            
             else:
                 result = {
                     "error": f"Unknown eval_type '{eval_type}' or missing required fields",
-                    "supported_types": ["query", "metric"]
+                    "supported_types": ["query", "metric", "opportunity"],
+                    "payload_keys": list(task.payload.keys()) if task.payload else []
                 }
                 task_succeeded = False
 
