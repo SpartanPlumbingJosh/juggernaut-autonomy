@@ -174,11 +174,14 @@ def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[s
 
     try:
         brain = _get_brain_service()
+        if brain is None:
+            return _error_response(503, "Brain service not available")
+        
         result = brain.consult(
             question=question,
             session_id=session_id,
             context=context,
-            include_memories=True
+            include_memories=body.get("include_memories", True)
         )
 
         return _make_response(200, {
@@ -238,13 +241,16 @@ def handle_history(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         brain = _get_brain_service()
-        result = brain.get_history(session_id)
+        if brain is None:
+            return _error_response(503, "Brain service not available")
+        
+        history = brain.get_history(session_id)
 
         return _make_response(200, {
             "success": True,
-            "session_id": result.get("session_id", session_id),
-            "history": result.get("history", []),
-            "message_count": result.get("message_count", 0)
+            "session_id": session_id,
+            "history": history,
+            "message_count": len(history)
         })
 
     except ImportError:
@@ -289,12 +295,15 @@ def handle_clear(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         brain = _get_brain_service()
+        if brain is None:
+            return _error_response(503, "Brain service not available")
+        
         result = brain.clear_history(session_id)
 
         return _make_response(200, {
             "success": True,
             "session_id": result.get("session_id", session_id),
-            "messages_deleted": result.get("messages_deleted", 0)
+            "messages_deleted": result.get("deleted", 0)
         })
 
     except ImportError:
@@ -312,6 +321,57 @@ def handle_options() -> Dict[str, Any]:
         Response with CORS headers.
     """
     return _make_response(200, {"success": True})
+
+
+def handle_brain_request(
+    method: str,
+    endpoint: str,
+    params: Optional[Dict[str, Any]] = None,
+    body: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Handle brain API requests from main.py.
+
+    This function provides a simplified interface for main.py to route
+    brain API requests to the appropriate handlers.
+
+    Args:
+        method: HTTP method (GET, POST, DELETE, OPTIONS).
+        endpoint: Endpoint name (consult, history, clear).
+        params: Query parameters.
+        body: Request body for POST requests.
+
+    Returns:
+        Dict with 'status' (int) and 'body' (dict) keys.
+    """
+    params = params or {}
+    body = body or {}
+
+    # Handle OPTIONS for CORS preflight
+    if method == "OPTIONS":
+        resp = handle_options()
+        return {"status": resp["statusCode"], "body": json.loads(resp["body"])}
+
+    # Route to appropriate handler based on endpoint
+    if endpoint == "consult":
+        if method == "POST":
+            resp = handle_consult(body, params)
+        else:
+            resp = _error_response(405, f"Method {method} not allowed")
+    elif endpoint == "history":
+        if method == "GET":
+            resp = handle_history(params)
+        else:
+            resp = _error_response(405, f"Method {method} not allowed")
+    elif endpoint == "clear":
+        if method == "DELETE":
+            resp = handle_clear(params)
+        else:
+            resp = _error_response(405, f"Method {method} not allowed")
+    else:
+        resp = _error_response(404, f"Unknown endpoint: {endpoint}")
+
+    return {"status": resp["statusCode"], "body": json.loads(resp["body"])}
 
 
 def route_request(
@@ -469,6 +529,8 @@ def create_http_handler():
 # =============================================================================
 
 __all__ = [
+    "BRAIN_AVAILABLE",
+    "handle_brain_request",
     "handle_consult",
     "handle_history",
     "handle_clear",
