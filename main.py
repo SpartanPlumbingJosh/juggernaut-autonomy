@@ -400,7 +400,7 @@ def auto_approve_timed_out_tasks():
     try:
         # Find tasks waiting for approval with old approval requests
         stale_query = """
-            SELECT t.id, t.title, t.task_type, t.priority, t.risk_level,
+            SELECT t.id, t.title, t.task_type, t.priority, a.risk_level,
                    a.id as approval_id, a.created_at as approval_created
             FROM governance_tasks t
             JOIN approvals a ON t.id = a.task_id
@@ -504,10 +504,11 @@ def handle_orphaned_waiting_approval_tasks():
                     execute_sql(f"""
                         INSERT INTO approvals (
                             task_id, worker_id, action_type, action_description,
-                            risk_level, decision, created_at
+                            action_data, risk_level, decision, created_at
                         ) VALUES (
                             '{task_id}', 'SYSTEM', 'task_execution',
                             'Auto-generated approval request for orphaned high-priority task',
+                            '{"task_id": "' || '{task_id}' || '", "auto_generated": true}',
                             '{priority}', 'pending', NOW()
                         )
                         ON CONFLICT DO NOTHING
