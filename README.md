@@ -2,6 +2,18 @@
 
 Autonomous revenue generation system. Target: $100M.
 
+## What It Does
+
+JUGGERNAUT is a self-operating business system where AI workers (Claude agents) autonomously claim and execute tasks from a central governance database. The system:
+
+- **Manages a task queue** where AI workers pick up pending work, claim it with unique IDs, and execute without human intervention
+- **Handles its own development** - workers create branches, write code, submit PRs, and merge after automated review
+- **Tracks revenue experiments** - tests different business approaches and measures results
+- **Coordinates multiple agents** - scales from single-worker execution to multi-agent collaboration
+- **Self-monitors** - logs all activity, tracks progress, and surfaces issues
+
+The goal is an AI system that can identify opportunities, build solutions, and generate revenue with minimal human oversight.
+
 ## Structure
 ```
 /core        - Database operations, logging, shared utilities
@@ -9,6 +21,8 @@ Autonomous revenue generation system. Target: $100M.
 /experiments - Revenue experiment definitions and tracking
 /api         - External API endpoints
 /docs        - Schema documentation, architecture decisions
+/orchestrator - Task coordination and worker management
+/services    - Business logic and integrations
 ```
 
 ## Quick Start
