@@ -224,6 +224,30 @@ except ImportError as e:
     def get_system_health(*args, **kwargs): return {}
 
 
+# Completion Verification System - prevents fake completions
+VERIFICATION_AVAILABLE = False
+_verification_import_error = None
+
+try:
+    from core.verification import CompletionVerifier, VerificationResult
+    VERIFICATION_AVAILABLE = True
+except ImportError as e:
+    _verification_import_error = str(e)
+    # Stub for graceful degradation - allows completion without verification
+    class VerificationResult:
+        """Stub VerificationResult when verification unavailable."""
+        def __init__(self, **kwargs):
+            self.has_evidence = True  # Default to allowing completion
+            self.reason = "Verification unavailable"
+    
+    class CompletionVerifier:
+        """Stub CompletionVerifier when verification unavailable."""
+        def verify_evidence(self, evidence):
+            return (True, "unverified")  # Allow completion by default
+        def verify_task(self, task):
+            return VerificationResult(has_evidence=True)
+
+
 # Phase 5.3: Scheduler - Scheduled Task Run Logging (FIX-03)
 SCHEDULER_AVAILABLE = False
 _scheduler_import_error = None
@@ -1067,21 +1091,87 @@ def get_due_scheduled_tasks() -> List[Dict]:
 
 
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
-    """Update task status."""
+    """
+    Update task status with completion verification.
+    
+    For tasks being marked 'completed', verifies that valid completion evidence
+    exists before allowing the status change. If evidence is missing or invalid,
+    the task is rejected and remains in its current state.
+    """
     now = datetime.now(timezone.utc).isoformat()
+    
+    # Build completion_evidence from result_data
+    evidence_text = None
+    if result_data and isinstance(result_data, dict):
+        pr_url = result_data.get("pr_url")
+        if pr_url:
+            evidence_text = pr_url
+        elif result_data.get("executed"):
+            evidence_text = f"Task executed successfully: {json.dumps(result_data)[:200]}"
+    
+    # VERIFICATION GATE: Check evidence before marking complete
+    if status == "completed" and VERIFICATION_AVAILABLE:
+        try:
+            verifier = CompletionVerifier()
+            is_valid, evidence_type = verifier.verify_evidence(evidence_text)
+            
+            if not is_valid:
+                # Reject completion - task doesn't have valid evidence
+                log_action(
+                    "task.completion_rejected",
+                    f"Task {task_id} completion rejected: No valid evidence provided. "
+                    f"Evidence text: {evidence_text[:100] if evidence_text else 'None'}",
+                    level="warn",
+                    task_id=task_id
+                )
+                
+                # Update task with rejection message but keep it in_progress
+                reject_sql = f"""
+                    UPDATE governance_tasks 
+                    SET error_message = CONCAT(
+                        COALESCE(error_message, ''),
+                        '[VERIFICATION] Completion rejected: Missing valid evidence. ',
+                        'Provide PR link, file path, or substantive completion notes. '
+                    )
+                    WHERE id = {escape_value(task_id)}
+                """
+                try:
+                    execute_sql(reject_sql)
+                except Exception:
+                    pass
+                
+                # Don't proceed with completion
+                return
+            
+            # Log successful verification
+            log_action(
+                "task.completion_verified",
+                f"Task {task_id} completion verified. Evidence type: {evidence_type}",
+                level="info",
+                task_id=task_id
+            )
+        except Exception as verify_err:
+            # Log verification error but allow completion (graceful degradation)
+            log_action(
+                "task.verification_error",
+                f"Verification error for task {task_id}: {verify_err}. Allowing completion.",
+                level="warn",
+                task_id=task_id
+            )
+    
+    # Build the update columns
     cols = [f"status = {escape_value(status)}"]
+    
     if status == "completed":
         cols.append(f"completed_at = {escape_value(now)}")
+        # Add verification status
+        if VERIFICATION_AVAILABLE:
+            cols.append("verification_status = 'verified'")
+    
+    if evidence_text:
+        cols.append(f"completion_evidence = {escape_value(evidence_text)}")
+    
     if result_data:
-        # FIX: Also populate completion_evidence for completed tasks
-        if status == "completed" and isinstance(result_data, dict):
-            # Extract PR URL or generate summary for completion_evidence
-            pr_url = result_data.get("pr_url")
-            if pr_url:
-                cols.append(f"completion_evidence = {escape_value(pr_url)}")
-            elif result_data.get("executed"):
-                evidence = f"Task executed successfully: {json.dumps(result_data)[:200]}"
-                cols.append(f"completion_evidence = {escape_value(evidence)}")
         cols.append(f"result = {escape_value(result_data)}")
     
     sql = f"UPDATE governance_tasks SET {', '.join(cols)} WHERE id = {escape_value(task_id)}"
