@@ -46,6 +46,41 @@ from core.notifications import (
     notify_engine_started
 )
 
+# GAP-03: RBAC Runtime Permission Enforcement
+RBAC_AVAILABLE = False
+_rbac_import_error = None
+
+try:
+    from core.rbac import (
+        check_permission,
+        PermissionResult,
+        PermissionDenied,
+        log_access_attempt,
+    )
+    RBAC_AVAILABLE = True
+except ImportError as e:
+    _rbac_import_error = str(e)
+    # Stub classes for graceful degradation
+    class PermissionResult:
+        """Stub PermissionResult for when RBAC is unavailable."""
+        def __init__(self, allowed: bool, reason: str, **kwargs):
+            self.allowed = allowed
+            self.reason = reason
+            self.worker_id = kwargs.get("worker_id")
+            self.action = kwargs.get("action")
+    
+    class PermissionDenied(Exception):
+        """Stub PermissionDenied exception."""
+        pass
+    
+    def check_permission(worker_id, action, resource=None, context=None):
+        """Stub check_permission when RBAC unavailable - falls back to simple check."""
+        return PermissionResult(allowed=True, reason="RBAC unavailable, allowing by default")
+    
+    def log_access_attempt(*args, **kwargs):
+        """Stub log_access_attempt when RBAC unavailable."""
+        return None
+
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
 EXPERIMENTS_AVAILABLE = False
 _experiments_import_error = None
@@ -91,8 +126,6 @@ try:
     EXEC_DASHBOARD_API_AVAILABLE = True
 except ImportError as e:
     _exec_dashboard_import_error = str(e)
-
-
 
 
 
@@ -702,6 +735,7 @@ def should_require_approval_for_risk(risk_score: float, risk_level: str) -> bool
 
 # ============================================================
 # PERMISSION CONTROL (Level 3: Permission/Scope Control)
+# GAP-03: Integrated with core/rbac.py for full RBAC enforcement
 # ============================================================
 
 def get_forbidden_actions() -> List[str]:
@@ -718,11 +752,46 @@ def get_forbidden_actions() -> List[str]:
 
 
 def is_action_allowed(action: str) -> Tuple[bool, str]:
-    """Check if an action is allowed for this worker."""
+    """
+    Check if an action is allowed for this worker.
+    
+    GAP-03: Now integrated with core/rbac.py check_permission() to:
+    1. Check role-based permissions (not just forbidden_actions)
+    2. Log all access attempts to access_audit_log
+    
+    Args:
+        action: The action to check (e.g., "task.database", "tool.slack")
+    
+    Returns:
+        Tuple of (allowed: bool, reason: str)
+    """
+    # GAP-03: Use RBAC check_permission if available
+    if RBAC_AVAILABLE:
+        result = check_permission(
+            worker_id=WORKER_ID,
+            action=action,
+            resource=None,
+            context={"source": "is_action_allowed", "check_type": "permission"}
+        )
+        return result.allowed, result.reason
+    
+    # Fallback to simple forbidden_actions check if RBAC unavailable
     forbidden = get_forbidden_actions()
     
     for pattern in forbidden:
         if pattern == action or action.startswith(pattern.rstrip("*")):
+            # Log denied access attempt even without RBAC
+            log_action(
+                "permission.denied",
+                f"Action '{action}' denied by forbidden_actions pattern '{pattern}'",
+                level="warn",
+                output_data={
+                    "action": action,
+                    "pattern": pattern,
+                    "worker_id": WORKER_ID,
+                    "rbac_available": False
+                }
+            )
             return False, f"Action '{action}' is forbidden by pattern '{pattern}'"
     
     return True, "Action allowed"
@@ -1337,7 +1406,7 @@ def get_registered_tools() -> Dict[str, Dict]:
 
 def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[bool, Any]:
     """Execute a registered tool."""
-    # Check permissions
+    # Check permissions using RBAC-integrated is_action_allowed
     allowed, reason = is_action_allowed(f"tool.{tool_name}")
     if not allowed:
         return False, reason
@@ -1565,7 +1634,7 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                  {"task_id": task.id, "risk_score": risk_score, "risk_level": risk_level},
                  confidence=confidence)
     
-    # Check permission
+    # Check permission using RBAC-integrated is_action_allowed
     allowed, reason = is_action_allowed(f"task.{task.task_type}")
     if not allowed:
         log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
@@ -2111,6 +2180,12 @@ def autonomy_loop():
     
     log_info("Autonomy loop starting", {"worker_id": WORKER_ID, "interval": LOOP_INTERVAL})
     
+    # GAP-03: Log RBAC framework status
+    if RBAC_AVAILABLE:
+        log_info("RBAC framework available - access_audit_log active", {"status": "enabled"})
+    elif _rbac_import_error:
+        log_action("rbac.unavailable", f"RBAC disabled: {_rbac_import_error}", level="warn")
+    
     # Log experiment framework status (deferred from import time)
     if EXPERIMENTS_AVAILABLE:
         log_info("Experiments framework available", {"status": "enabled"})
@@ -2335,6 +2410,7 @@ def autonomy_loop():
                 for task in tasks:
                     # Check permission BEFORE claiming (Level 3: Permission enforcement)
                     # This prevents claiming tasks that the worker is forbidden from executing
+                    # GAP-03: Now uses RBAC check_permission via is_action_allowed
                     allowed, reason = is_action_allowed(f"task.{task.task_type}")
                     if not allowed:
                         log_action("task.skipped", f"Task skipped (forbidden): {reason}", 
@@ -2565,6 +2641,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                 "database": "connected" if db_ok else "error",
                 "dry_run": DRY_RUN,
                 "loop_interval": LOOP_INTERVAL,
+                "rbac": RBAC_AVAILABLE,  # GAP-03: Report RBAC status
                 "dashboard_api": DASHBOARD_API_AVAILABLE,
                 "experiments": {
                     "available": EXPERIMENTS_AVAILABLE,
@@ -2796,12 +2873,15 @@ def handle_shutdown(signum, frame):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("JUGGERNAUT AUTONOMY ENGINE v1.1.0")
+    print("JUGGERNAUT AUTONOMY ENGINE v1.2.0")
     print("=" * 60)
     print(f"Worker ID: {WORKER_ID}")
     print(f"Loop Interval: {LOOP_INTERVAL} seconds")
     print(f"Dry Run Mode: {DRY_RUN}")
     print(f"Health Port: {PORT}")
+    print(f"RBAC: {'available' if RBAC_AVAILABLE else 'NOT AVAILABLE'}")  # GAP-03
+    if _rbac_import_error:
+        print(f"  RBAC import error: {_rbac_import_error}")
     print(f"Brain API: {'available' if BRAIN_API_AVAILABLE else 'NOT AVAILABLE'}")
     if _brain_api_import_error:
         print(f"  Brain import error: {_brain_api_import_error}")
@@ -2828,6 +2908,3 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
-
-
-
