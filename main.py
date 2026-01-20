@@ -2964,7 +2964,7 @@ def handle_shutdown(signum, frame):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("JUGGERNAUT AUTONOMY ENGINE v1.2.0")
+    print("JUGGERNAUT AUTONOMY ENGINE v1.3.0")
     print("=" * 60)
     print(f"Worker ID: {WORKER_ID}")
     print(f"Loop Interval: {LOOP_INTERVAL} seconds")
