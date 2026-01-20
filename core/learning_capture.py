@@ -425,6 +425,7 @@ def save_learning_to_db(
     worker_id: str,
     learning: Dict[str, Any],
     goal_id: Optional[str] = None,
+    source: Optional[str] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
     Save extracted learning to the learnings database table.
@@ -436,6 +437,7 @@ def save_learning_to_db(
         worker_id: ID of the worker that captured this learning
         learning: Learning dictionary from extract_learning_from_task
         goal_id: Optional goal ID if task was part of a goal
+        source: Source description for L2-02 compliance (e.g., "task_execution:code")
 
     Returns:
         Tuple of (success: bool, learning_id: Optional[str])
@@ -454,7 +456,12 @@ def save_learning_to_db(
         "is_validated",
         "created_at",
         "updated_at",
+        "source",
     ]
+
+    # Build source string if not provided
+    if source is None:
+        source = f"task_execution:{learning.get('details', {}).get('task_type', 'unknown')}"
 
     values = [
         escape_value_func(worker_id),
@@ -467,6 +474,7 @@ def save_learning_to_db(
         "FALSE",  # is_validated starts as false
         escape_value_func(now),
         escape_value_func(now),
+        escape_value_func(source),
     ]
 
     # Add optional goal_id
@@ -571,6 +579,9 @@ def capture_task_learning(
             worker_id=worker_id,
         )
 
+        # Build source string for L2-02 compliance
+        source_str = f"task_execution:{task_type}:{task_id}"
+
         # Save to database
         saved, learning_id = save_learning_to_db(
             execute_sql_func=execute_sql_func,
@@ -579,6 +590,7 @@ def capture_task_learning(
             worker_id=worker_id,
             learning=learning,
             goal_id=goal_id,
+            source=source_str,
         )
 
         if saved:
