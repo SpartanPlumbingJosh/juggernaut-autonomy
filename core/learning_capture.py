@@ -541,10 +541,6 @@ def save_learning_to_db(
     columns.append("evidence_task_ids")
     values.append(f"{escape_value_func([task_id])}::jsonb")
 
-    # FIX-11: Add source reference for L2-02 References and Sourcing
-    if learning.get("source"):
-        columns.append("source")
-        values.append(escape_value_func(learning["source"]))
 
     sql = f"""
         INSERT INTO learnings ({', '.join(columns)})
@@ -696,3 +692,4 @@ def capture_task_learning(
             error_data={"error": str(type_error)},
         )
         return False, None
+
