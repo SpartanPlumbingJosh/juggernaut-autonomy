@@ -4,6 +4,22 @@ version = "0.1.0"
 description = "Autonomous revenue generation system"
 requires-python = ">=3.11"
 
+[tool.ruff]
+line-length = 127
+target-version = "py311"
+exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
+
+[tool.ruff.lint]
+# Ignore common issues that can be cleaned up later
+# F401: unused imports
+# F841: unused local variables  
+# F541: f-string without placeholders
+# E701: multiple statements on one line
+ignore = ["F401", "F841", "F541", "E701"]
+
+# Keep E722 (bare except) as error - it is a real issue
+select = ["E", "F", "W"]
+
 [tool.flake8]
 max-line-length = 127
 exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
@@ -12,8 +28,7 @@ ignore = ["E501", "W503"]
 [tool.black]
 line-length = 127
 target-version = ["py311"]
-exclude = '''
-/(
+exclude = '/(
     \.git
     | __pycache__
     | venv
@@ -21,7 +36,7 @@ exclude = '''
     | build
     | dist
 )/
-'''
+'
 
 [tool.isort]
 profile = "black"
@@ -39,3 +54,4 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+
