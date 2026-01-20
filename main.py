@@ -405,7 +405,7 @@ def auto_approve_timed_out_tasks():
             FROM governance_tasks t
             JOIN approvals a ON t.id = a.task_id
             WHERE t.status = 'waiting_approval'
-              AND a.status = 'pending'
+              AND a.decision = 'pending'
               AND a.created_at < NOW() - INTERVAL '30 minutes'
             ORDER BY a.created_at ASC
             LIMIT 10
@@ -441,11 +441,10 @@ def auto_approve_timed_out_tasks():
                 try:
                     execute_sql(f"""
                         UPDATE approvals 
-                        SET status = 'approved', 
-                            decision = 'auto_approved',
+                        SET decision = 'auto_approved',
                             decided_by = 'SYSTEM_TIMEOUT',
                             decided_at = NOW(),
-                            notes = 'Auto-approved after 30 minute timeout (low/medium risk)'
+                            decision_notes = 'Auto-approved after 30 minute timeout (low/medium risk)'
                         WHERE id = '{approval_id}'
                     """)
                     
@@ -469,6 +468,77 @@ def auto_approve_timed_out_tasks():
         log_error(f"Auto-approval timeout check failed: {e}")
         return {"error": str(e)}
 
+
+
+def handle_orphaned_waiting_approval_tasks():
+    """
+    Handle tasks stuck in waiting_approval status that don't have approval records.
+    These are typically tasks where the approval record was never created.
+    Low/medium priority tasks get reset to pending.
+    High/critical priority tasks get an approval record created.
+    """
+    try:
+        # Find orphaned tasks (waiting_approval but no approval record)
+        orphan_query = """
+            SELECT t.id, t.title, t.task_type, t.priority, t.updated_at
+            FROM governance_tasks t
+            LEFT JOIN approvals a ON t.id = a.task_id
+            WHERE t.status = 'waiting_approval'
+              AND a.id IS NULL
+              AND t.updated_at < NOW() - INTERVAL '15 minutes'
+            ORDER BY t.updated_at ASC
+            LIMIT 10
+        """
+        
+        result = execute_sql(orphan_query)
+        reset = []
+        created_approvals = []
+        
+        for row in result.get("rows", []):
+            task_id = row["id"]
+            priority = row.get("priority", "medium")
+            
+            if priority in ("high", "critical"):
+                # Create an approval record for high-priority tasks
+                try:
+                    execute_sql(f"""
+                        INSERT INTO approvals (
+                            task_id, worker_id, action_type, action_description,
+                            risk_level, decision, created_at
+                        ) VALUES (
+                            '{task_id}', 'SYSTEM', 'task_execution',
+                            'Auto-generated approval request for orphaned high-priority task',
+                            '{priority}', 'pending', NOW()
+                        )
+                        ON CONFLICT DO NOTHING
+                    """)
+                    created_approvals.append(task_id)
+                    log_action("approval.orphan_created",
+                              f"Created approval record for orphaned task {task_id}",
+                              task_id=task_id)
+                except Exception as e:
+                    log_error(f"Failed to create approval for orphaned task {task_id}: {e}")
+            else:
+                # Reset low/medium priority tasks to pending
+                try:
+                    execute_sql(f"""
+                        UPDATE governance_tasks
+                        SET status = 'pending',
+                            updated_at = NOW()
+                        WHERE id = '{task_id}'
+                    """)
+                    reset.append(task_id)
+                    log_action("task.orphan_reset",
+                              f"Reset orphaned task {task_id} to pending",
+                              task_id=task_id)
+                except Exception as e:
+                    log_error(f"Failed to reset orphaned task {task_id}: {e}")
+        
+        return {"reset": reset, "created_approvals": created_approvals}
+        
+    except Exception as e:
+        log_error(f"Orphaned task handler failed: {e}")
+        return {"error": str(e)}
 
 def sanitize_payload(payload: Dict, max_value_length: int = 1000) -> Dict:
     """
@@ -2581,6 +2651,38 @@ def autonomy_loop():
                     )
             except Exception as esc_err:
                 log_error(f"Escalation timeout check failed: {esc_err}")
+
+        # L5-WIRE-05: Auto-approve timed out approval requests
+        try:
+            approval_result = auto_approve_timed_out_tasks()
+            if approval_result.get("auto_approved"):
+                for task_id in approval_result["auto_approved"]:
+                    log_action("approval.auto_timeout_processed",
+                              f"Task auto-approved after timeout",
+                              task_id=task_id)
+            if approval_result.get("escalated"):
+                for task_id in approval_result["escalated"]:
+                    log_action("approval.timeout_escalated",
+                              f"High-risk task escalated due to approval timeout",
+                              task_id=task_id)
+        except Exception as approval_err:
+            log_error(f"Approval timeout check failed: {approval_err}")
+        
+        # L5-WIRE-06: Handle orphaned waiting_approval tasks
+        try:
+            orphan_result = handle_orphaned_waiting_approval_tasks()
+            if orphan_result.get("reset"):
+                for task_id in orphan_result["reset"]:
+                    log_action("task.orphan_processed",
+                              f"Orphaned task reset to pending",
+                              task_id=task_id)
+            if orphan_result.get("created_approvals"):
+                for task_id in orphan_result["created_approvals"]:
+                    log_action("approval.orphan_created_processed",
+                              f"Created approval for orphaned high-priority task",
+                              task_id=task_id)
+        except Exception as orphan_err:
+            log_error(f"Orphaned task handler failed: {orphan_err}")
 
         # L5-WIRE-04: Create escalations for stuck tasks (in_progress > 30 min)
         try:
