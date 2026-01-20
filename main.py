@@ -936,10 +936,10 @@ def claim_task(task_id: str) -> bool:
         UPDATE governance_tasks 
         SET assigned_worker = {escape_value(WORKER_ID)}, 
             status = 'in_progress',
-            started_at = {escape_value(now)}
+            started_at = COALESCE(started_at, {escape_value(now)})
         WHERE id = {escape_value(task_id)}
         AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
-        AND status = 'pending'
+        AND status IN ('pending', 'in_progress')
         RETURNING id
     """
     try:
