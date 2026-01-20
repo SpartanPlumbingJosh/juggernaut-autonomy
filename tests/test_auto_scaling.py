@@ -949,10 +949,11 @@ class TestSpawnWorker:
         mock_response.raise_for_status = MagicMock()
         mock_http_client.post.return_value = mock_response
 
-        worker_id = auto_scaler.spawn_worker()
+        result = auto_scaler.spawn_worker()
 
-        assert worker_id is not None
-        assert worker_id.startswith("claude-worker-")
+        assert result is not None
+        assert result.worker_id is not None
+        assert result.worker_id.startswith("claude-worker-")
         assert auto_scaler._last_scale_up is not None
 
     def test_spawn_worker_failure(
@@ -964,9 +965,10 @@ class TestSpawnWorker:
         mock_response.raise_for_status = MagicMock()
         mock_http_client.post.return_value = mock_response
 
-        worker_id = auto_scaler.spawn_worker()
+        result = auto_scaler.spawn_worker()
 
-        assert worker_id is None
+        assert result is not None
+        assert result.success is False
 
     def test_spawn_worker_with_custom_type(
         self, auto_scaler: AutoScaler, mock_http_client: MagicMock
@@ -977,10 +979,11 @@ class TestSpawnWorker:
         mock_response.raise_for_status = MagicMock()
         mock_http_client.post.return_value = mock_response
 
-        worker_id = auto_scaler.spawn_worker(worker_type="custom-worker")
+        result = auto_scaler.spawn_worker(worker_type="custom-worker")
 
-        assert worker_id is not None
-        assert worker_id.startswith("custom-worker-")
+        assert result is not None
+        assert result.worker_id is not None
+        assert result.worker_id.startswith("custom-worker-")
 
 
 class TestTerminateWorker:
