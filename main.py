@@ -2313,6 +2313,34 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
         elif task.task_type == "code":
             # Autonomous code generation handler (PR #185)
             if CODE_TASK_AVAILABLE:
+                # Log tool execution start to tool_executions table
+                tool_exec_id = None
+                code_start_time = time.time()
+                try:
+                    tool_params = {
+                        "task_title": task.title,
+                        "task_description": task.description[:500] if task.description else "",
+                        "auto_merge": False
+                    }
+                    now = datetime.now(timezone.utc).isoformat()
+                    sql = f"""
+                        INSERT INTO tool_executions (
+                            tool_name, params, status, worker_id, task_id, started_at
+                        ) VALUES (
+                            {escape_value('code_task_executor')}, 
+                            {escape_value(tool_params)}, 
+                            'running', 
+                            {escape_value(WORKER_ID)},
+                            {escape_value(str(task.id))},
+                            {escape_value(now)}
+                        ) RETURNING id
+                    """
+                    exec_result = execute_sql(sql)
+                    tool_exec_id = exec_result.get("rows", [{}])[0].get("id")
+                except Exception as log_err:
+                    log_action("tool_exec.log_failed", f"Failed to log tool execution start: {log_err}",
+                              level="warn", task_id=task.id)
+                
                 try:
                     code_result = execute_code_task(
                         task_id=task.id,
@@ -2324,6 +2352,26 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                     )
                     result = code_result
                     task_succeeded = code_result.get("success", False)
+                    
+                    # Update tool_executions with result
+                    if tool_exec_id:
+                        try:
+                            code_duration_ms = int((time.time() - code_start_time) * 1000)
+                            now = datetime.now(timezone.utc).isoformat()
+                            status = 'completed' if task_succeeded else 'failed'
+                            sql = f"""
+                                UPDATE tool_executions SET
+                                    status = {escape_value(status)},
+                                    result_data = {escape_value(code_result)},
+                                    completed_at = {escape_value(now)},
+                                    duration_ms = {code_duration_ms}
+                                WHERE id = {escape_value(tool_exec_id)}
+                            """
+                            execute_sql(sql)
+                        except Exception as upd_err:
+                            log_action("tool_exec.update_failed", f"Failed to update tool execution: {upd_err}",
+                                      level="warn", task_id=task.id)
+                    
                     if task_succeeded:
                         log_action("code_task.completed",
                                   f"Code task created PR #{code_result.get('pr_number')}",
@@ -2335,6 +2383,25 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                 except Exception as code_err:
                     result = {"error": str(code_err), "task_type": "code"}
                     task_succeeded = False
+                    
+                    # Update tool_executions with error
+                    if tool_exec_id:
+                        try:
+                            code_duration_ms = int((time.time() - code_start_time) * 1000)
+                            now = datetime.now(timezone.utc).isoformat()
+                            sql = f"""
+                                UPDATE tool_executions SET
+                                    status = 'failed',
+                                    result_data = {escape_value(result)},
+                                    error_message = {escape_value(str(code_err))},
+                                    completed_at = {escape_value(now)},
+                                    duration_ms = {code_duration_ms}
+                                WHERE id = {escape_value(tool_exec_id)}
+                            """
+                            execute_sql(sql)
+                        except Exception:
+                            pass  # Don't fail if we can't update the record
+                    
                     log_action("code_task.exception", f"Code task exception: {str(code_err)}",
                               level="error", task_id=task.id, error_data=result)
             else:
@@ -3277,4 +3344,5 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
 
