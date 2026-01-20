@@ -2760,6 +2760,9 @@ if __name__ == "__main__":
     print(f"Loop Interval: {LOOP_INTERVAL} seconds")
     print(f"Dry Run Mode: {DRY_RUN}")
     print(f"Health Port: {PORT}")
+    print(f"Brain API: {'available' if BRAIN_API_AVAILABLE else 'NOT AVAILABLE'}")
+    if _brain_api_import_error:
+        print(f"  Brain import error: {_brain_api_import_error}")
     print("=" * 60)
     
     # Register signal handlers
