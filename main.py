@@ -501,6 +501,7 @@ def handle_orphaned_waiting_approval_tasks():
             if priority in ("high", "critical"):
                 # Create an approval record for high-priority tasks
                 try:
+                    action_data = {"task_id": task_id, "auto_generated": True}
                     execute_sql(f"""
                         INSERT INTO approvals (
                             task_id, worker_id, action_type, action_description,
@@ -508,7 +509,7 @@ def handle_orphaned_waiting_approval_tasks():
                         ) VALUES (
                             '{task_id}', 'SYSTEM', 'task_execution',
                             'Auto-generated approval request for orphaned high-priority task',
-                            '{"task_id": "' || '{task_id}' || '", "auto_generated": true}',
+                            {escape_value(action_data)},
                             '{priority}', 'pending', NOW()
                         )
                         ON CONFLICT DO NOTHING
