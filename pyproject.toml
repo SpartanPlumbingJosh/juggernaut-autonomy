@@ -13,14 +13,14 @@ exclude = [".git", "__pycache__", "venv", ".venv", "build", "dist"]
 # Temporarily ignore all style issues to unblock CI tests
 # These can be cleaned up in follow-up PRs
 ignore = [
-    "E501",  # line too long
-    "E701",  # multiple statements on one line
-    "E722",  # bare except
-    "F401",  # unused imports
-    "F541",  # f-string without placeholders
-    "F841",  # unused local variables
-    "W291",  # trailing whitespace
-    "W293",  # blank line contains whitespace
+    "E501",
+    "E701",
+    "E722",
+    "F401",
+    "F541",
+    "F841",
+    "W291",
+    "W293",
 ]
 select = ["E", "F", "W"]
 
@@ -32,16 +32,6 @@ ignore = ["E501", "W503"]
 [tool.black]
 line-length = 127
 target-version = ["py311"]
-exclude = '''
-/(
-    \.git
-    | __pycache__
-    | venv
-    | \.venv
-    | build
-    | dist
-)/
-'''
 
 [tool.isort]
 profile = "black"
