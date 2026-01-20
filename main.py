@@ -83,6 +83,16 @@ try:
 except ImportError as e:
     _dashboard_import_error = str(e)
 
+# Executive Dashboard API (FIX-10)
+EXEC_DASHBOARD_API_AVAILABLE = False
+_exec_dashboard_import_error = None
+try:
+    from api.executive_dashboard import get_executive_dashboard
+    EXEC_DASHBOARD_API_AVAILABLE = True
+except ImportError as e:
+    _exec_dashboard_import_error = str(e)
+
+
 
 
 
@@ -2541,6 +2551,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                     "/", "/health",
                     "/api/dashboard/stats",
                     "/api/dashboard/opportunities",
+                    "/api/executive",
                     "/api/dashboard/activity",
                     "/api/dashboard/revenue",
                     "/api/dashboard/workers",
@@ -2553,6 +2564,27 @@ class HealthHandler(BaseHTTPRequestHandler):
             }).encode())
         
         # Dashboard API endpoints
+
+        # Executive Dashboard API (FIX-10)
+        elif path == "/api/executive":
+            if not EXEC_DASHBOARD_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Executive Dashboard API not available: {_exec_dashboard_import_error}"
+                }).encode())
+                return
+            
+            exec_data = get_executive_dashboard()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(exec_data, default=str).encode())
+
         elif path.startswith("/api/dashboard/"):
             if not DASHBOARD_API_AVAILABLE:
                 self.send_response(503)
