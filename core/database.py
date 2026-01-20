@@ -153,6 +153,7 @@ def log_execution(
     duration_ms: int = None,
     tokens_used: int = None,
     cost_cents: int = None,
+    details: Dict = None,
     source: str = "system"
 ) -> Optional[str]:
     """
@@ -171,6 +172,7 @@ def log_execution(
         duration_ms: How long the action took
         tokens_used: AI tokens consumed
         cost_cents: Cost in cents
+        details: Additional details dict (merged into output_data)
         source: Source identifier (e.g., 'claude_main', 'api')
     
     Returns:
@@ -193,6 +195,14 @@ def log_execution(
         data["input_data"] = input_data
     if output_data:
         data["output_data"] = output_data
+    if details:
+        # Merge details into output_data or create new output_data
+        if "output_data" not in data:
+            data["output_data"] = {}
+        if isinstance(data["output_data"], dict):
+            data["output_data"]["details"] = details
+        else:
+            data["output_data"] = {"original": data["output_data"], "details": details}
     if error_data:
         data["error_data"] = error_data
     if duration_ms is not None:
