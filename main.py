@@ -119,6 +119,7 @@ try:
         orchestrator_assign_task,
         log_coordination_event,
         check_escalation_timeouts,
+        update_worker_heartbeat,
     )
     ORCHESTRATION_AVAILABLE = True
 except ImportError as e:
@@ -128,6 +129,7 @@ except ImportError as e:
     def orchestrator_assign_task(*args, **kwargs): return {"success": False, "error": "orchestration not available"}
     def log_coordination_event(*args, **kwargs): return None
     def check_escalation_timeouts(*args, **kwargs): return []
+    def update_worker_heartbeat(*args, **kwargs): return False
 
 
 # Phase 5: Proactive Systems - Opportunity Scanner (wired up by HIGH-05)
@@ -2495,6 +2497,16 @@ def autonomy_loop():
             now = datetime.now(timezone.utc).isoformat()
             sql = f"UPDATE worker_registry SET last_heartbeat = {escape_value(now)} WHERE worker_id = {escape_value(WORKER_ID)}"
             execute_sql(sql)
+            
+            # Update heartbeats for specialist workers (ANALYST, STRATEGIST, EXECUTOR)
+            # These are logical workers handled by this engine, not separate processes
+            # GAP-04: Fix stale heartbeats for specialist workers
+            if ORCHESTRATION_AVAILABLE:
+                for specialist in ["ANALYST", "STRATEGIST", "EXECUTOR"]:
+                    try:
+                        update_worker_heartbeat(specialist)
+                    except Exception as hb_err:
+                        log_error(f"Failed to update {specialist} heartbeat: {hb_err}")
             
         except Exception as e:
             log_error(f"Loop error: {str(e)}", {"traceback": traceback.format_exc()[:500]})
