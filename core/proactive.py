@@ -227,7 +227,8 @@ def identify_opportunity(
     customer_name: Optional[str] = None,
     customer_contact: Optional[Dict] = None,
     metadata: Optional[Dict] = None,
-    created_by: str = "SCANNER"
+    created_by: str = "SCANNER",
+    source_description: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create a new identified opportunity.
@@ -243,6 +244,7 @@ def identify_opportunity(
         customer_contact: Contact details as JSON
         metadata: Additional data
         created_by: Who/what identified this opportunity
+        source_description: L2-02 compliant source reference (e.g., "market_scan:google_trends")
         
     Returns:
         Dict with opportunity_id and details
