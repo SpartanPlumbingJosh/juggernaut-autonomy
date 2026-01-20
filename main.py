@@ -314,6 +314,16 @@ except ImportError as e:
         return 0, []
 
 
+# Code Task Executor - Autonomous code generation (PR #185)
+CODE_TASK_AVAILABLE = False
+_code_task_import_error = None
+
+try:
+    from src.task_executor_code import execute_code_task
+    CODE_TASK_AVAILABLE = True
+except ImportError as e:
+    _code_task_import_error = str(e)
+
 
 # ============================================================
 # CONFIGURATION
@@ -2054,6 +2064,39 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
                 }
                 task_succeeded = False
 
+        elif task.task_type == "code":
+            # Autonomous code generation handler (PR #185)
+            if CODE_TASK_AVAILABLE:
+                try:
+                    code_result = execute_code_task(
+                        task_id=task.id,
+                        task_title=task.title,
+                        task_description=task.description or "",
+                        task_payload=task.payload or {},
+                        log_action_func=log_action,
+                        auto_merge=False  # Set True to auto-merge PRs
+                    )
+                    result = code_result
+                    task_succeeded = code_result.get("success", False)
+                    if task_succeeded:
+                        log_action("code_task.completed",
+                                  f"Code task created PR #{code_result.get('pr_number')}",
+                                  task_id=task.id, output_data=code_result)
+                    else:
+                        log_action("code_task.failed",
+                                  f"Code task failed: {code_result.get('error', 'Unknown error')}",
+                                  level="error", task_id=task.id, error_data=code_result)
+                except Exception as code_err:
+                    result = {"error": str(code_err), "task_type": "code"}
+                    task_succeeded = False
+                    log_action("code_task.exception", f"Code task exception: {str(code_err)}",
+                              level="error", task_id=task.id, error_data=result)
+            else:
+                result = {"error": "Code task executor not available", "import_error": _code_task_import_error}
+                task_succeeded = False
+                log_action("code_task.unavailable", "Code task executor not available",
+                          level="warn", task_id=task.id, error_data=result)
+
         else:
             # Unknown task type - requires human guidance
             # Set to waiting_approval so a human can review and provide instructions
@@ -2956,3 +2999,4 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
