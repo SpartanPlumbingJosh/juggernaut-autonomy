@@ -421,10 +421,11 @@ def escape_value(value: Any) -> str:
     elif isinstance(value, (int, float)):
         return str(value)
     elif isinstance(value, (dict, list)):
-        # JSON serialization with proper escaping
-        json_str = json.dumps(value)
-        # Escape single quotes, backslashes, and null bytes
-        escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
+        # JSON serialization - json.dumps() handles escaping properly
+        json_str = json.dumps(value, ensure_ascii=False)
+        # Only escape single quotes for SQL and remove null bytes
+        # Do NOT double-escape backslashes - json.dumps() already escapes correctly
+        escaped = json_str.replace("'", "''").replace("\x00", "")
         return f"'{escaped}'"
     else:
         # String escaping: handle quotes, backslashes, null bytes
@@ -2786,5 +2787,6 @@ if __name__ == "__main__":
         print("\nInterrupted. Shutting down...")
     
     print("Goodbye.")
+
 
 
