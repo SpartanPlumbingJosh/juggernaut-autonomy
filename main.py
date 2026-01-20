@@ -951,6 +951,44 @@ def update_resource_usage(task_id: str, minutes_used: int) -> bool:
         return False
 
 
+def release_allocation(task_id: str) -> bool:
+    """
+    Release a task's resource allocation when the task fails.
+    
+    Called when a task fails to free up allocated resources and
+    mark the allocation as released.
+    
+    Args:
+        task_id: The task that failed.
+        
+    Returns:
+        True if release succeeded.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    
+    sql = f"""
+        UPDATE resource_allocations
+        SET status = 'released',
+            updated_at = {escape_value(now)}
+        WHERE task_id = {escape_value(task_id)}
+          AND status = 'active'
+    """
+    
+    try:
+        result = execute_sql(sql)
+        updated = result.get("rowCount", 0) > 0
+        if updated:
+            log_action(
+                "resource.released",
+                f"Released resource allocation for failed task: {task_id}",
+                level="info",
+                task_id=task_id
+            )
+        return updated
+    except Exception:
+        return False
+
+
 # ============================================================
 # APPROVAL WORKFLOW (Level 3: Human-in-the-Loop)
 # Split into read-only check and creation functions
@@ -2026,6 +2064,9 @@ def execute_task(task: Task, dry_run: bool = False) -> Tuple[bool, Dict]:
     except Exception as e:
         duration_ms = int((time.time() - start_time) * 1000)
         error_str = str(e)
+
+        # FIX-14: Release resource allocation on task failure
+        release_allocation(task.id)
         
         # Get retry count (may be string from DB, so cast safely)
         sql = f"SELECT COALESCE(attempt_count, 0) as retries FROM governance_tasks WHERE id = {escape_value(task.id)}"
