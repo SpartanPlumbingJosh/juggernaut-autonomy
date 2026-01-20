@@ -299,6 +299,22 @@ except ImportError as e:
     def create_auto_scaler(*args, **kwargs): return None
 
 
+# Phase 7: Stale Task Cleanup (CRITICAL-03c)
+STALE_CLEANUP_AVAILABLE = False
+_stale_cleanup_import_error = None
+
+try:
+    from core.stale_cleanup import reset_stale_tasks
+    STALE_CLEANUP_AVAILABLE = True
+except ImportError as e:
+    _stale_cleanup_import_error = str(e)
+    # Stub function for graceful degradation
+    def reset_stale_tasks(*args, **kwargs):
+        """Stub: stale_cleanup module not available."""
+        return 0, []
+
+
+
 # ============================================================
 # CONFIGURATION
 # ============================================================
@@ -2380,6 +2396,26 @@ def autonomy_loop():
             log_error(f"Stuck task escalation check failed: {stuck_err}")
 
         try:
+            # -1. Reset stale tasks at start of each loop (CRITICAL-03c)
+            if STALE_CLEANUP_AVAILABLE:
+                try:
+                    reset_count, reset_tasks = reset_stale_tasks()
+                    if reset_count > 0:
+                        log_action(
+                            "stale_cleanup",
+                            f"Reset {reset_count} stale tasks",
+                            output_data={
+                                "reset_count": reset_count,
+                                "task_ids": [t.get("id") for t in reset_tasks]
+                            }
+                        )
+                except Exception as cleanup_err:
+                    log_action(
+                        "stale_cleanup.error",
+                        f"Stale cleanup failed: {cleanup_err}",
+                        level="warn"
+                    )
+            
             # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
             approved_tasks = poll_approved_tasks(limit=3)
             if approved_tasks:
