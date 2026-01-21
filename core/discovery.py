@@ -457,11 +457,67 @@ def create_experiment_from_opportunity(
         "max_hours_invested": 20
     }
     
-    result = query_db(
-        """
-        INSERT INTO experiments (
-            id, name, experiment_type, hypothesis, 
-            success_criteria, status, budget_allocated,
-            metadata, created_at
-        ) VALUES (
-            $1, $2, 'revenue_generation', $3
+    # Build metadata
+    metadata = {
+        "discovery_id": discovery_id,
+        "opportunity": opportunity,
+        "first_step": first_step
+    }
+    
+    try:
+        result = query_db(
+            """
+            INSERT INTO experiments (
+                id, name, experiment_type, hypothesis, 
+                success_criteria, status, budget_allocated,
+                metadata, created_at
+            ) VALUES (
+                $1, $2, 'revenue_generation', $3,
+                $4, 'proposed', $5,
+                $6, NOW()
+            )
+            RETURNING id
+            """,
+            [
+                experiment_id,
+                name,
+                hypothesis,
+                json.dumps(success_criteria),
+                capital,
+                json.dumps(metadata)
+            ]
+        )
+        
+        log_execution(
+            worker_id="DISCOVERY_AGENT",
+            action="discovery.experiment_created",
+            message=f"Created experiment {experiment_id} from opportunity: {name}",
+            output_data={
+                "experiment_id": experiment_id,
+                "discovery_id": discovery_id,
+                "opportunity_name": name
+            }
+        )
+        
+        return {
+            "success": True,
+            "experiment_id": experiment_id,
+            "name": name,
+            "hypothesis": hypothesis,
+            "success_criteria": success_criteria
+        }
+        
+    except Exception as e:
+        log_execution(
+            worker_id="DISCOVERY_AGENT",
+            action="discovery.experiment_failed",
+            message=f"Failed to create experiment from opportunity: {name}",
+            level="error",
+            error_data={"error": str(e), "opportunity": name}
+        )
+        
+        return {
+            "success": False,
+            "error": str(e),
+            "opportunity_name": name
+        }
