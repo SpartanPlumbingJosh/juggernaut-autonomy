@@ -287,7 +287,12 @@ class EvaluationDispatcher:
             logger.error("Score out of range [0, 1]: %s", score)
             raise ValueError("Score must be within [0, 1]")
 
-        threshold = float(request.payload.get("threshold", DEFAULT_QUERY_SCORE_THRESHOLD))
+        try:
+            threshold = float(request.payload.get("threshold", DEFAULT_QUERY_SCORE_THRESHOLD))
+        except (TypeError, ValueError) as exc:
+            logger.error("Invalid threshold type for scoring evaluation: %s", exc)
+            raise ValueError("Threshold must be a numeric value") from exc
+
         passed = score >= threshold
         details: Dict[str, Any] = {
             "threshold": threshold,
@@ -439,6 +444,20 @@ class EvaluationDispatcherTests(unittest.TestCase):
         self.assertEqual(result.eval_type, EVAL_TYPE_QUERY)
         self.assertIn("threshold", result.details)
         self.assertIn("overlap_tokens", result.details)
+
+    def test_scoring_invalid_threshold_raises_value_error(self) -> None:
+        """Invalid threshold type raises a clear ValueError."""
+        request = EvaluationRequest(
+            eval_type=EVAL_TYPE_SCORING,
+            payload={"score": 0.7, "threshold": "invalid"},
+            experiment_id="exp-score-invalid-threshold",
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            self.dispatcher.evaluate(request)
+
+        message = str(ctx.exception)
+        self.assertIn("Threshold must be a numeric value", message)
 
 
 if __name__ == "__main__":
