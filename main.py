@@ -81,6 +81,39 @@ except ImportError as e:
         """Stub log_access_attempt when RBAC unavailable."""
         return None
 
+# VERCHAIN-02: Stage Transition Enforcement
+STAGE_TRANSITIONS_AVAILABLE = False
+_stage_transitions_import_error = None
+
+try:
+    from core.stage_transitions import (
+        validate_stage_transition,
+        transition_stage,
+        get_task_stage,
+        get_valid_next_stages,
+        can_complete_task,
+        sync_status_to_stage,
+        TransitionResult,
+    )
+    STAGE_TRANSITIONS_AVAILABLE = True
+except ImportError as e:
+    _stage_transitions_import_error = str(e)
+    # Stub functions for graceful degradation
+    def validate_stage_transition(task_id, new_stage, evidence=None):
+        return type('TransitionResult', (), {'allowed': True, 'reason': 'Module unavailable'})()
+    def transition_stage(task_id, new_stage, evidence=None, verified_by=None):
+        return type('TransitionResult', (), {'allowed': True, 'reason': 'Module unavailable'})()
+    def get_task_stage(task_id):
+        return None
+    def get_valid_next_stages(task_id):
+        return []
+    def can_complete_task(task_id):
+        return True, "Module unavailable"
+    def sync_status_to_stage(task_id, status):
+        return None
+    class TransitionResult:
+        pass
+
 # Phase 4: Experimentation Framework (wired up by HIGH-06)
 EXPERIMENTS_AVAILABLE = False
 _experiments_import_error = None
@@ -1177,6 +1210,18 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
     sql = f"UPDATE governance_tasks SET {', '.join(cols)} WHERE id = {escape_value(task_id)}"
     try:
         execute_sql(sql)
+        
+        # VERCHAIN-02: Sync status to stage for stage state machine enforcement
+        if STAGE_TRANSITIONS_AVAILABLE:
+            try:
+                sync_status_to_stage(task_id, status)
+            except Exception as stage_err:
+                log_action(
+                    "task.stage_sync_error",
+                    f"Failed to sync stage for task {task_id}: {stage_err}",
+                    level="warn",
+                    task_id=task_id
+                )
     except Exception as e:
         log_error(f"Failed to update task {task_id}: {e}")
 
