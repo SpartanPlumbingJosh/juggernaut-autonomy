@@ -1,8 +1,9 @@
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence
 
-from wire.core.conflict_manager import ConflictManager
+from core.conflict_manager import ConflictManager
 
 # Constants
 DEFAULT_MAX_CONCURRENT_TASKS: int = 8
@@ -52,7 +53,7 @@ class TaskResult:
 class MultiAgentExecutor:
     """Executes tasks for multiple agents with L5 conflict detection and resolution.
 
-    This executor integrates with the `wire.core.conflict_manager.ConflictManager`
+    This executor integrates with the `core.conflict_manager.ConflictManager`
     to provide Level 5 multi-agent conflict detection and resolution before
     executing tasks.
     """
@@ -79,7 +80,7 @@ class MultiAgentExecutor:
     def _apply_conflict_resolution(self, tasks: Sequence[Task]) -> List[Task]:
         """Detects and resolves conflicts among a collection of tasks.
 
-        This method wires into the `wire.core.conflict_manager.ConflictManager`
+        This method wires into the `core.conflict_manager.ConflictManager`
         by calling its conflict detection and resolution methods. It is
         intentionally defensive to support different underlying implementations
         of the conflict manager.
@@ -212,7 +213,7 @@ class MultiAgentExecutor:
 
         This method performs:
           1. Conflict detection and resolution using ConflictManager.
-          2. Execution of the resulting, conflict-free task set.
+          2. Concurrent execution of the resulting, conflict-free task set.
 
         Args:
             tasks: Iterable of tasks to run.
@@ -229,11 +230,30 @@ class MultiAgentExecutor:
         # Step 1: Detect and resolve conflicts with the ConflictManager.
         resolved_tasks: List[Task] = self._apply_conflict_resolution(original_tasks)
 
-        # Step 2: Execute resolved tasks.
+        # Step 2: Execute resolved tasks concurrently using ThreadPoolExecutor.
         results: List[TaskResult] = []
-        for task in resolved_tasks:
-            result = self.execute_task(task)
-            results.append(result)
+        with ThreadPoolExecutor(max_workers=self.max_concurrent_tasks) as executor:
+            future_to_task = {
+                executor.submit(self.execute_task, task): task
+                for task in resolved_tasks
+            }
+            for future in as_completed(future_to_task):
+                task = future_to_task[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                except Exception as exc:
+                    logger.exception(
+                        "Task %s raised an exception: %s", task.task_id, exc
+                    )
+                    results.append(
+                        TaskResult(
+                            task_id=task.task_id,
+                            agent_id=task.agent_id,
+                            success=False,
+                            error=str(exc),
+                        )
+                    )
 
         logger.info(
             "Multi-agent execution finished; %d results produced", len(results)
@@ -257,7 +277,7 @@ def configure_logging(level: int = DEFAULT_LOG_LEVEL) -> None:
 def main() -> None:
     """Entry point for running a sample multi-agent execution with conflict handling.
 
-    This demonstrates wiring the `wire.core.conflict_manager.ConflictManager`
+    This demonstrates wiring the `core.conflict_manager.ConflictManager`
     into the main execution path to enable L5 multi-agent conflict resolution.
     """
     configure_logging()
@@ -268,7 +288,7 @@ def main() -> None:
             task_id="task-1",
             agent_id="agent-A",
             payload={"operation": "read", "target": "resource-1"},
-            priority  = 1,
+            priority=1,
             resources=["resource-1"],
         ),
         Task(
