@@ -19,7 +19,7 @@ Migrate the dashboard API from Vercel → Railway for:
 ## Architecture
 
 ### Before
-```
+```text
 Dashboard Frontend (Vercel) 
     ↓
 Dashboard API (Vercel Serverless) ← $65/month, timeouts, cold starts
@@ -28,7 +28,7 @@ Neon Database
 ```
 
 ### After
-```
+```text
 Dashboard Frontend (Vercel) 
     ↓
 Dashboard API (Railway FastAPI) ← $5/month, always-on, fast
@@ -50,10 +50,12 @@ Neon Database
 The `juggernaut-dashboard-api` service needs these environment variables:
 
 ```bash
-DATABASE_URL=postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require
+DATABASE_URL=postgresql://<username>:<password>@<host>/<database>?sslmode=require
 
 DASHBOARD_API_SECRET=<generate a secret key>
 ```
+
+**Note:** Get the actual DATABASE_URL from your Neon dashboard or environment configuration. Never commit real credentials to git.
 
 Generate the API secret:
 ```bash
