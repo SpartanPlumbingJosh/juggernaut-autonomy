@@ -84,17 +84,19 @@ class TestL1BasicResponse:
         test_id = generate_unique_id("log")
         
         try:
-            # Insert test log entry
+            # Insert test log entry using ACTUAL schema:
+            # execution_logs has: id, worker_id, action, level (enum), message, error_data, etc.
             query = """
                 INSERT INTO execution_logs 
-                (id, worker_id, action_type, status, details, created_at)
-                VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())
+                (id, worker_id, action, level, message, error_data, created_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, NOW())
                 RETURNING id
             """
             result = execute_sql(query, [
                 test_id,
                 "test_action",
-                "success",
+                "info",  # level is an enum: debug/info/warn/error/critical
+                "Test log message",
                 json.dumps({"test": True})
             ])
             
@@ -150,26 +152,29 @@ class TestL2PersistentContext:
         memory_key = generate_unique_id("mem")
         
         try:
-            # Write memory
+            # Write memory using ACTUAL schema:
+            # memories table has: id, scope, scope_id, key, content, memory_type, importance, etc.
             write_query = """
-                INSERT INTO agent_memory 
-                (id, agent_id, memory_type, content, importance, created_at)
-                VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW())
+                INSERT INTO memories 
+                (id, scope, scope_id, key, content, memory_type, importance, created_at)
+                VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6, NOW())
                 RETURNING id
             """
             write_result = execute_sql(write_query, [
-                memory_key,
-                "test_memory",
-                json.dumps({"test_data": "persists"}),
-                0.8
+                "test",           # scope
+                memory_key,       # scope_id
+                "test_key",       # key
+                json.dumps({"test_data": "persists"}),  # content
+                "test_memory",    # memory_type
+                0.8               # importance
             ])
             
             memory_id = write_result["rows"][0]["id"]
-            cleanup_test_data.append(("agent_memory", "id", memory_id))
+            cleanup_test_data.append(("memories", "id", memory_id))
             
             # Read memory back
             read_result = execute_sql(
-                "SELECT content FROM agent_memory WHERE id = $1",
+                "SELECT content FROM memories WHERE id = $1",
                 [memory_id]
             )
             
@@ -441,10 +446,11 @@ class TestL3TaskExecution:
         task_title = generate_unique_id("retry")
         
         try:
-            # Create task
+            # Create task using ACTUAL schema:
+            # governance_tasks has attempt_count, not retry_count
             create_result = execute_sql("""
                 INSERT INTO governance_tasks 
-                (id, title, status, priority, task_type, retry_count, created_at)
+                (id, title, status, priority, task_type, attempt_count, created_at)
                 VALUES (gen_random_uuid(), $1, 'pending', 'medium', 'test', 0, NOW())
                 RETURNING id
             """, [task_title])
@@ -456,7 +462,7 @@ class TestL3TaskExecution:
             execute_sql("""
                 UPDATE governance_tasks 
                 SET status = 'failed', 
-                    retry_count = retry_count + 1,
+                    attempt_count = attempt_count + 1,
                     error_message = 'Test error for retry'
                 WHERE id = $1
             """, [task_id])
@@ -465,17 +471,17 @@ class TestL3TaskExecution:
             execute_sql("""
                 UPDATE governance_tasks 
                 SET status = 'pending'
-                WHERE id = $1 AND retry_count < 3
+                WHERE id = $1 AND attempt_count < 3
             """, [task_id])
             
             # Verify retry worked
             verify = execute_sql(
-                "SELECT status, retry_count FROM governance_tasks WHERE id = $1",
+                "SELECT status, attempt_count FROM governance_tasks WHERE id = $1",
                 [task_id]
             )
             
             assert verify["rows"][0]["status"] == "pending", "Task should be pending after retry"
-            assert verify["rows"][0]["retry_count"] == 1, "Retry count should be 1"
+            assert verify["rows"][0]["attempt_count"] == 1, "Attempt count should be 1"
             
             duration_ms = int((time.time() - start_time) * 1000)
             record_test_result(
@@ -483,7 +489,7 @@ class TestL3TaskExecution:
                 level="L3",
                 status="passed",
                 duration_ms=duration_ms,
-                details={"task_id": task_id, "retry_count": 1}
+                details={"task_id": task_id, "attempt_count": 1}
             )
             
         except Exception as exc:
@@ -600,7 +606,8 @@ class TestL4Innovation:
             
             if schema_check["rowCount"] > 0:
                 exp_name = generate_unique_id("exp")
-                # Create experiment
+                # Create experiment using ACTUAL schema:
+                # experiments has start_date/end_date, not started_at/concluded_at
                 insert_result = execute_sql("""
                     INSERT INTO experiments 
                     (id, name, hypothesis, status, created_at)
@@ -611,18 +618,18 @@ class TestL4Innovation:
                 exp_id = insert_result["rows"][0]["id"]
                 cleanup_test_data.append(("experiments", "id", exp_id))
                 
-                # Start experiment
+                # Start experiment (use start_date not started_at)
                 execute_sql("""
                     UPDATE experiments 
-                    SET status = 'running', started_at = NOW()
+                    SET status = 'running', start_date = NOW()
                     WHERE id = $1
                 """, [exp_id])
                 
-                # Conclude experiment
+                # Conclude experiment (use end_date not concluded_at)
                 execute_sql("""
                     UPDATE experiments 
                     SET status = 'concluded', 
-                        concluded_at = NOW(),
+                        end_date = NOW(),
                         conclusion = 'success'
                     WHERE id = $1
                 """, [exp_id])
@@ -751,28 +758,28 @@ class TestL5MultiAgent:
             agent1_id = f"{test_worker_id}-1"
             agent2_id = f"{test_worker_id}-2"
             
-            # Check for workers table
+            # Check for worker_registry table (actual table name)
             schema_check = execute_sql("""
                 SELECT column_name 
                 FROM information_schema.columns 
-                WHERE table_name = 'workers'
+                WHERE table_name = 'worker_registry'
             """)
             
             if schema_check["rowCount"] > 0:
-                # Register agents
+                # Register agents using worker_registry
                 for agent_id in [agent1_id, agent2_id]:
                     execute_sql("""
-                        INSERT INTO workers 
+                        INSERT INTO worker_registry 
                         (id, worker_id, status, capabilities, last_heartbeat, created_at)
                         VALUES (gen_random_uuid(), $1, 'active', '["test"]', NOW(), NOW())
                         ON CONFLICT (worker_id) DO UPDATE SET last_heartbeat = NOW()
                     """, [agent_id])
-                    cleanup_test_data.append(("workers", "worker_id", agent_id))
+                    cleanup_test_data.append(("worker_registry", "worker_id", agent_id))
                 
                 # Verify both agents registered
                 verify = execute_sql("""
                     SELECT COUNT(*) as count 
-                    FROM workers 
+                    FROM worker_registry 
                     WHERE worker_id IN ($1, $2) AND status = 'active'
                 """, [agent1_id, agent2_id])
                 
