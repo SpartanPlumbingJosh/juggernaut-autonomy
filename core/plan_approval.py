@@ -30,6 +30,7 @@ import json
 import os
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field, asdict
@@ -151,10 +152,13 @@ def _execute_sql(sql: str) -> List[Dict]:
     auth_string = f"{user}:{password}"
     import base64
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
+    # URL-encode credentials to handle special characters in the connection string
+    encoded_user = urllib.parse.quote(user, safe='')
+    encoded_password = urllib.parse.quote(password, safe='')
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Basic {auth_bytes}",
-        "Neon-Connection-String": f"postgresql://{user}:{password}@{NEON_HOST}/{NEON_DATABASE}?sslmode=require"
+        "Neon-Connection-String": f"postgresql://{encoded_user}:{encoded_password}@{NEON_HOST}/{NEON_DATABASE}?sslmode=require"
     }
     payload = json.dumps({"query": sql}).encode()
     req = urllib.request.Request(NEON_HTTP_URL, data=payload, headers=headers, method="POST")
