@@ -112,6 +112,44 @@ class ResourceAllocator:
             weights[task.task_id] = max(weight, SMALL_EPSILON)
         return weights
 
+    def _validate_tasks(self, tasks: List[TaskSpec]) -> None:
+        """Validate task constraints before allocation.
+
+        Args:
+            tasks: List of task specifications to validate.
+
+        Raises:
+            ValueError: If any task has invalid min_time or max_time constraints.
+        """
+        for idx, task in enumerate(tasks):
+            if task.min_time < 0:
+                logger.error(
+                    "Task %s (index %d) has negative min_time: %.3f",
+                    task.task_id, idx, task.min_time
+                )
+                raise ValueError(
+                    f"Task '{task.task_id}' has invalid min_time={task.min_time:.3f} "
+                    "(must be non-negative)"
+                )
+            if task.max_time < 0:
+                logger.error(
+                    "Task %s (index %d) has negative max_time: %.3f",
+                    task.task_id, idx, task.max_time
+                )
+                raise ValueError(
+                    f"Task '{task.task_id}' has invalid max_time={task.max_time:.3f} "
+                    "(must be non-negative)"
+                )
+            if task.min_time > task.max_time:
+                logger.error(
+                    "Task %s (index %d) has min_time (%.3f) > max_time (%.3f)",
+                    task.task_id, idx, task.min_time, task.max_time
+                )
+                raise ValueError(
+                    f"Task '{task.task_id}' has min_time={task.min_time:.3f} > "
+                    f"max_time={task.max_time:.3f}"
+                )
+
     def allocate(self, tasks: List[TaskSpec]) -> Dict[str, float]:
         """Allocate time budgets dynamically across tasks.
 
@@ -123,12 +161,15 @@ class ResourceAllocator:
 
         Raises:
             ResourceAllocationError: If constraints cannot be satisfied.
-            ValueError: If tasks list is empty.
+            ValueError: If tasks list is empty or contains invalid tasks.
         """
         if not tasks:
             raise ValueError("At least one task is required for allocation.")
 
         logger.debug("Starting allocation for %d tasks with total budget %.3f", len(tasks), self.total_time_budget)
+
+        # Validate all tasks before proceeding
+        self._validate_tasks(tasks)
 
         min_time_sum = sum(task.min_time for task in tasks)
         if min_time_sum > self.total_time_budget:
@@ -145,27 +186,31 @@ class ResourceAllocator:
 
         weights = self._compute_weights(tasks)
         total_weight = sum(weights.values())
+
+        # Initial allocation proportional to weights (or even share if weights are negligible)
+        allocations: Dict[str, float] = {}
         if total_weight <= SMALL_EPSILON:
-            # In pathological case, distribute remaining budget evenly
+            # In pathological case, distribute remaining budget evenly but respect max_time
             logger.warning("Total weight is extremely small; distributing remaining budget evenly.")
             even_share = remaining_budget / len(tasks) if tasks else 0.0
-            return {task.task_id: task.min_time + even_share for task in tasks}
-
-        # Initial allocation proportional to weights
-        allocations: Dict[str, float] = {}
-        for task in tasks:
-            extra_share = remaining_budget * (weights[task.task_id] / total_weight)
-            allocated = task.min_time + extra_share
-            clamped = max(task.min_time, min(allocated, task.max_time))
-            allocations[task.task_id] = clamped
-            logger.debug(
-                "Task %s: weight=%.3f, extra_share=%.3f, raw_alloc=%.3f, clamped_alloc=%.3f",
-                task.task_id,
-                weights[task.task_id],
-                extra_share,
-                allocated,
-                clamped,
-            )
+            for task in tasks:
+                tentative = task.min_time + even_share
+                clamped = max(task.min_time, min(tentative, task.max_time))
+                allocations[task.task_id] = clamped
+        else:
+            for task in tasks:
+                extra_share = remaining_budget * (weights[task.task_id] / total_weight)
+                allocated = task.min_time + extra_share
+                clamped = max(task.min_time, min(allocated, task.max_time))
+                allocations[task.task_id] = clamped
+                logger.debug(
+                    "Task %s: weight=%.3f, extra_share=%.3f, raw_alloc=%.3f, clamped_alloc=%.3f",
+                    task.task_id,
+                    weights[task.task_id],
+                    extra_share,
+                    allocated,
+                    clamped,
+                )
 
         # Check if clamping caused unused budget, and redistribute if significant
         used_budget = sum(allocations.values())
