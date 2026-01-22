@@ -7,7 +7,7 @@ def test_integrate_module_imports_successfully():
     assert isinstance(module, types.ModuleType)
 
 
-def test_integrate_module_has_no_public_callables():
+def test_integrate_module_has_no_public_attributes():
     module = importlib.import_module("integrate")
     public_attrs = [
         name
@@ -15,5 +15,5 @@ def test_integrate_module_has_no_public_callables():
         if not name.startswith("_")
     ]
     # If the module is intentionally empty, it should not define any public
-    # functions or classes. Adjust this test if public API is added later.
+    # attributes. Adjust this test if public API is added later.
     assert public_attrs == []
