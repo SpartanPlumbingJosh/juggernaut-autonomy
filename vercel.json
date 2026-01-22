@@ -10,5 +10,11 @@
       "src": "/v1/(.*)",
       "dest": "/api/vercel_handler.py"
     }
-  ]
+  ],
+  "functions": {
+    "api/*.py": {
+      "memory": 512,
+      "maxDuration": 10
+    }
+  }
 }
