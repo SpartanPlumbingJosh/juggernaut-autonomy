@@ -8,6 +8,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import os
+import logging
+import json
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Import all dashboard functions
 from api.dashboard import (
@@ -76,7 +81,8 @@ async def proxy_to_dashboard(request: Request, path: str):
     if method == "POST":
         try:
             body = await request.json()
-        except:
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.error(f"Failed to parse JSON body: {e}")
             body = {}
     
     # Call the dashboard handler
