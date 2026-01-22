@@ -5,7 +5,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def message_module() -> types.ModuleType:
-    """Fixture to import the message module once per test session."""
+    """Fixture to import the message module once per test module."""
     return importlib.import_module("message")
 
 
@@ -15,9 +15,9 @@ def test_message_module_imports_successfully(message_module):
     assert isinstance(message_module, types.ModuleType)
 
 
-def test_message_module_has_no_public_callables(message_module):
+def test_message_module_has_no_public_attributes(message_module):
     """
-    Empty module should not expose any public callables (functions/classes).
+    Empty module should not expose any public attributes.
 
     Public attributes are those not starting with an underscore.
     """
