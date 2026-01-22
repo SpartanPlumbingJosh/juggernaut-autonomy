@@ -93,6 +93,8 @@ class GovernanceTaskManager:
         try:
             self._connection = sqlite3.connect(self._db_path)
             self._connection.row_factory = sqlite3.Row
+            # Enable foreign key enforcement
+            self._connection.execute("PRAGMA foreign_keys = ON")
         except sqlite3.Error as exc:
             LOGGER.exception("Failed to connect to SQLite database at %s", db_path)
             raise
