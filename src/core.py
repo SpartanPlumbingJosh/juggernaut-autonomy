@@ -155,6 +155,31 @@ class ImpactSimulationRepository:
             LOGGER.exception("Failed to ensure impact_simulations schema: %s", exc)
             raise
 
+    def _row_to_record(self, row: Tuple[Any, ...]) -> ImpactSimulationRecord:
+        """Convert a database row tuple to an ImpactSimulationRecord.
+
+        Args:
+            row: Database row tuple with columns in SELECT order:
+                (id, experiment_id, simulation_type, input_params,
+                 predicted_outcomes, confidence_scores, actual_outcomes,
+                 accuracy_score, created_at, completed_at)
+
+        Returns:
+            ImpactSimulationRecord instance with parsed JSON and datetime fields.
+        """
+        return ImpactSimulationRecord(
+            id=row[0],
+            experiment_id=row[1],
+            simulation_type=row[2],
+            input_params=json.loads(row[3]),
+            predicted_outcomes=json.loads(row[4]),
+            confidence_scores=json.loads(row[5]),
+            actual_outcomes=json.loads(row[6]) if row[6] is not None else None,
+            accuracy_score=row[7],
+            created_at=_str_to_datetime(row[8]),
+            completed_at=_str_to_datetime(row[9]) if row[9] is not None else None,
+        )
+
     def insert_simulation(self, record: ImpactSimulationRecord) -> int:
         """Insert a new simulation record into the database.
 
@@ -321,4 +346,12 @@ class ImpactSimulationRepository:
             row = cursor.fetchone()
         except sqlite3.Error as exc:
             LOGGER.exception(
-                "Failed to query latest impact simulation for experiment_id=%s: %
+                "Failed to query latest impact simulation for experiment_id=%s: %s",
+                experiment_id,
+                exc,
+            )
+            raise
+
+        if row is None:
+            return None
+        return self._row_to_record(row)
