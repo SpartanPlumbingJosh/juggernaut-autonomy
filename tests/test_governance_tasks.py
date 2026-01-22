@@ -90,4 +90,11 @@ def test_ensure_schema_creates_required_tables(in_memory_manager):
     expected_task_columns = {
         "id",
         "name",
-        "parameters
+        "parameters",
+        "dry_run",
+        "dry_run_result",
+        "status",
+        "created_at",
+        "updated_at",
+    }
+    assert columns == expected_task_columns
