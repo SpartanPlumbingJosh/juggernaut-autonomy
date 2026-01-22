@@ -27,8 +27,10 @@ Workflow:
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
+import urllib.parse
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List, Tuple
 from dataclasses import dataclass, field, asdict
@@ -124,21 +126,39 @@ class PlanStatus(Enum):
 # DATABASE CONFIGURATION
 # ============================================================
 
-NEON_HOST = "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech"
-NEON_DATABASE = "neondb"
-NEON_USER = "neondb_owner"
-NEON_PASSWORD = "npg_OYkCRU4aze2l"
+# Load credentials from environment variables - NEVER hardcode credentials
+NEON_HOST = os.environ.get("NEON_HOST", "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech")
+NEON_DATABASE = os.environ.get("NEON_DATABASE", "neondb")
+NEON_USER = os.environ.get("NEON_USER", "")
+NEON_PASSWORD = os.environ.get("NEON_PASSWORD", "")
 NEON_HTTP_URL = f"https://{NEON_HOST}/sql"
 
 
+def _get_db_credentials() -> Tuple[str, str]:
+    """Get database credentials from environment, raising error if not set."""
+    user = NEON_USER or os.environ.get("NEON_USER")
+    password = NEON_PASSWORD or os.environ.get("NEON_PASSWORD")
+    if not user or not password:
+        raise EnvironmentError(
+            "Database credentials not configured. "
+            "Set NEON_USER and NEON_PASSWORD environment variables."
+        )
+    return user, password
+
+
 def _execute_sql(sql: str) -> List[Dict]:
-    auth_string = f"{NEON_USER}:{NEON_PASSWORD}"
+    """Execute SQL query against Neon database."""
+    user, password = _get_db_credentials()
+    auth_string = f"{user}:{password}"
     import base64
     auth_bytes = base64.b64encode(auth_string.encode()).decode()
+    # URL-encode credentials to handle special characters in the connection string
+    encoded_user = urllib.parse.quote(user, safe='')
+    encoded_password = urllib.parse.quote(password, safe='')
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Basic {auth_bytes}",
-        "Neon-Connection-String": f"postgresql://{NEON_USER}:{NEON_PASSWORD}@{NEON_HOST}/{NEON_DATABASE}?sslmode=require"
+        "Neon-Connection-String": f"postgresql://{encoded_user}:{encoded_password}@{NEON_HOST}/{NEON_DATABASE}?sslmode=require"
     }
     payload = json.dumps({"query": sql}).encode()
     req = urllib.request.Request(NEON_HTTP_URL, data=payload, headers=headers, method="POST")
@@ -152,6 +172,11 @@ def _execute_sql(sql: str) -> List[Dict]:
 
 
 def _escape_value(value: Any) -> str:
+    """Escape a value for SQL query.
+    
+    WARNING: This is a basic escaping function. For production use,
+    parameterized queries are strongly recommended to prevent SQL injection.
+    """
     if value is None:
         return "NULL"
     if isinstance(value, bool):
@@ -272,13 +297,17 @@ def get_plan_status(task_id: str) -> Dict[str, Any]:
     impl_plan = task.get("implementation_plan")
     metadata = task.get("metadata") or {}
     if isinstance(metadata, str):
-        try: metadata = json.loads(metadata)
-        except: metadata = {}
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
     
-    if stage == "plan_approved": status = PlanStatus.APPROVED
+    if stage == "plan_approved":
+        status = PlanStatus.APPROVED
     elif stage == "plan_submitted":
         status = PlanStatus.REJECTED if metadata.get("plan_rejected_at") else PlanStatus.SUBMITTED
-    else: status = PlanStatus.NONE
+    else:
+        status = PlanStatus.NONE
     
     return {"success": True, "task_id": task_id, "stage": stage, "plan_status": status.value,
             "has_plan": impl_plan is not None, "can_start_work": stage == "plan_approved",
@@ -338,8 +367,10 @@ def executor_should_revise_plan(task: Dict) -> Tuple[bool, Optional[str]]:
     stage = task.get("stage")
     metadata = task.get("metadata") or {}
     if isinstance(metadata, str):
-        try: metadata = json.loads(metadata)
-        except: metadata = {}
+        try:
+            metadata = json.loads(metadata)
+        except json.JSONDecodeError:
+            metadata = {}
     if stage == "plan_submitted" and metadata.get("plan_rejected_at"):
         if metadata.get("plan_rejected_at", "") > metadata.get("plan_submitted_at", ""):
             return True, metadata.get("plan_rejection_feedback")
