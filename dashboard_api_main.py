@@ -20,11 +20,17 @@ from api.dashboard import (
     API_VERSION
 )
 
+# Internal (service-to-service) dashboard endpoints
+from api.internal_dashboard import router as internal_dashboard_router
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
     version=API_VERSION
 )
+
+# Internal routes (authenticated via INTERNAL_API_SECRET)
+app.include_router(internal_dashboard_router)
 
 # CORS configuration
 app.add_middleware(
