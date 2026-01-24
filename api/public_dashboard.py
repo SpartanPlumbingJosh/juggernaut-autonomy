@@ -10,7 +10,7 @@ import time
 from typing import Any, Dict, Optional, Tuple
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Query
 
 from api.dashboard import query_db, validate_uuid
 
