@@ -49,6 +49,32 @@ def _sql_quote(value: Optional[str]) -> str:
     return f"'{_sql_escape(value)}'"
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _iso(dt: datetime) -> str:
+    return dt.isoformat()
+
+
+def _rows(sql: str) -> list:
+    return query_db(sql).get("rows", [])
+
+
+def _to_float(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _to_int(value: Any, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 # ============================================================================
 # READ-ONLY PUBLIC ENDPOINTS (No Auth Required)
 # ============================================================================
@@ -97,6 +123,153 @@ def public_tasks(
         "success": True,
         "tasks": rows,
         "total": total,
+    }
+    _cache.set(cache_key, result, int(cache_seconds))
+    return result
+
+
+@router.get("/health")
+def public_health(
+    cache_seconds: int = 5,
+) -> Dict[str, Any]:
+    """System health metrics - no auth required."""
+    cache_key = "pub_health"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    now = _utc_now()
+    alerts = []
+
+    # DB connectivity + latency
+    db_status = "unknown"
+    db_latency_ms: Optional[float] = None
+    try:
+        start = time.perf_counter()
+        _ = _rows("SELECT 1 as ok")
+        db_latency_ms = (time.perf_counter() - start) * 1000.0
+        db_status = "healthy"
+    except Exception as e:
+        db_status = "down"
+        alerts.append({"message": f"Database connectivity error: {e}"})
+
+    # API status (this service). We degrade if DB is down.
+    api_status = "healthy" if db_status == "healthy" else "degraded"
+
+    # Error rate from execution_logs over the last hour
+    error_rate_percent = 0.0
+    try:
+        rows = _rows(
+            """
+            SELECT
+              COUNT(*)::int as total,
+              COUNT(*) FILTER (WHERE level IN ('error','critical'))::int as errors
+            FROM execution_logs
+            WHERE created_at >= NOW() - INTERVAL '1 hour'
+            """
+        )
+        r = (rows[0] or {}) if rows else {}
+        total = _to_int(r.get("total"), 0)
+        errors = _to_int(r.get("errors"), 0)
+        error_rate_percent = (errors / total * 100.0) if total > 0 else 0.0
+    except Exception as e:
+        alerts.append({"message": f"Failed to compute error rate: {e}"})
+
+    # Uptime approximation: % of workers with heartbeat within last 5 minutes
+    uptime_percent = 0.0
+    try:
+        rows = _rows(
+            """
+            SELECT
+              COUNT(*)::int as total,
+              COUNT(*) FILTER (WHERE last_heartbeat IS NOT NULL AND last_heartbeat >= NOW() - INTERVAL '5 minutes')::int as online
+            FROM worker_registry
+            """
+        )
+        r = (rows[0] or {}) if rows else {}
+        total = _to_int(r.get("total"), 0)
+        online = _to_int(r.get("online"), 0)
+        uptime_percent = (online / total * 100.0) if total > 0 else 0.0
+    except Exception as e:
+        alerts.append({"message": f"Failed to compute uptime: {e}"})
+
+    api_latency_ms = _to_float(db_latency_ms, 0.0)
+
+    if api_status != "healthy":
+        alerts.append({"message": f"API status: {api_status}"})
+    if error_rate_percent >= 5.0:
+        alerts.append({"message": f"High error rate: {error_rate_percent:.2f}%"})
+    if uptime_percent < 95.0:
+        alerts.append({"message": f"Low worker uptime: {uptime_percent:.2f}%"})
+
+    result = {
+        "success": True,
+        "database": db_status,
+        "railway_api": api_status,
+        "api_latency_ms": round(api_latency_ms, 1) if api_latency_ms is not None else None,
+        "error_rate_percent": round(error_rate_percent, 2),
+        "uptime_percent": round(uptime_percent, 2),
+        "alerts": alerts,
+        "timestamp": _iso(now),
+    }
+    _cache.set(cache_key, result, int(cache_seconds))
+    return result
+
+
+@router.get("/task-tree")
+def public_task_tree(
+    limit: int = Query(500, ge=1, le=2000),
+    cache_seconds: int = 5,
+) -> Dict[str, Any]:
+    """Hierarchical task tree built from governance_tasks.parent_task_id - no auth required."""
+    safe_limit = max(1, min(int(limit), 2000))
+    cache_key = f"pub_task_tree:{safe_limit}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    rows = _rows(
+        f"""
+        SELECT
+          id,
+          title,
+          status::text as status,
+          assigned_worker,
+          parent_task_id
+        FROM governance_tasks
+        ORDER BY created_at ASC
+        LIMIT {safe_limit}
+        """
+    )
+
+    nodes: Dict[str, Dict[str, Any]] = {}
+    children_by_parent: Dict[Optional[str], list] = {}
+
+    for r in rows:
+        task_id = str(r.get("id"))
+        parent_id = str(r.get("parent_task_id")) if r.get("parent_task_id") else None
+        node = {
+            "id": task_id,
+            "title": r.get("title") or "Untitled",
+            "status": r.get("status") or "pending",
+            "assigned_worker": r.get("assigned_worker"),
+            "children": [],
+        }
+        nodes[task_id] = node
+        children_by_parent.setdefault(parent_id, []).append(task_id)
+
+    def attach(task_id: str) -> Dict[str, Any]:
+        node = nodes.get(task_id) or {"id": task_id, "title": "Untitled", "status": "pending", "children": []}
+        kid_ids = children_by_parent.get(task_id, [])
+        node["children"] = [attach(k) for k in kid_ids]
+        return node
+
+    roots = [attach(task_id) for task_id in children_by_parent.get(None, [])]
+
+    result = {
+        "success": True,
+        "tree": roots,
+        "timestamp": _iso(_utc_now()),
     }
     _cache.set(cache_key, result, int(cache_seconds))
     return result
@@ -454,21 +627,58 @@ def public_tree_root(
 
 
 @router.get("/dlq")
-def public_dlq_count(
+def public_dlq(
+    show_reviewed: bool = False,
+    limit: int = Query(100, ge=1, le=200),
     cache_seconds: int = 5,
 ) -> Dict[str, Any]:
-    """Get DLQ count - no auth required."""
-    cache_key = "pub_dlq"
+    """Get DLQ items - no auth required."""
+    safe_limit = max(1, min(int(limit), 200))
+    cache_key = f"pub_dlq_items:{show_reviewed}:{safe_limit}"
     cached = _cache.get(cache_key)
     if cached is not None:
         return cached
 
-    rows = query_db("SELECT COUNT(*) as count FROM dead_letter_queue WHERE status = 'pending'").get("rows", [])
-    count = int((rows[0] or {}).get("count", 0)) if rows else 0
+    where = "" if show_reviewed else "WHERE resolved_at IS NULL"
+    rows = _rows(
+        f"""
+        SELECT
+          id,
+          original_task_id,
+          reason,
+          final_error,
+          metadata,
+          created_at,
+          resolved_at
+        FROM dead_letter_queue
+        {where}
+        ORDER BY created_at DESC
+        LIMIT {safe_limit}
+        """
+    )
+
+    items = []
+    for r in rows:
+        md = r.get("metadata") or {}
+        retry_count = None
+        if isinstance(md, dict):
+            retry_count = md.get("retry_count") or md.get("retries")
+
+        items.append(
+            {
+                "id": r.get("id"),
+                "task_id": r.get("original_task_id"),
+                "error": r.get("final_error") or r.get("reason"),
+                "retry_count": _to_int(retry_count, 0),
+                "created_at": r.get("created_at"),
+                "resolved_at": r.get("resolved_at"),
+            }
+        )
+
     result = {
         "success": True,
-        "count": count,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+        "timestamp": _iso(_utc_now()),
     }
     _cache.set(cache_key, result, int(cache_seconds))
     return result
@@ -519,21 +729,97 @@ def public_cost(
     if cached is not None:
         return cached
 
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-    sql = f"""
-        SELECT
-          COALESCE(SUM(CASE WHEN completed_at >= '{today_start.isoformat()}' THEN actual_cost_cents ELSE 0 END), 0) as today,
-          COALESCE(SUM(actual_cost_cents), 0) as total
-        FROM governance_tasks
-    """
-    rows = query_db(sql).get("rows", [])
-    row = (rows[0] or {}) if rows else {}
+    # Prefer cost_events if available; fall back to governance_tasks.actual_cost_cents.
+    now = _utc_now()
+    recent_events = []
+    breakdown = {"ai": 0.0, "compute": 0.0, "other": 0.0}
+    today = week = month = all_time = 0.0
+
+    try:
+        summary_rows = _rows(
+            """
+            SELECT
+              COALESCE(SUM(CASE WHEN recorded_at >= date_trunc('day', NOW()) THEN amount_cents ELSE 0 END), 0) as today_cents,
+              COALESCE(SUM(CASE WHEN recorded_at >= NOW() - INTERVAL '7 days' THEN amount_cents ELSE 0 END), 0) as week_cents,
+              COALESCE(SUM(CASE WHEN recorded_at >= date_trunc('month', NOW()) THEN amount_cents ELSE 0 END), 0) as month_cents,
+              COALESCE(SUM(amount_cents), 0) as all_time_cents
+            FROM cost_events
+            """
+        )
+        s = (summary_rows[0] or {}) if summary_rows else {}
+        today = _to_float(s.get("today_cents"), 0.0) / 100.0
+        week = _to_float(s.get("week_cents"), 0.0) / 100.0
+        month = _to_float(s.get("month_cents"), 0.0) / 100.0
+        all_time = _to_float(s.get("all_time_cents"), 0.0) / 100.0
+
+        breakdown_rows = _rows(
+            """
+            SELECT
+              COALESCE(category, 'other') as category,
+              COALESCE(SUM(amount_cents), 0) as cents
+            FROM cost_events
+            GROUP BY COALESCE(category, 'other')
+            """
+        )
+        for r in breakdown_rows:
+            cat = str(r.get("category") or "other").lower()
+            amt = _to_float(r.get("cents"), 0.0) / 100.0
+            if "ai" in cat or "llm" in cat or "openrouter" in cat:
+                breakdown["ai"] += amt
+            elif "railway" in cat or "compute" in cat:
+                breakdown["compute"] += amt
+            else:
+                breakdown["other"] += amt
+
+        recent_rows = _rows(
+            """
+            SELECT recorded_at, category, amount_cents, description
+            FROM cost_events
+            ORDER BY recorded_at DESC
+            LIMIT 50
+            """
+        )
+        for r in recent_rows:
+            recent_events.append(
+                {
+                    "timestamp": r.get("recorded_at"),
+                    "category": r.get("category"),
+                    "amount": _to_float(r.get("amount_cents"), 0.0) / 100.0,
+                    "description": r.get("description"),
+                }
+            )
+    except Exception:
+        # Fallback for older DBs
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        sql = f"""
+            SELECT
+              COALESCE(SUM(CASE WHEN completed_at >= '{today_start.isoformat()}' THEN actual_cost_cents ELSE 0 END), 0) as today_cents,
+              COALESCE(SUM(actual_cost_cents), 0) as total_cents
+            FROM governance_tasks
+        """
+        rows = _rows(sql)
+        row = (rows[0] or {}) if rows else {}
+        today = _to_float(row.get("today_cents"), 0.0) / 100.0
+        all_time = _to_float(row.get("total_cents"), 0.0) / 100.0
+        week = 0.0
+        month = 0.0
 
     result = {
         "success": True,
-        "today": float(row.get("today", 0) or 0),
-        "total": float(row.get("total", 0) or 0),
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "today": round(today, 4),
+        "this_week": round(week, 4),
+        "this_month": round(month, 4),
+        "all_time": round(all_time, 4),
+        "breakdown": {
+            "ai": round(breakdown.get("ai", 0.0), 4),
+            "compute": round(breakdown.get("compute", 0.0), 4),
+            "other": round(breakdown.get("other", 0.0), 4),
+        },
+        "recent": recent_events,
+        # Frontend compatibility
+        "events": recent_events,
+        "summary": {"today": today, "week": week, "month": month, "allTime": all_time},
+        "timestamp": _iso(now),
     }
     _cache.set(cache_key, result, int(cache_seconds))
     return result

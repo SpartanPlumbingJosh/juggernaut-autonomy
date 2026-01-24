@@ -8,6 +8,8 @@ import os
 import uuid
 import json
 import logging
+import sys
+from pathlib import Path
 from datetime import datetime
 from typing import Any, Generator, Optional
 
@@ -20,6 +22,12 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+repo_root = Path(__file__).resolve().parent.parent
+src_path = repo_root / "src"
+if str(src_path) not in sys.path:
+    sys.path.insert(0, str(src_path))
 
 
 # =============================================================================

@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from conftest import execute_sql, generate_unique_id
+from tests.conftest import execute_sql, generate_unique_id
 
 logger = logging.getLogger(__name__)
 

@@ -6,7 +6,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone
 
-from plan_approval import (
+from core.plan_approval import (
     ExecutionPlan, PlanReview, PlanStatus,
     submit_plan, review_plan, get_plan_status, can_start_work,
     get_tasks_awaiting_plan_review, get_tasks_needing_plan,
@@ -41,7 +41,7 @@ class TestExecutionPlan(unittest.TestCase):
 
 
 class TestSubmitPlan(unittest.TestCase):
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_submit_valid_plan(self, mock_sql):
         mock_sql.side_effect = [
             [{"id": "task-123", "title": "Test", "status": "pending", "stage": "discovered", "assigned_worker": "EX"}],
@@ -56,7 +56,7 @@ class TestSubmitPlan(unittest.TestCase):
         self.assertTrue(result["success"])
         self.assertEqual(result["stage"], "plan_submitted")
 
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_submit_invalid_plan(self, mock_sql):
         mock_sql.return_value = [{"id": "task-123", "title": "Test", "status": "pending", "stage": "discovered"}]
         plan = {"approach": "Short", "steps": [], "files_affected": [], "risks": [],
@@ -65,7 +65,7 @@ class TestSubmitPlan(unittest.TestCase):
         self.assertFalse(result["success"])
         self.assertIn("validation_errors", result)
 
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_submit_plan_task_not_found(self, mock_sql):
         mock_sql.return_value = []
         plan = {"approach": "Valid approach with sufficient detail",
@@ -78,7 +78,7 @@ class TestSubmitPlan(unittest.TestCase):
 
 
 class TestReviewPlan(unittest.TestCase):
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_approve_plan(self, mock_sql):
         mock_sql.side_effect = [
             [{"id": "task-123", "title": "Test", "status": "pending", "stage": "plan_submitted",
@@ -90,7 +90,7 @@ class TestReviewPlan(unittest.TestCase):
         self.assertTrue(result["approved"])
         self.assertEqual(result["stage"], "plan_approved")
 
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_reject_plan(self, mock_sql):
         mock_sql.side_effect = [
             [{"id": "task-123", "title": "Test", "status": "pending", "stage": "plan_submitted",
@@ -105,14 +105,14 @@ class TestReviewPlan(unittest.TestCase):
 
 
 class TestCanStartWork(unittest.TestCase):
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_can_start_approved(self, mock_sql):
         mock_sql.return_value = [{"id": "task-123", "stage": "plan_approved",
                                   "implementation_plan": "{}", "metadata": "{}"}]
         can_start, reason = can_start_work("task-123")
         self.assertTrue(can_start)
 
-    @patch('plan_approval._execute_sql')
+    @patch('core.plan_approval._execute_sql')
     def test_cannot_start_no_plan(self, mock_sql):
         mock_sql.return_value = [{"id": "task-123", "stage": "discovered",
                                   "implementation_plan": None, "metadata": "{}"}]
@@ -141,7 +141,7 @@ class TestIntegrationHelpers(unittest.TestCase):
 
 
 class TestOrchestratorAutoReview(unittest.TestCase):
-    @patch('plan_approval.review_plan')
+    @patch('core.plan_approval.review_plan')
     def test_auto_approve_good_plan(self, mock_review):
         mock_review.return_value = {"success": True, "approved": True}
         good_plan = {"steps": ["Step 1", "Step 2", "Step 3"], "estimated_duration_minutes": 120,
@@ -150,7 +150,7 @@ class TestOrchestratorAutoReview(unittest.TestCase):
         mock_review.assert_called_once()
         self.assertTrue(mock_review.call_args[1]["approved"])
 
-    @patch('plan_approval.review_plan')
+    @patch('core.plan_approval.review_plan')
     def test_auto_reject_incomplete_plan(self, mock_review):
         mock_review.return_value = {"success": True, "approved": False}
         bad_plan = {"steps": ["One step"], "estimated_duration_minutes": 60,
@@ -160,19 +160,19 @@ class TestOrchestratorAutoReview(unittest.TestCase):
 
 
 class TestConvenienceFunctions(unittest.TestCase):
-    @patch('plan_approval.submit_plan')
+    @patch('core.plan_approval.submit_plan')
     def test_quick_submit_plan(self, mock_submit):
         mock_submit.return_value = {"success": True}
         result = quick_submit_plan("task-123", approach="Quick approach", steps=["Step 1", "Step 2"])
         mock_submit.assert_called_once()
 
-    @patch('plan_approval.review_plan')
+    @patch('core.plan_approval.review_plan')
     def test_approve_plan_wrapper(self, mock_review):
         mock_review.return_value = {"success": True}
         result = approve_plan("task-123", "Looks good")
         mock_review.assert_called_once_with("task-123", approved=True, feedback="Looks good")
 
-    @patch('plan_approval.review_plan')
+    @patch('core.plan_approval.review_plan')
     def test_reject_plan_wrapper(self, mock_review):
         mock_review.return_value = {"success": True}
         result = reject_plan("task-123", "Needs work", ["Add tests"])

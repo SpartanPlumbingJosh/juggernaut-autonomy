@@ -55,11 +55,11 @@ except ImportError as e:
     def ensure_conflict_tables() -> bool:
         """Stub: conflict_manager module not available."""
         return False
-    
+
     def acquire_lock(*args, **kwargs):
         """Stub: always grants lock when conflict_manager unavailable."""
         return ConflictResolution.GRANTED, None, None
-    
+
     def release_lock(*args, **kwargs) -> bool:
         """Stub: conflict_manager module not available."""
         return True
@@ -120,7 +120,7 @@ def _format_value(v: Any) -> str:
     if v is None:
         return "NULL"
     elif isinstance(v, bool):
-        return "TRUE" if v else "FALSE"
+        return "true" if v else "false"
     elif isinstance(v, (int, float)):
         return str(v)
     elif isinstance(v, (dict, list)):
@@ -146,40 +146,65 @@ class AgentStatus(Enum):
 
 class TaskPriority(Enum):
     """Task priority levels for queue management."""
-    CRITICAL = 1  # System failures, revenue-impacting issues
-    HIGH = 2      # Time-sensitive
-    NORMAL = 3    # Standard operations
-    LOW = 4       # Background tasks
-    DEFERRED = 5  # Can wait for off-peak
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+    # Backwards-compatible aliases
+    NORMAL = "medium"
+    DEFERRED = "low"
 
 
 class HandoffReason(Enum):
     """Reasons for agent-to-agent handoffs."""
-    CAPABILITY_MATCH = "capability_match"
-    LOAD_BALANCING = "load_balancing"
-    ESCALATION = "escalation"
-    SPECIALIZATION = "specialization"
-    PARALLEL_EXECUTION = "parallel_execution"
-    FOLLOWUP_REQUIRED = "followup_required"
-    FAILURE_RECOVERY = "failure_recovery"
+    CAPACITY = "capacity"
+    EXPERTISE = "expertise"
+    FAILURE = "failure"
+
+    # Backwards-compatible aliases
+    CAPABILITY_MATCH = "expertise"
+    LOAD_BALANCING = "capacity"
+    ESCALATION = "failure"
+    SPECIALIZATION = "expertise"
+    PARALLEL_EXECUTION = "capacity"
+    FOLLOWUP_REQUIRED = "expertise"
+    FAILURE_RECOVERY = "failure"
 
 
 class ConflictType(Enum):
     """Types of resource conflicts between agents."""
-    RESOURCE_CONTENTION = "resource_contention"
-    BUDGET_EXCEEDED = "budget_exceeded"
-    PRIORITY_CONFLICT = "priority_conflict"
-    CAPABILITY_OVERLAP = "capability_overlap"
-    TIMING_CONFLICT = "timing_conflict"
+    RESOURCE = "resource"
+    PRIORITY = "priority"
+    OWNERSHIP = "ownership"
+
+    # Backwards-compatible aliases
+    RESOURCE_CONTENTION = "resource"
+    BUDGET_EXCEEDED = "resource"
+    PRIORITY_CONFLICT = "priority"
+    CAPABILITY_OVERLAP = "ownership"
+    TIMING_CONFLICT = "priority"
 
 
 class EscalationLevel(Enum):
     """Escalation severity levels."""
-    INFO = "info"           # FYI, no action needed
-    LOW = "low"             # Can wait hours
-    MEDIUM = "medium"       # Should address soon
-    HIGH = "high"           # Needs attention within hour
-    CRITICAL = "critical"   # Immediate human intervention required
+    WORKER = 1
+    ORCHESTRATOR = 2
+    OWNER = 3
+
+    def db_value(self) -> str:
+        if self == EscalationLevel.WORKER:
+            return "low"
+        if self == EscalationLevel.ORCHESTRATOR:
+            return "high"
+        return "critical"
+
+    # Backwards-compatible aliases for string-based enum expectations
+    CRITICAL = OWNER
+    HIGH = ORCHESTRATOR
+    MEDIUM = ORCHESTRATOR
+    LOW = WORKER
+    INFO = WORKER
 
 
 @dataclass
@@ -188,11 +213,12 @@ class AgentCard:
     Digital identity for an agent in the swarm.
     Defines capabilities, constraints, and communication channels.
     """
-    agent_id: str
-    name: str
+    worker_id: str
     role: str
-    description: str
     capabilities: List[str]
+    status: AgentStatus = AgentStatus.IDLE
+    name: str = ""
+    description: str = ""
     tools: List[str] = field(default_factory=list)
     preferred_model: str = "google/gemini-flash-1.5"
     escalation_model: str = "anthropic/claude-sonnet-4-20250514"
@@ -201,6 +227,10 @@ class AgentCard:
     success_rate_threshold: float = 0.85
     max_cost_per_task_cents: int = 100
     daily_cost_limit_cents: int = 1000
+
+    @property
+    def agent_id(self) -> str:
+        return self.worker_id
     
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -222,6 +252,7 @@ class SwarmTask:
     Task that can be executed by any agent in the swarm.
     """
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    title: str = ""
     task_type: str = ""
     description: str = ""
     payload: Dict[str, Any] = field(default_factory=dict)
@@ -307,22 +338,7 @@ def discover_agents(
     
     try:
         result = _query(sql)
-        agents = result.get("rows", [])
-        
-        # Fetch active task counts separately (simpler queries work better)
-        for agent in agents:
-            try:
-                task_sql = f"""
-                SELECT COUNT(*) as cnt FROM governance_tasks
-                WHERE assigned_worker = {_format_value(agent['worker_id'])}
-                  AND status = 'in_progress'
-                """
-                task_result = _query(task_sql)
-                agent['active_task_count'] = int(task_result.get('rows', [{}])[0].get('cnt', 0) or 0)
-            except:
-                agent['active_task_count'] = 0
-        
-        return agents
+        return result.get("rows", [])
     except Exception as e:
         print(f"Failed to discover agents: {e}")
         return []
@@ -346,53 +362,72 @@ def route_task(task: SwarmTask) -> Optional[str]:
     
     if not agents:
         return None
-    
+
     # Score each agent
     best_agent = None
-    best_score = -1
-    
+    best_score = -1.0
+
     for agent in agents:
-        # Skip offline or error agents
-        if agent.get("status") in ("offline", "error"):
+        # Support both dict rows (runtime) and AgentCard (tests)
+        if isinstance(agent, AgentCard):
+            agent_status = agent.status
+            agent_worker_id = agent.worker_id
+            max_tasks = agent.max_concurrent_tasks or 5
+            max_cost = agent.daily_cost_limit_cents or 1000
+            completed = 0
+            failed = 0
+        else:
+            raw_status = (agent.get("status") or "idle").lower()
+            try:
+                agent_status = AgentStatus(raw_status)
+            except Exception:
+                agent_status = AgentStatus.IDLE
+            agent_worker_id = agent.get("worker_id")
+            max_tasks = agent.get("max_concurrent_tasks", 5) or 5
+            max_cost = agent.get("max_cost_per_day_cents", 1000) or 1000
+            completed = agent.get("tasks_completed", 0) or 0
+            failed = agent.get("tasks_failed", 0) or 0
+
+        if not agent_worker_id:
             continue
-        
-        # Calculate routing score
+
+        # Skip offline or error agents
+        if agent_status in (AgentStatus.OFFLINE, AgentStatus.ERROR):
+            continue
+
         score = 0.0
-        
+
         # Health score weight (40%)
-        score += (agent.get("health_score", 0.5) or 0.5) * 0.4
-        
+        health_score = 0.5 if isinstance(agent, AgentCard) else (agent.get("health_score", 0.5) or 0.5)
+        score += health_score * 0.4
+
         # Availability weight (30%) - inverse of load
-        task_count = agent.get("active_task_count", 0) or 0
-        max_tasks = agent.get("max_concurrent_tasks", 5) or 5
+        task_count = 0 if isinstance(agent, AgentCard) else (agent.get("active_task_count", 0) or 0)
         load = task_count / max_tasks if max_tasks > 0 else 0.5
         score += (1 - min(load, 1.0)) * 0.3
-        
+
         # Budget headroom weight (20%)
-        current_cost = agent.get("current_day_cost_cents", 0) or 0
-        max_cost = agent.get("max_cost_per_day_cents", 1000) or 1000
+        current_cost = 0 if isinstance(agent, AgentCard) else (agent.get("current_day_cost_cents", 0) or 0)
         if max_cost > 0:
             budget_headroom = (max_cost - current_cost) / max_cost
             score += max(0, budget_headroom) * 0.2
-        
+
         # Success rate weight (10%)
-        completed = agent.get("tasks_completed", 0) or 0
-        failed = agent.get("tasks_failed", 0) or 0
         total = completed + failed
         if total > 0:
-            success_rate = completed / total
-            score += success_rate * 0.1
+            score += (completed / total) * 0.1
         else:
-            score += 0.05  # Default for new agents
-        
+            score += 0.05
+
         if score > best_score:
             best_score = score
             best_agent = agent
-    
-    if best_agent:
-        return best_agent.get("worker_id")
-    
-    return None
+
+    if best_agent is None:
+        return None
+
+    return best_agent.worker_id if isinstance(best_agent, AgentCard) else best_agent.get("worker_id")
+
 
 
 def get_agent_workload(worker_id: str) -> Dict[str, Any]:
@@ -911,7 +946,7 @@ def get_resource_status() -> Dict[str, Any]:
         return {}
 
 
-def resolve_conflict(
+def _resolve_conflict_impl(
     conflict_type: ConflictType,
     involved_agents: List[str],
     resource_id: str,
@@ -941,7 +976,7 @@ def resolve_conflict(
     if not involved_agents:
         resolution["resolution"] = "no_agents_involved"
         return resolution
-    
+
     # Get agent details for comparison
     agents_data = []
     for agent_id in involved_agents:
@@ -1003,11 +1038,24 @@ def resolve_conflict(
     return resolution
 
 
+def resolve_conflict(
+    conflict_type: ConflictType,
+    participants: List[str],
+    resource_id: str,
+) -> Dict[str, Any]:
+    return _resolve_conflict_impl(
+        conflict_type=conflict_type,
+        involved_agents=participants,
+        resource_id=resource_id,
+        context=None,
+    )
+
+
 # ============================================================
 # PHASE 6.3: CROSS-AGENT MEMORY
 # ============================================================
 
-def write_shared_memory(
+def _write_shared_memory_impl(
     key: str,
     value: Any,
     writer_id: str,
@@ -1066,6 +1114,27 @@ def write_shared_memory(
     return None
 
 
+def write_shared_memory(
+    key: str,
+    value: Any,
+    ttl_hours: Optional[int] = None,
+    writer_id: str = "ORCHESTRATOR",
+    scope: str = "global",
+) -> bool:
+    ttl_seconds = ttl_hours * 3600 if ttl_hours is not None else None
+    return (
+        _write_shared_memory_impl(
+            key=key,
+            value=value,
+            writer_id=writer_id,
+            scope=scope,
+            ttl_seconds=ttl_seconds,
+            permissions=None,
+        )
+        is not None
+    )
+
+
 def read_shared_memory(
     key: str,
     reader_id: str = None,
@@ -1111,7 +1180,7 @@ def read_shared_memory(
     return None
 
 
-def sync_memory_to_agents(
+def _sync_memory_to_agents_impl(
     key: str,
     scope: str = "global",
     target_agents: List[str] = None
@@ -1180,6 +1249,15 @@ def sync_memory_to_agents(
     return synced
 
 
+def sync_memory_to_agents(
+    key: str,
+    value: Any = None,
+) -> int:
+    if value is not None:
+        write_shared_memory(key=key, value=value, ttl_hours=24)
+    return _sync_memory_to_agents_impl(key=key, scope="global", target_agents=None)
+
+
 def garbage_collect_memory(max_age_days: int = 30) -> int:
     """
     Clean up expired and old shared memory entries.
@@ -1213,7 +1291,7 @@ def garbage_collect_memory(max_age_days: int = 30) -> int:
 # PHASE 6.4: ESCALATION SYSTEM
 # ============================================================
 
-def create_escalation(
+def _create_escalation_impl(
     level: EscalationLevel,
     title: str,
     description: str,
@@ -1275,6 +1353,42 @@ def create_escalation(
     except Exception as e:
         print(f"Failed to create escalation: {e}")
     
+    return None
+
+
+def create_escalation(*args, **kwargs) -> Optional[str]:
+    """Compatibility wrapper for escalation creation.
+
+    Supports:
+    - create_escalation(task_id=..., reason=..., level=...)
+    - create_escalation(level, title, description, source_agent, context=None, required_action=None, timeout_minutes=60)
+    """
+    if "task_id" in kwargs and "reason" in kwargs and "level" in kwargs:
+        return _create_escalation_impl(
+            level=kwargs["level"],
+            title=kwargs["reason"],
+            description=kwargs["reason"],
+            source_agent="ORCHESTRATOR",
+            context={"task_id": kwargs["task_id"]},
+            required_action=None,
+            timeout_minutes=60,
+        )
+
+    if len(args) >= 4:
+        level, title, description, source_agent = args[:4]
+        context = args[4] if len(args) >= 5 else kwargs.get("context")
+        required_action = args[5] if len(args) >= 6 else kwargs.get("required_action")
+        timeout_minutes = args[6] if len(args) >= 7 else kwargs.get("timeout_minutes", 60)
+        return _create_escalation_impl(
+            level=level,
+            title=title,
+            description=description,
+            source_agent=source_agent,
+            context=context,
+            required_action=required_action,
+            timeout_minutes=timeout_minutes,
+        )
+
     return None
 
 
@@ -1529,7 +1643,7 @@ def handle_agent_failure(worker_id: str) -> Dict[str, Any]:
             swarm_task = SwarmTask(
                 task_id=task["id"],
                 task_type=task.get("task_type", ""),
-                priority=TaskPriority(task.get("priority", 3)),
+                priority=TaskPriority(str(task.get("priority", "medium"))),
                 goal_id=task.get("goal_id")
             )
             
@@ -1565,7 +1679,7 @@ def handle_agent_failure(worker_id: str) -> Dict[str, Any]:
     return results
 
 
-def activate_backup_agent(
+def _activate_backup_agent_impl(
     failed_worker_id: str,
     backup_worker_id: str = None
 ) -> Optional[str]:
@@ -1627,6 +1741,10 @@ def activate_backup_agent(
     except Exception as e:
         print(f"Failed to activate backup: {e}")
         return None
+
+
+def activate_backup_agent(primary_id: str, backup_id: str) -> bool:
+    return _activate_backup_agent_impl(primary_id, backup_id) is not None
 
 
 def run_health_check() -> Dict[str, Any]:

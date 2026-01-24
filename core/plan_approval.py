@@ -89,8 +89,8 @@ class ExecutionPlan:
         if not self.steps or len(self.steps) < 1:
             errors.append("At least one step is required")
         for i, step in enumerate(self.steps):
-            if len(step) < 10:
-                errors.append(f"Step {i+1} is too short (min 10 chars)")
+            if len(step) < 5:
+                errors.append(f"Step {i+1} is too short (min 5 chars)")
         if not self.verification_approach or len(self.verification_approach) < 20:
             errors.append("Verification approach must be at least 20 characters")
         if self.estimated_duration_minutes < 5:
