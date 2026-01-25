@@ -1152,8 +1152,9 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                 summary = data_obj.get("summary")
 
             if executed_flag or success_flag or isinstance(data_obj, (dict, list, str)):
-                if isinstance(summary, str) and summary.strip():
-                    evidence_text = f"Summary: {summary.strip()[:400]}"
+                summary_text = summary.strip() if isinstance(summary, str) else ""
+                if summary_text and len(summary_text) >= 20:
+                    evidence_text = f"Summary: {summary_text[:400]}"
                 else:
                     evidence_text = f"Task executed: {json.dumps(result_data, default=str)[:600]}"
     

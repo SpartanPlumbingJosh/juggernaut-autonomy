@@ -1,0 +1,255 @@
+{
+  "fields": [
+    {
+      "name": "id",
+      "dataTypeID": 2950,
+      "tableID": 290715,
+      "columnID": 1,
+      "dataTypeSize": 16,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "goal_id",
+      "dataTypeID": 2950,
+      "tableID": 290715,
+      "columnID": 2,
+      "dataTypeSize": 16,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "root_task_id",
+      "dataTypeID": 2950,
+      "tableID": 290715,
+      "columnID": 33,
+      "dataTypeSize": 16,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "parent_task_id",
+      "dataTypeID": 2950,
+      "tableID": 290715,
+      "columnID": 3,
+      "dataTypeSize": 16,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "title",
+      "dataTypeID": 1043,
+      "tableID": 290715,
+      "columnID": 7,
+      "dataTypeSize": -1,
+      "dataTypeModifier": 504,
+      "format": "text"
+    },
+    {
+      "name": "task_type",
+      "dataTypeID": 1043,
+      "tableID": 290715,
+      "columnID": 6,
+      "dataTypeSize": -1,
+      "dataTypeModifier": 104,
+      "format": "text"
+    },
+    {
+      "name": "status",
+      "dataTypeID": 1043,
+      "tableID": 290715,
+      "columnID": 29,
+      "dataTypeSize": -1,
+      "dataTypeModifier": 54,
+      "format": "text"
+    },
+    {
+      "name": "priority",
+      "dataTypeID": 290596,
+      "tableID": 290715,
+      "columnID": 11,
+      "dataTypeSize": 4,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "requires_approval",
+      "dataTypeID": 16,
+      "tableID": 290715,
+      "columnID": 25,
+      "dataTypeSize": 1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "approval_reason",
+      "dataTypeID": 25,
+      "tableID": 290715,
+      "columnID": 26,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "assigned_worker",
+      "dataTypeID": 1043,
+      "tableID": 290715,
+      "columnID": 4,
+      "dataTypeSize": -1,
+      "dataTypeModifier": 104,
+      "format": "text"
+    },
+    {
+      "name": "assigned_at",
+      "dataTypeID": 1184,
+      "tableID": 290715,
+      "columnID": 16,
+      "dataTypeSize": 8,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "started_at",
+      "dataTypeID": 1184,
+      "tableID": 290715,
+      "columnID": 17,
+      "dataTypeSize": 8,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "completed_at",
+      "dataTypeID": 1184,
+      "tableID": 290715,
+      "columnID": 18,
+      "dataTypeSize": 8,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "updated_at",
+      "dataTypeID": 1184,
+      "tableID": 290715,
+      "columnID": 35,
+      "dataTypeSize": 8,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "attempt_count",
+      "dataTypeID": 23,
+      "tableID": 290715,
+      "columnID": 20,
+      "dataTypeSize": 4,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "max_attempts",
+      "dataTypeID": 23,
+      "tableID": 290715,
+      "columnID": 21,
+      "dataTypeSize": 4,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "next_retry_at",
+      "dataTypeID": 1184,
+      "tableID": 290715,
+      "columnID": 22,
+      "dataTypeSize": 8,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "tags",
+      "dataTypeID": 3802,
+      "tableID": 290715,
+      "columnID": 27,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "metadata",
+      "dataTypeID": 3802,
+      "tableID": 290715,
+      "columnID": 28,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "error_message",
+      "dataTypeID": 25,
+      "tableID": 290715,
+      "columnID": 13,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "completion_evidence",
+      "dataTypeID": 25,
+      "tableID": 0,
+      "columnID": 0,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "result",
+      "dataTypeID": 3802,
+      "tableID": 290715,
+      "columnID": 12,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    }
+  ],
+  "rows": [
+    {
+      "id": "cc40b40d-be5a-41c8-b84a-233159fb94c3",
+      "goal_id": "65822ac4-2e02-4efc-8f75-50f1d36f1660",
+      "root_task_id": null,
+      "parent_task_id": null,
+      "title": "REVENUE-EXP-01: Domain Flip Pilot \u2014 Define niche filters + selection rubric",
+      "task_type": "analysis",
+      "status": "waiting_approval",
+      "priority": "critical",
+      "requires_approval": false,
+      "approval_reason": null,
+      "assigned_worker": "EXECUTOR",
+      "assigned_at": null,
+      "started_at": "2026-01-25 17:55:50.234451+00",
+      "completed_at": null,
+      "updated_at": "2026-01-25 17:55:50.234451+00",
+      "attempt_count": 0,
+      "max_attempts": 3,
+      "next_retry_at": null,
+      "tags": [
+        "mission",
+        "revenue",
+        "domain_flip",
+        "REVENUE-EXP-01",
+        "week1_100"
+      ],
+      "metadata": {
+        "mission": "juggernaut",
+        "seeded_by": "db_seed_domain_flip.py",
+        "experiment_id": "3fa0ca36-b84b-462e-9905-7951c53375ab"
+      },
+      "error_message": null,
+      "completion_evidence": "",
+      "result": {
+        "reason": "No automated handler for task_type 'analysis'",
+        "requires": "Human review and execution guidance",
+        "task_description": "Define profitable niches + hard filters for undervalued domains. Produce an explicit rubric that can be used to score candidates under $20 (or reg-fee) and target resale >= $50 within 30 days."
+      }
+    }
+  ],
+  "command": "SELECT",
+  "rowCount": 1,
+  "rowAsArray": false
+}
