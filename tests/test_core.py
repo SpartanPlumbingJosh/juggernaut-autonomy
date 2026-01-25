@@ -1,9 +1,13 @@
 import json
 import logging
+import os
 import sqlite3
+import sys
 from datetime import datetime, timedelta
 
 import pytest
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 from core import (
     ACCURACY_MINIMUM_DATA_POINTS,
@@ -178,4 +182,73 @@ def test_ensure_schema_db_error_is_propagated_and_logged(caplog):
 # ---------------------------------------------------------------------------
 
 
-def test_insert_simulation_persists_record_and_returns_generated_id(repository,
+def test_insert_simulation_persists_record_and_returns_generated_id(repository, sample_simulation_record):
+    simulation_id = repository.insert_simulation(sample_simulation_record)
+    assert isinstance(simulation_id, int)
+    assert simulation_id > 0
+
+    fetched = repository.get_by_id(simulation_id)
+    assert fetched is not None
+    assert fetched.id == simulation_id
+    assert fetched.experiment_id == sample_simulation_record.experiment_id
+    assert fetched.simulation_type == sample_simulation_record.simulation_type
+    assert fetched.input_params == sample_simulation_record.input_params
+    assert fetched.predicted_outcomes == sample_simulation_record.predicted_outcomes
+    assert fetched.confidence_scores == sample_simulation_record.confidence_scores
+    assert fetched.actual_outcomes is None
+    assert fetched.accuracy_score is None
+
+
+def test_get_by_id_missing_returns_none(repository):
+    assert repository.get_by_id(999999) is None
+
+
+def test_get_latest_for_experiment_returns_latest(repository, sample_simulation_record, sample_datetime):
+    rec1 = ImpactSimulationRecord(
+        id=None,
+        experiment_id=sample_simulation_record.experiment_id,
+        simulation_type='t1',
+        input_params={'x': 1},
+        predicted_outcomes={'m': 1.0},
+        confidence_scores={'m': 0.5},
+        actual_outcomes=None,
+        accuracy_score=None,
+        created_at=sample_datetime,
+        completed_at=None,
+    )
+    rec2 = ImpactSimulationRecord(
+        id=None,
+        experiment_id=sample_simulation_record.experiment_id,
+        simulation_type='t2',
+        input_params={'x': 2},
+        predicted_outcomes={'m': 2.0},
+        confidence_scores={'m': 0.6},
+        actual_outcomes=None,
+        accuracy_score=None,
+        created_at=sample_datetime + timedelta(seconds=1),
+        completed_at=None,
+    )
+    id1 = repository.insert_simulation(rec1)
+    id2 = repository.insert_simulation(rec2)
+
+    latest = repository.get_latest_for_experiment(sample_simulation_record.experiment_id)
+    assert latest is not None
+    assert latest.id == id2
+    assert latest.simulation_type == 't2'
+    assert latest.input_params == {'x': 2}
+    assert id2 != id1
+
+
+def test_update_with_actuals_updates_latest_record(repository, sample_simulation_record, sample_datetime):
+    repository.insert_simulation(sample_simulation_record)
+    updated = repository.update_with_actuals(
+        experiment_id=sample_simulation_record.experiment_id,
+        actual_outcomes={'metric1': 1.0},
+        accuracy=0.75,
+        completed_at=sample_datetime + timedelta(minutes=5),
+    )
+
+    assert updated is not None
+    assert updated.actual_outcomes == {'metric1': 1.0}
+    assert updated.accuracy_score == 0.75
+    assert updated.completed_at == sample_datetime + timedelta(minutes=5)
