@@ -2598,9 +2598,28 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                     "payload": task.payload or {},
                 }
 
+                log_action(
+                    "task.handler_lookup",
+                    f"Looking up handler for task_type='{task.task_type}' (will fallback to 'ai')",
+                    level="info",
+                    task_id=task.id,
+                )
+
                 handler = get_handler(task.task_type, execute_sql, log_action)
+                log_action(
+                    "task.handler_lookup_result",
+                    f"Primary handler for '{task.task_type}': {handler.__class__.__name__ if handler else 'None'}",
+                    level="info",
+                    task_id=task.id,
+                )
                 if handler is None:
                     handler = get_handler("ai", execute_sql, log_action)
+                    log_action(
+                        "task.handler_lookup_result",
+                        f"Fallback handler for 'ai': {handler.__class__.__name__ if handler else 'None'}",
+                        level="info",
+                        task_id=task.id,
+                    )
 
                 if handler is not None:
                     handler_result = handler.execute(task_dict)
