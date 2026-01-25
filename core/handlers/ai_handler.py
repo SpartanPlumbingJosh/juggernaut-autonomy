@@ -9,27 +9,65 @@ from .base import BaseHandler, HandlerResult
 logger = logging.getLogger(__name__)
 
 
+def _strip_code_fences(text: str) -> str:
+    s = (text or "").strip()
+    if s.startswith("```"):
+        first_newline = s.find("\n")
+        if first_newline != -1:
+            s = s[first_newline + 1 :]
+        if s.endswith("```"):
+            s = s[: -3]
+    return s.strip()
+
+
+def _find_first_json_object(text: str) -> Optional[str]:
+    s = _strip_code_fences(text)
+    start = s.find("{")
+    if start == -1:
+        return None
+
+    depth = 0
+    in_str = False
+    escape = False
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return s[start : i + 1]
+
+    return None
+
+
 def _extract_json_object(text: str) -> Optional[Dict[str, Any]]:
     if not text:
         return None
 
-    stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        try:
-            return json.loads(stripped)
-        except Exception:
-            return None
-
-    start = stripped.find("{")
-    end = stripped.rfind("}")
-    if start == -1 or end == -1 or end <= start:
+    candidate = _find_first_json_object(text)
+    if not candidate:
         return None
 
-    candidate = stripped[start : end + 1]
     try:
-        return json.loads(candidate)
+        obj = json.loads(candidate)
     except Exception:
         return None
+
+    return obj if isinstance(obj, dict) else None
 
 
 class AIHandler(BaseHandler):
@@ -60,7 +98,7 @@ class AIHandler(BaseHandler):
 
         system = (
             "You are JUGGERNAUT ENGINE, an autonomous execution agent. "
-            "Return a single JSON object. No markdown. No prose outside JSON.\n\n"
+            "Return a single JSON object. No markdown, no code fences, no prose outside JSON.\n\n"
             "Schema:\n"
             "{\n"
             "  \"success\": boolean,\n"
