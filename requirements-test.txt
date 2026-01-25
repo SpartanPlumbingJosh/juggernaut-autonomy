@@ -4,6 +4,9 @@
 # Test framework
 pytest>=7.4.0
 
+# Async test support
+pytest-asyncio>=0.23.0
+
 # HTTP client for Neon database
 httpx>=0.25.0
 

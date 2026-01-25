@@ -1,0 +1,13 @@
+# Ruff configuration for juggernaut-autonomy
+# See https://docs.astral.sh/ruff/configuration/
+
+[lint]
+# Ignore common issues that exist throughout the legacy codebase
+# F401: imported but unused - common in FastAPI routers
+# F841: local variable assigned but never used
+# E722: bare except (legacy error handling)
+ignore = ["F401", "F841", "E722"]
+
+# Ignore E402 (module level import not at top) for entrypoint files
+# These files load environment variables before imports intentionally
+per-file-ignores = { "start_dashboard.py" = ["E402"], "dashboard_api_main.py" = ["E402"] }

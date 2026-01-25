@@ -28,6 +28,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger('test_failure_detection')
 
+# Skip Neon-dependent tests if credentials/endpoint are not configured
+# This prevents HTTP 400 errors when Neon is unavailable
+NEON_HOST = os.environ.get("NEON_HOST")
+NEON_USER = os.environ.get("NEON_USER")
+NEON_PASSWORD = os.environ.get("NEON_PASSWORD")
+NEON_AVAILABLE = bool(NEON_HOST and NEON_USER and NEON_PASSWORD)
+
+pytestmark = pytest.mark.skipif(
+    not NEON_AVAILABLE,
+    reason="Neon database credentials not configured (set NEON_HOST, NEON_USER, NEON_PASSWORD)"
+)
+
 # Test constants
 HEARTBEAT_THRESHOLD_SECONDS = 120  # 2 minutes - same as production
 TEST_WORKER_PREFIX = "test-failure-"
