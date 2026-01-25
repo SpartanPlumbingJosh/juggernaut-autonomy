@@ -2565,24 +2565,67 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                           level="warn", task_id=task.id, error_data=result)
 
         else:
-            # Unknown task type - requires human guidance
-            # Set to waiting_approval so a human can review and provide instructions
-            log_action("task.unhandled_type", 
-                      f"Task type '{task.task_type}' has no automated handler - waiting for human guidance",
-                      level="warn", task_id=task.id,
-                      output_data={"task_type": task.task_type, "title": task.title})
-            
-            update_task_status(task.id, "waiting_approval", {
-                "reason": f"No automated handler for task_type '{task.task_type}'",
-                "requires": "Human review and execution guidance",
-                "task_description": task.description[:500] if task.description else None
-            })
-            
-            return False, {
-                "waiting_approval": True,
-                "reason": f"Task type '{task.task_type}' requires human guidance",
-                "task_type": task.task_type
-            }
+            # Unknown task type - attempt modular handler dispatch, then fall back to AI.
+            handler_result = None
+            try:
+                from core.handlers import get_handler
+
+                task_dict = {
+                    "id": task.id,
+                    "task_type": task.task_type,
+                    "title": task.title,
+                    "description": task.description,
+                    "priority": task.priority,
+                    "payload": task.payload or {},
+                }
+
+                handler = get_handler(task.task_type, execute_sql, log_action)
+                if handler is None:
+                    handler = get_handler("ai", execute_sql, log_action)
+
+                if handler is not None:
+                    handler_result = handler.execute(task_dict)
+            except Exception as handler_err:
+                log_action(
+                    "task.handler_dispatch_failed",
+                    f"Handler dispatch failed: {str(handler_err)[:200]}",
+                    level="warn",
+                    task_id=task.id,
+                )
+
+            if handler_result is not None:
+                result = handler_result.to_dict()
+                waiting = bool((handler_result.data or {}).get("waiting_approval"))
+                if waiting:
+                    update_task_status(task.id, "waiting_approval", handler_result.data)
+                    return False, {"waiting_approval": True, **(handler_result.data or {})}
+
+                task_succeeded = bool(handler_result.success)
+            else:
+                # If handler dispatch wasn't possible, fall back to human guidance.
+                log_action(
+                    "task.unhandled_type",
+                    f"Task type '{task.task_type}' has no automated handler - waiting for human guidance",
+                    level="warn",
+                    task_id=task.id,
+                    output_data={"task_type": task.task_type, "title": task.title},
+                )
+
+                update_task_status(
+                    task.id,
+                    "waiting_approval",
+                    {
+                        "reason": f"No automated handler for task_type '{task.task_type}'",
+                        "requires": "Human review and execution guidance",
+                        "task_description": task.description[:500] if task.description else None,
+                    },
+                )
+
+                return False, {
+                    "waiting_approval": True,
+                    "reason": f"Task type '{task.task_type}' requires human guidance",
+                    "task_type": task.task_type,
+                }
         # Mark based on actual success
         duration_ms = int((time.time() - start_time) * 1000)
         

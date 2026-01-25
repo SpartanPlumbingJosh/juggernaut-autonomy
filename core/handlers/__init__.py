@@ -21,6 +21,7 @@ import logging
 from typing import Any, Callable, Dict, List, Optional, Type
 
 from .base import BaseHandler, HandlerResult
+from .ai_handler import AIHandler
 from .database_handler import DatabaseHandler
 from .research_handler import ResearchHandler
 from .scan_handler import ScanHandler
@@ -31,10 +32,18 @@ logger = logging.getLogger(__name__)
 
 # Registry of available handlers
 _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
+    "ai": AIHandler,
     "database": DatabaseHandler,
     "research": ResearchHandler,
     "scan": ScanHandler,
     "test": TestHandler,
+    "workflow": AIHandler,
+    "content_creation": AIHandler,
+    "analysis": AIHandler,
+    "development": AIHandler,
+    "integration": AIHandler,
+    "planning": AIHandler,
+    "design": AIHandler,
 }
 
 # Public list of available handler types
@@ -171,6 +180,7 @@ __all__ = [
     # Classes
     "BaseHandler",
     "HandlerResult",
+    "AIHandler",
     "DatabaseHandler",
     "ResearchHandler",
     "ScanHandler",
