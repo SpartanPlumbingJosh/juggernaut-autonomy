@@ -7,6 +7,7 @@ import os
 import json
 import urllib.request
 import urllib.error
+import urllib.parse
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -28,7 +29,34 @@ class Database:
     
     def __init__(self, connection_string: str = None):
         self.connection_string = connection_string or NEON_CONNECTION_STRING
+        self._validate_connection_string(self.connection_string)
         self.endpoint = NEON_ENDPOINT
+
+    def _validate_connection_string(self, connection_string: str) -> None:
+        env_val = os.getenv("DATABASE_URL")
+        if env_val is None:
+            logger.warning("DATABASE_URL is not set; using built-in default connection string")
+
+        cs = (connection_string or "").strip()
+        if not cs:
+            raise ValueError("DATABASE connection string is empty")
+
+        try:
+            parsed = urllib.parse.urlparse(cs)
+        except Exception as e:
+            raise ValueError(f"DATABASE_URL is not a valid URL: {e}") from e
+
+        if parsed.scheme not in ("postgres", "postgresql"):
+            raise ValueError("DATABASE_URL must start with postgres:// or postgresql://")
+
+        username = parsed.username
+        password = parsed.password
+        hostname = parsed.hostname
+        if not username or not hostname:
+            raise ValueError("DATABASE_URL must include username and host")
+
+        if password is None or password == "":
+            raise ValueError("DATABASE_URL is missing a password")
     
     def query(self, sql: str) -> Dict[str, Any]:
         """Execute a SQL query and return results."""
