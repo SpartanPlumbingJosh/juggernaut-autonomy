@@ -3306,7 +3306,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             status = "healthy" if db_ok else "degraded"
             response = {
                 "status": status,
-                "version": "1.2.0",
+                "version": "1.3.1",
                 "worker_id": WORKER_ID,
                 "uptime_seconds": int(uptime),
                 "database": "connected" if db_ok else "error",
@@ -3336,7 +3336,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "service": "JUGGERNAUT Autonomy Engine",
                 "status": "running",
-                "version": "1.2.0",
+                "version": "1.3.1",
                 "endpoints": [
                     "/", "/health",
                     "/api/dashboard/stats",
@@ -3544,7 +3544,7 @@ def handle_shutdown(signum, frame):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("JUGGERNAUT AUTONOMY ENGINE v1.3.0")
+    print("JUGGERNAUT AUTONOMY ENGINE v1.3.1")
     print("=" * 60)
     print(f"Worker ID: {WORKER_ID}")
     print(f"Loop Interval: {LOOP_INTERVAL} seconds")
