@@ -128,6 +128,59 @@ def public_tasks(
     return result
 
 
+@router.get("/factory-metrics")
+def public_factory_metrics(
+    cache_seconds: int = 5,
+) -> Dict[str, Any]:
+    cache_key = "pub_factory_metrics"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    awaiting_rows = _rows(
+        "SELECT COUNT(*)::int as count FROM governance_tasks WHERE status = 'waiting_approval'"
+    )
+    pending_rows = _rows(
+        "SELECT COUNT(*)::int as count FROM governance_tasks WHERE status = 'pending'"
+    )
+    avg_duration_rows = _rows(
+        """
+        SELECT ROUND(AVG(EXTRACT(EPOCH FROM (completed_at - started_at))/60)::numeric, 1) as avg_minutes
+        FROM governance_tasks
+        WHERE status = 'completed'
+          AND started_at IS NOT NULL
+          AND completed_at > NOW() - INTERVAL '24 hours'
+        """
+    )
+    oldest_waiting_rows = _rows(
+        """
+        SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - MIN(created_at)))/60) as oldest_minutes
+        FROM governance_tasks
+        WHERE status IN ('pending', 'waiting_approval')
+        """
+    )
+
+    awaiting = _to_int((awaiting_rows[0] or {}).get("count"), 0) if awaiting_rows else 0
+    pending = _to_int((pending_rows[0] or {}).get("count"), 0) if pending_rows else 0
+
+    avg_minutes_raw = (avg_duration_rows[0] or {}).get("avg_minutes") if avg_duration_rows else None
+    avg_minutes = None if avg_minutes_raw is None else round(_to_float(avg_minutes_raw, 0.0), 1)
+
+    oldest_minutes_raw = (oldest_waiting_rows[0] or {}).get("oldest_minutes") if oldest_waiting_rows else None
+    oldest_minutes = None if oldest_minutes_raw is None else _to_int(oldest_minutes_raw, 0)
+
+    result = {
+        "success": True,
+        "pending": pending,
+        "waiting_approval": awaiting,
+        "avg_duration_minutes_24h": avg_minutes,
+        "oldest_waiting_minutes": oldest_minutes,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    _cache.set(cache_key, result, int(cache_seconds))
+    return result
+
+
 @router.get("/health")
 def public_health(
     cache_seconds: int = 5,
