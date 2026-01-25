@@ -1,0 +1,584 @@
+{
+  "ok": true,
+  "result": {
+    "fields": [
+      {
+        "name": "id",
+        "dataTypeID": 2950,
+        "tableID": 290715,
+        "columnID": 1,
+        "dataTypeSize": 16,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "title",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 7,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 504,
+        "format": "text"
+      },
+      {
+        "name": "status",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 29,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 54,
+        "format": "text"
+      },
+      {
+        "name": "task_type",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 6,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 104,
+        "format": "text"
+      },
+      {
+        "name": "priority",
+        "dataTypeID": 290596,
+        "tableID": 290715,
+        "columnID": 11,
+        "dataTypeSize": 4,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "created_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 15,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "updated_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 35,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "completed_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 18,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "id": "ad3b41ce-fb28-461c-8927-668699ffa5e5",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 17:19:19.656407+00",
+        "updated_at": "2026-01-25 17:20:51.594992+00",
+        "completed_at": "2026-01-25 17:21:20.160347+00"
+      },
+      {
+        "id": "c563d394-1988-4899-81b5-5983ea362ece",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 17:19:19.550548+00",
+        "updated_at": "2026-01-25 17:19:51.515398+00",
+        "completed_at": "2026-01-25 17:20:19.585058+00"
+      },
+      {
+        "id": "72a6c65e-4254-4833-bc5c-1903760a5295",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 16:18:51.27734+00",
+        "updated_at": "2026-01-25 16:19:51.22861+00",
+        "completed_at": "2026-01-25 16:20:19.818752+00"
+      },
+      {
+        "id": "92cce048-2258-4ce8-ba4f-53d3b813cbbd",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 16:18:51.163794+00",
+        "updated_at": "2026-01-25 16:18:51.163794+00",
+        "completed_at": "2026-01-25 16:19:19.74866+00"
+      },
+      {
+        "id": "83e7404c-f363-433d-abb8-159a3af4dd70",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 15:18:48.825787+00",
+        "updated_at": "2026-01-25 15:19:48.665252+00",
+        "completed_at": "2026-01-25 15:20:16.878408+00"
+      },
+      {
+        "id": "db4cc6c3-dbbe-471e-989b-0c547db633a9",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 15:18:48.717362+00",
+        "updated_at": "2026-01-25 15:18:48.717362+00",
+        "completed_at": "2026-01-25 15:19:16.959169+00"
+      },
+      {
+        "id": "72ef06f4-051b-4e48-9535-7c56a6d026a2",
+        "title": "Pull Unsold Estimates from ServiceTitan",
+        "status": "cancelled",
+        "task_type": "research",
+        "priority": "critical",
+        "created_at": "2026-01-25 15:13:40.686017+00",
+        "updated_at": "2026-01-25 15:13:40.686017+00",
+        "completed_at": null
+      },
+      {
+        "id": "ee6f037a-7a10-48f4-a4ec-bb85bdb43a0f",
+        "title": "Identify Lapsed Customers for Re-engagement",
+        "status": "waiting_approval",
+        "task_type": "research",
+        "priority": "high",
+        "created_at": "2026-01-25 15:13:40.686017+00",
+        "updated_at": "2026-01-25 15:44:48.04218+00",
+        "completed_at": null
+      },
+      {
+        "id": "fe518895-6d35-4e89-a7d6-52d340887b1e",
+        "title": "Build Daily Revenue Report",
+        "status": "waiting_approval",
+        "task_type": "research",
+        "priority": "high",
+        "created_at": "2026-01-25 15:13:40.686017+00",
+        "updated_at": "2026-01-25 15:59:15.793164+00",
+        "completed_at": null
+      },
+      {
+        "id": "85912687-3367-439b-bf6f-e767b98bbcd7",
+        "title": "GOAL: Generate Revenue for Spartan Plumbing Autonomously",
+        "status": "cancelled",
+        "task_type": "research",
+        "priority": "critical",
+        "created_at": "2026-01-25 15:13:32.363033+00",
+        "updated_at": "2026-01-25 15:44:47.882648+00",
+        "completed_at": null
+      },
+      {
+        "id": "f6d4b3e8-4be5-4bda-bef2-128755ab4a5c",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 14:18:16.692653+00",
+        "updated_at": "2026-01-25 14:19:48.764655+00",
+        "completed_at": "2026-01-25 14:20:16.927479+00"
+      },
+      {
+        "id": "0607fb0d-5ae2-4183-b673-08d82919c4bd",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 14:18:16.58286+00",
+        "updated_at": "2026-01-25 14:18:48.829045+00",
+        "completed_at": "2026-01-25 14:19:16.860261+00"
+      },
+      {
+        "id": "118e683d-ed0e-4b3f-b51d-d06ef69ca491",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 13:17:48.674002+00",
+        "updated_at": "2026-01-25 13:18:48.638168+00",
+        "completed_at": "2026-01-25 13:19:16.848511+00"
+      },
+      {
+        "id": "2b714817-be37-4dc8-8725-0b46af2d889b",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 13:17:48.573722+00",
+        "updated_at": "2026-01-25 13:17:48.573722+00",
+        "completed_at": "2026-01-25 13:18:16.990752+00"
+      },
+      {
+        "id": "60d24212-1462-48ba-827b-b2b51f19eee7",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 12:17:16.605046+00",
+        "updated_at": "2026-01-25 12:18:48.683222+00",
+        "completed_at": "2026-01-25 12:19:16.762159+00"
+      },
+      {
+        "id": "158dc65a-53a8-4c75-a2f1-807d48da08ee",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 12:17:16.486521+00",
+        "updated_at": "2026-01-25 12:17:48.647282+00",
+        "completed_at": "2026-01-25 12:18:16.8892+00"
+      },
+      {
+        "id": "f6bbf58b-a42c-458f-bbed-cb290406ad12",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 11:16:48.76588+00",
+        "updated_at": "2026-01-25 11:17:48.745082+00",
+        "completed_at": "2026-01-25 11:18:16.793417+00"
+      },
+      {
+        "id": "3518000b-083e-46a9-bd3d-6202711f4756",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 11:16:48.661979+00",
+        "updated_at": "2026-01-25 11:16:48.661979+00",
+        "completed_at": "2026-01-25 11:17:16.749771+00"
+      },
+      {
+        "id": "bd3f1c3c-78f4-41b3-8b7e-fba499a64e50",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 10:16:16.578308+00",
+        "updated_at": "2026-01-25 10:17:48.623475+00",
+        "completed_at": "2026-01-25 10:18:16.846342+00"
+      },
+      {
+        "id": "6882937d-1246-4cda-8a42-a19e0b0b00e8",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 10:16:16.462886+00",
+        "updated_at": "2026-01-25 10:16:48.749598+00",
+        "completed_at": "2026-01-25 10:17:16.831155+00"
+      },
+      {
+        "id": "8083c2d2-55eb-455e-8fde-6f9f17aacb1b",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 09:15:48.665609+00",
+        "updated_at": "2026-01-25 09:16:48.726486+00",
+        "completed_at": "2026-01-25 09:17:16.72786+00"
+      },
+      {
+        "id": "a4e47b29-a729-4871-b246-c6aa3e20c40b",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 09:15:48.554015+00",
+        "updated_at": "2026-01-25 09:15:48.554015+00",
+        "completed_at": "2026-01-25 09:16:16.965094+00"
+      },
+      {
+        "id": "2297c76a-e685-4276-baff-2dfb270c9b50",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 08:15:16.726712+00",
+        "updated_at": "2026-01-25 08:16:48.677132+00",
+        "completed_at": "2026-01-25 08:17:16.76935+00"
+      },
+      {
+        "id": "29b7e3dd-5734-48c6-909b-d89e9151d746",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 08:15:16.600195+00",
+        "updated_at": "2026-01-25 08:15:48.670535+00",
+        "completed_at": "2026-01-25 08:16:16.784543+00"
+      },
+      {
+        "id": "f383b3b9-edfe-4ebb-bcd1-5b596b879aa2",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 07:14:48.695473+00",
+        "updated_at": "2026-01-25 07:15:48.584228+00",
+        "completed_at": "2026-01-25 07:16:16.788679+00"
+      },
+      {
+        "id": "7de70742-a4ca-40de-bdcd-4dd4ccb762bb",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 07:14:48.573437+00",
+        "updated_at": "2026-01-25 07:14:48.573437+00",
+        "completed_at": "2026-01-25 07:15:16.933336+00"
+      },
+      {
+        "id": "a59e9a84-3fa0-484d-a4e4-449cf34c5be4",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 06:14:16.703789+00",
+        "updated_at": "2026-01-25 06:15:48.698442+00",
+        "completed_at": "2026-01-25 06:16:16.7998+00"
+      },
+      {
+        "id": "a2bd8b51-f010-4917-b426-332a56a31d71",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 06:14:16.585846+00",
+        "updated_at": "2026-01-25 06:14:48.692169+00",
+        "completed_at": "2026-01-25 06:15:16.857832+00"
+      },
+      {
+        "id": "d905a532-5943-427c-a9af-574d1ed8a7b6",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 05:14:01.334187+00",
+        "updated_at": "2026-01-25 05:15:01.380782+00",
+        "completed_at": "2026-01-25 05:16:00.9084+00"
+      },
+      {
+        "id": "d0766403-4470-421f-b9ee-d4f5f7d138dd",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 05:14:01.224024+00",
+        "updated_at": "2026-01-25 05:14:01.224024+00",
+        "completed_at": "2026-01-25 05:15:00.461758+00"
+      },
+      {
+        "id": "06aab6e8-1459-4056-88c9-d5d5e9db7305",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 04:13:33.64118+00",
+        "updated_at": "2026-01-25 04:14:55.142624+00",
+        "completed_at": "2026-01-25 04:15:33.811897+00"
+      },
+      {
+        "id": "1f802630-7e3f-416b-867b-dffa95507ed1",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 04:13:33.526428+00",
+        "updated_at": "2026-01-25 04:13:55.147649+00",
+        "completed_at": "2026-01-25 04:14:34.94216+00"
+      },
+      {
+        "id": "444c6320-330a-488a-b36a-9cb10a5e9578",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 03:12:33.972574+00",
+        "updated_at": "2026-01-25 03:13:55.441501+00",
+        "completed_at": "2026-01-25 03:14:33.968849+00"
+      },
+      {
+        "id": "2dba8dde-d02f-4df1-ae4e-8b01d369fb6f",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 03:12:33.854933+00",
+        "updated_at": "2026-01-25 03:12:54.930277+00",
+        "completed_at": "2026-01-25 03:13:34.236662+00"
+      },
+      {
+        "id": "b7076424-fb14-4464-91ba-7014f3a415e3",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 02:12:14.428858+00",
+        "updated_at": "2026-01-25 02:13:14.439823+00",
+        "completed_at": "2026-01-25 02:13:21.195216+00"
+      },
+      {
+        "id": "27c23431-ba64-4d56-9569-28e84c8a3ca6",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 02:12:14.3352+00",
+        "updated_at": "2026-01-25 02:12:14.3352+00",
+        "completed_at": "2026-01-25 02:12:21.235083+00"
+      },
+      {
+        "id": "c80881f8-a26c-435d-b91c-e903604e36f8",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 01:11:21.048553+00",
+        "updated_at": "2026-01-25 01:13:14.36644+00",
+        "completed_at": "2026-01-25 01:13:21.357679+00"
+      },
+      {
+        "id": "4eef6397-75f8-4a9a-a427-8a757aee4f90",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 01:11:20.90809+00",
+        "updated_at": "2026-01-25 01:12:14.346217+00",
+        "completed_at": "2026-01-25 01:12:20.912392+00"
+      },
+      {
+        "id": "284f4617-e393-4990-9723-876397b99d96",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 00:11:14.55805+00",
+        "updated_at": "2026-01-25 00:12:14.272433+00",
+        "completed_at": "2026-01-25 00:12:21.052305+00"
+      },
+      {
+        "id": "49913fc9-08f1-4c8c-bf7c-5c388be73e3d",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-25 00:11:14.463+00",
+        "updated_at": "2026-01-25 00:11:14.463+00",
+        "completed_at": "2026-01-25 00:11:21.648726+00"
+      },
+      {
+        "id": "7bed7448-d2d8-426b-a228-a36d193a8f7a",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 23:10:20.814965+00",
+        "updated_at": "2026-01-24 23:12:14.505967+00",
+        "completed_at": "2026-01-24 23:12:20.913363+00"
+      },
+      {
+        "id": "06476cf1-7ee2-477a-9dd9-7ccedefb9961",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 23:10:20.677802+00",
+        "updated_at": "2026-01-24 23:11:14.305832+00",
+        "completed_at": "2026-01-24 23:11:21.605342+00"
+      },
+      {
+        "id": "4304a8bf-49a3-4459-8338-715857dcef65",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 22:10:14.465237+00",
+        "updated_at": "2026-01-24 22:11:14.368324+00",
+        "completed_at": "2026-01-24 22:11:21.019136+00"
+      },
+      {
+        "id": "4f1952ae-24dd-47d6-8441-75684d8053c8",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 22:10:14.369934+00",
+        "updated_at": "2026-01-24 22:10:14.369934+00",
+        "completed_at": "2026-01-24 22:10:21.027124+00"
+      },
+      {
+        "id": "acea7d28-7b11-4a48-99e6-2e9321d11df2",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 21:09:20.697712+00",
+        "updated_at": "2026-01-24 21:11:14.389114+00",
+        "completed_at": "2026-01-24 21:11:21.082899+00"
+      },
+      {
+        "id": "77a9d76d-ea49-4883-9024-d64d2c634b93",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 21:09:20.557141+00",
+        "updated_at": "2026-01-24 21:10:14.650441+00",
+        "completed_at": "2026-01-24 21:10:21.247965+00"
+      },
+      {
+        "id": "843a58c3-ae64-49a5-8108-c25ae9e2c378",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 20:09:14.623393+00",
+        "updated_at": "2026-01-24 20:10:14.290967+00",
+        "completed_at": "2026-01-24 20:10:21.031715+00"
+      },
+      {
+        "id": "bd1a8236-358f-40f7-ad8d-1b4c1a9afc35",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 20:09:14.519886+00",
+        "updated_at": "2026-01-24 20:09:14.519886+00",
+        "completed_at": "2026-01-24 20:09:20.89051+00"
+      },
+      {
+        "id": "c0737e2e-7b85-4186-aae5-0678dd07ecf1",
+        "title": "Evaluate: Competitor gap in product space",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 19:08:20.723089+00",
+        "updated_at": "2026-01-24 19:10:14.445755+00",
+        "completed_at": "2026-01-24 19:10:21.243829+00"
+      },
+      {
+        "id": "e39ae6a5-b26f-404c-9b20-26b69ac7015c",
+        "title": "Evaluate: Rising search trend in target category",
+        "status": "completed",
+        "task_type": "evaluation",
+        "priority": "medium",
+        "created_at": "2026-01-24 19:08:20.590846+00",
+        "updated_at": "2026-01-24 19:09:14.409751+00",
+        "completed_at": "2026-01-24 19:09:20.927747+00"
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 50,
+    "rowAsArray": false
+  }
+}

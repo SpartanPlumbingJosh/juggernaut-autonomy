@@ -1,0 +1,173 @@
+{
+  "priority_enum": {
+    "fields": [
+      {
+        "name": "priority",
+        "dataTypeID": 19,
+        "tableID": 3501,
+        "columnID": 4,
+        "dataTypeSize": 64,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "priority": "critical"
+      },
+      {
+        "priority": "high"
+      },
+      {
+        "priority": "normal"
+      },
+      {
+        "priority": "low"
+      },
+      {
+        "priority": "background"
+      },
+      {
+        "priority": "medium"
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 6,
+    "rowAsArray": false
+  },
+  "inserted_ids": [
+    "cc40b40d-be5a-41c8-b84a-233159fb94c3",
+    "8b51fc1a-c4cb-440c-839a-f7ed9609dd7b",
+    "2ca8b324-3adc-4938-a5f7-fe920743ae2f",
+    "cff581e4-a380-4f9f-a938-a7f50a3d9b2a",
+    "f7d07bac-8337-4ab6-85e1-b1c3e9cd5bce",
+    "2ba17d57-bcd6-4c07-95d9-af0ba008b6c4"
+  ],
+  "insert_errors": [],
+  "pending": {
+    "fields": [
+      {
+        "name": "id",
+        "dataTypeID": 2950,
+        "tableID": 290715,
+        "columnID": 1,
+        "dataTypeSize": 16,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "title",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 7,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 504,
+        "format": "text"
+      },
+      {
+        "name": "status",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 29,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 54,
+        "format": "text"
+      },
+      {
+        "name": "task_type",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 6,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 104,
+        "format": "text"
+      },
+      {
+        "name": "priority",
+        "dataTypeID": 290596,
+        "tableID": 290715,
+        "columnID": 11,
+        "dataTypeSize": 4,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "requires_approval",
+        "dataTypeID": 16,
+        "tableID": 290715,
+        "columnID": 25,
+        "dataTypeSize": 1,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "created_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 15,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "id": "2ba17d57-bcd6-4c07-95d9-af0ba008b6c4",
+        "title": "REVENUE-EXP-01: Monitor inquiries + weekly status report",
+        "status": "pending",
+        "task_type": "analysis",
+        "priority": "medium",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.958812+00"
+      },
+      {
+        "id": "f7d07bac-8337-4ab6-85e1-b1c3e9cd5bce",
+        "title": "REVENUE-EXP-01: Create listing assets + list domain on marketplaces",
+        "status": "pending",
+        "task_type": "workflow",
+        "priority": "high",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.797715+00"
+      },
+      {
+        "id": "cff581e4-a380-4f9f-a938-a7f50a3d9b2a",
+        "title": "REVENUE-EXP-01: Select best domain + finalize purchase plan (approval required)",
+        "status": "pending",
+        "task_type": "workflow",
+        "priority": "critical",
+        "requires_approval": true,
+        "created_at": "2026-01-25 17:55:43.642175+00"
+      },
+      {
+        "id": "2ca8b324-3adc-4938-a5f7-fe920743ae2f",
+        "title": "REVENUE-EXP-01: Evaluate top 5 domain candidates (age/backlinks/keywords/comps)",
+        "status": "pending",
+        "task_type": "analysis",
+        "priority": "high",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.488736+00"
+      },
+      {
+        "id": "8b51fc1a-c4cb-440c-839a-f7ed9609dd7b",
+        "title": "REVENUE-EXP-01: Find 20 undervalued domain candidates (<= $20)",
+        "status": "pending",
+        "task_type": "research",
+        "priority": "critical",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.326844+00"
+      },
+      {
+        "id": "cc40b40d-be5a-41c8-b84a-233159fb94c3",
+        "title": "REVENUE-EXP-01: Domain Flip Pilot \u2014 Define niche filters + selection rubric",
+        "status": "pending",
+        "task_type": "analysis",
+        "priority": "critical",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.161839+00"
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 6,
+    "rowAsArray": false
+  }
+}

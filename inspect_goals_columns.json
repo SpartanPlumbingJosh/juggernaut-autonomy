@@ -1,0 +1,107 @@
+{
+  "fields": [
+    {
+      "name": "column_name",
+      "dataTypeID": 19,
+      "tableID": 13305,
+      "columnID": 4,
+      "dataTypeSize": 64,
+      "dataTypeModifier": -1,
+      "format": "text"
+    },
+    {
+      "name": "data_type",
+      "dataTypeID": 1043,
+      "tableID": 13305,
+      "columnID": 8,
+      "dataTypeSize": -1,
+      "dataTypeModifier": -1,
+      "format": "text"
+    }
+  ],
+  "rows": [
+    {
+      "column_name": "id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "parent_goal_id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "title",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "description",
+      "data_type": "text"
+    },
+    {
+      "column_name": "success_criteria",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "created_by",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "assigned_worker_id",
+      "data_type": "uuid"
+    },
+    {
+      "column_name": "status",
+      "data_type": "character varying"
+    },
+    {
+      "column_name": "progress",
+      "data_type": "numeric"
+    },
+    {
+      "column_name": "deadline",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "max_cost_cents",
+      "data_type": "integer"
+    },
+    {
+      "column_name": "required_approvals",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "outcome",
+      "data_type": "text"
+    },
+    {
+      "column_name": "outcome_data",
+      "data_type": "jsonb"
+    },
+    {
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "started_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "completed_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone"
+    },
+    {
+      "column_name": "time_budget_minutes",
+      "data_type": "integer"
+    },
+    {
+      "column_name": "time_spent_minutes",
+      "data_type": "integer"
+    }
+  ],
+  "command": "SELECT",
+  "rowCount": 20,
+  "rowAsArray": false
+}

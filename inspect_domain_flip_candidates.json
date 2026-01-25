@@ -1,0 +1,82 @@
+{
+  "ok": true,
+  "result": {
+    "fields": [
+      {
+        "name": "id",
+        "dataTypeID": 2950,
+        "tableID": 291226,
+        "columnID": 1,
+        "dataTypeSize": 16,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "name",
+        "dataTypeID": 1043,
+        "tableID": 291226,
+        "columnID": 2,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 259,
+        "format": "text"
+      },
+      {
+        "name": "status",
+        "dataTypeID": 1043,
+        "tableID": 291226,
+        "columnID": 5,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 34,
+        "format": "text"
+      },
+      {
+        "name": "approved_at",
+        "dataTypeID": 1114,
+        "tableID": 291226,
+        "columnID": 32,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "created_at",
+        "dataTypeID": 1114,
+        "tableID": 291226,
+        "columnID": 24,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "updated_at",
+        "dataTypeID": 1114,
+        "tableID": 291226,
+        "columnID": 25,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "id": "3fa0ca36-b84b-462e-9905-7951c53375ab",
+        "name": "REVENUE-EXP-01: Domain Flip Pilot",
+        "status": "running",
+        "approved_at": "2026-01-19 18:54:16.572343",
+        "created_at": "2026-01-19 03:00:12.43038",
+        "updated_at": "2026-01-19 23:35:00.602408"
+      },
+      {
+        "id": "22222222-2222-2222-2222-222222222222",
+        "name": "Domain Flip Test 001",
+        "status": "pending",
+        "approved_at": null,
+        "created_at": "2026-01-19 03:01:28.475487",
+        "updated_at": "2026-01-19 03:01:28.475487"
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 2,
+    "rowAsArray": false
+  }
+}

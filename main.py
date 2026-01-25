@@ -1139,8 +1139,23 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
         pr_url = result_data.get("pr_url")
         if pr_url:
             evidence_text = pr_url
-        elif result_data.get("executed"):
-            evidence_text = f"Task executed successfully: {json.dumps(result_data)[:200]}"
+        else:
+            # Accept multiple common result shapes:
+            # - main.py tasks often return {"executed": True, ...}
+            # - handler_result.to_dict() returns {"success": bool, "data": {...}, ...}
+            # - AI handler stores useful output in data.summary/data.result
+            executed_flag = bool(result_data.get("executed"))
+            success_flag = bool(result_data.get("success"))
+            data_obj = result_data.get("data")
+            summary = None
+            if isinstance(data_obj, dict):
+                summary = data_obj.get("summary")
+
+            if executed_flag or success_flag or isinstance(data_obj, (dict, list, str)):
+                if isinstance(summary, str) and summary.strip():
+                    evidence_text = f"Summary: {summary.strip()[:400]}"
+                else:
+                    evidence_text = f"Task executed: {json.dumps(result_data, default=str)[:600]}"
     
     # VERIFICATION GATE: Check evidence before marking complete
     if status == "completed" and VERIFICATION_AVAILABLE:
@@ -1163,8 +1178,11 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     UPDATE governance_tasks 
                     SET error_message = CONCAT(
                         COALESCE(error_message, ''),
-                        '[VERIFICATION] Completion rejected: Missing valid evidence. ',
-                        'Provide PR link, file path, or substantive completion notes. '
+                        CASE
+                            WHEN COALESCE(error_message, '') LIKE '%[VERIFICATION] Completion rejected:%'
+                            THEN ''
+                            ELSE '[VERIFICATION] Completion rejected: Missing valid evidence. Provide PR link, file path, or substantive completion notes. '
+                        END
                     )
                     WHERE id = {escape_value(task_id)}
                 """

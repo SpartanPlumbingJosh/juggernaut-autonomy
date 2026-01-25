@@ -1,0 +1,374 @@
+{
+  "tasks": {
+    "fields": [
+      {
+        "name": "id",
+        "dataTypeID": 2950,
+        "tableID": 290715,
+        "columnID": 1,
+        "dataTypeSize": 16,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "title",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 7,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 504,
+        "format": "text"
+      },
+      {
+        "name": "status",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 29,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 54,
+        "format": "text"
+      },
+      {
+        "name": "task_type",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 6,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 104,
+        "format": "text"
+      },
+      {
+        "name": "priority",
+        "dataTypeID": 290596,
+        "tableID": 290715,
+        "columnID": 11,
+        "dataTypeSize": 4,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "requires_approval",
+        "dataTypeID": 16,
+        "tableID": 290715,
+        "columnID": 25,
+        "dataTypeSize": 1,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "attempt_count",
+        "dataTypeID": 23,
+        "tableID": 290715,
+        "columnID": 20,
+        "dataTypeSize": 4,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "max_attempts",
+        "dataTypeID": 23,
+        "tableID": 290715,
+        "columnID": 21,
+        "dataTypeSize": 4,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "created_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 15,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "assigned_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 16,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "started_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 17,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "completed_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 18,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "updated_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 35,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "completion_evidence_preview",
+        "dataTypeID": 25,
+        "tableID": 0,
+        "columnID": 0,
+        "dataTypeSize": -1,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "error_message",
+        "dataTypeID": 25,
+        "tableID": 290715,
+        "columnID": 13,
+        "dataTypeSize": -1,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "id": "cc40b40d-be5a-41c8-b84a-233159fb94c3",
+        "title": "REVENUE-EXP-01: Domain Flip Pilot \u2014 Define niche filters + selection rubric",
+        "status": "waiting_approval",
+        "task_type": "analysis",
+        "priority": "critical",
+        "requires_approval": false,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "created_at": "2026-01-25 17:55:43.161839+00",
+        "assigned_at": null,
+        "started_at": "2026-01-25 17:55:50.234451+00",
+        "completed_at": null,
+        "updated_at": "2026-01-25 17:55:50.234451+00",
+        "completion_evidence_preview": "",
+        "error_message": null
+      },
+      {
+        "id": "8b51fc1a-c4cb-440c-839a-f7ed9609dd7b",
+        "title": "REVENUE-EXP-01: Find 20 undervalued domain candidates (<= $20)",
+        "status": "waiting_approval",
+        "task_type": "research",
+        "priority": "critical",
+        "requires_approval": false,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "created_at": "2026-01-25 17:55:43.326844+00",
+        "assigned_at": null,
+        "started_at": "2026-01-25 17:56:33.906+00",
+        "completed_at": null,
+        "updated_at": "2026-01-25 17:55:43.326844+00",
+        "completion_evidence_preview": "",
+        "error_message": null
+      },
+      {
+        "id": "2ca8b324-3adc-4938-a5f7-fe920743ae2f",
+        "title": "REVENUE-EXP-01: Evaluate top 5 domain candidates (age/backlinks/keywords/comps)",
+        "status": "waiting_approval",
+        "task_type": "analysis",
+        "priority": "high",
+        "requires_approval": false,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "created_at": "2026-01-25 17:55:43.488736+00",
+        "assigned_at": null,
+        "started_at": "2026-01-25 17:56:36.122834+00",
+        "completed_at": null,
+        "updated_at": "2026-01-25 17:55:43.488736+00",
+        "completion_evidence_preview": "",
+        "error_message": null
+      },
+      {
+        "id": "cff581e4-a380-4f9f-a938-a7f50a3d9b2a",
+        "title": "REVENUE-EXP-01: Select best domain + finalize purchase plan (approval required)",
+        "status": "waiting_approval",
+        "task_type": "workflow",
+        "priority": "critical",
+        "requires_approval": true,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "created_at": "2026-01-25 17:55:43.642175+00",
+        "assigned_at": null,
+        "started_at": "2026-01-25 17:56:34.901142+00",
+        "completed_at": null,
+        "updated_at": "2026-01-25 17:55:43.642175+00",
+        "completion_evidence_preview": "",
+        "error_message": null
+      },
+      {
+        "id": "f7d07bac-8337-4ab6-85e1-b1c3e9cd5bce",
+        "title": "REVENUE-EXP-01: Create listing assets + list domain on marketplaces",
+        "status": "in_progress",
+        "task_type": "workflow",
+        "priority": "high",
+        "requires_approval": false,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "created_at": "2026-01-25 17:55:43.797715+00",
+        "assigned_at": null,
+        "started_at": "2026-01-25 17:56:37.144063+00",
+        "completed_at": null,
+        "updated_at": "2026-01-25 17:55:43.797715+00",
+        "completion_evidence_preview": "",
+        "error_message": "[VERIFICATION] Completion rejected: Missing valid evidence. Provide PR link, file path, or substantive completion notes. [VERIFICATION] Completion rejected: Missing valid evidence. Provide PR link, file path, or substantive completion notes. [VERIFICATION] Completion rejected: Missing valid evidence. Provide PR link, file path, or substantive completion notes. [VERIFICATION] Completion rejected: Missing valid evidence. Provide PR link, file path, or substantive completion notes. [VERIFICATION] Completion rejected: Missing valid evidence. Provide PR link, file path, or substantive completion notes. "
+      },
+      {
+        "id": "2ba17d57-bcd6-4c07-95d9-af0ba008b6c4",
+        "title": "REVENUE-EXP-01: Monitor inquiries + weekly status report",
+        "status": "in_progress",
+        "task_type": "analysis",
+        "priority": "medium",
+        "requires_approval": false,
+        "attempt_count": 0,
+        "max_attempts": 3,
+        "created_at": "2026-01-25 17:55:43.958812+00",
+        "assigned_at": null,
+        "started_at": "2026-01-25 17:56:50.37879+00",
+        "completed_at": null,
+        "updated_at": "2026-01-25 17:56:50.37879+00",
+        "completion_evidence_preview": "",
+        "error_message": null
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 6,
+    "rowAsArray": false
+  },
+  "active_related": {
+    "fields": [
+      {
+        "name": "id",
+        "dataTypeID": 2950,
+        "tableID": 290715,
+        "columnID": 1,
+        "dataTypeSize": 16,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "title",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 7,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 504,
+        "format": "text"
+      },
+      {
+        "name": "status",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 29,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 54,
+        "format": "text"
+      },
+      {
+        "name": "task_type",
+        "dataTypeID": 1043,
+        "tableID": 290715,
+        "columnID": 6,
+        "dataTypeSize": -1,
+        "dataTypeModifier": 104,
+        "format": "text"
+      },
+      {
+        "name": "priority",
+        "dataTypeID": 290596,
+        "tableID": 290715,
+        "columnID": 11,
+        "dataTypeSize": 4,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "requires_approval",
+        "dataTypeID": 16,
+        "tableID": 290715,
+        "columnID": 25,
+        "dataTypeSize": 1,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "created_at",
+        "dataTypeID": 1184,
+        "tableID": 290715,
+        "columnID": 15,
+        "dataTypeSize": 8,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "id": "2ba17d57-bcd6-4c07-95d9-af0ba008b6c4",
+        "title": "REVENUE-EXP-01: Monitor inquiries + weekly status report",
+        "status": "in_progress",
+        "task_type": "analysis",
+        "priority": "medium",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.958812+00"
+      },
+      {
+        "id": "f7d07bac-8337-4ab6-85e1-b1c3e9cd5bce",
+        "title": "REVENUE-EXP-01: Create listing assets + list domain on marketplaces",
+        "status": "in_progress",
+        "task_type": "workflow",
+        "priority": "high",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.797715+00"
+      },
+      {
+        "id": "cff581e4-a380-4f9f-a938-a7f50a3d9b2a",
+        "title": "REVENUE-EXP-01: Select best domain + finalize purchase plan (approval required)",
+        "status": "waiting_approval",
+        "task_type": "workflow",
+        "priority": "critical",
+        "requires_approval": true,
+        "created_at": "2026-01-25 17:55:43.642175+00"
+      },
+      {
+        "id": "2ca8b324-3adc-4938-a5f7-fe920743ae2f",
+        "title": "REVENUE-EXP-01: Evaluate top 5 domain candidates (age/backlinks/keywords/comps)",
+        "status": "waiting_approval",
+        "task_type": "analysis",
+        "priority": "high",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.488736+00"
+      },
+      {
+        "id": "8b51fc1a-c4cb-440c-839a-f7ed9609dd7b",
+        "title": "REVENUE-EXP-01: Find 20 undervalued domain candidates (<= $20)",
+        "status": "waiting_approval",
+        "task_type": "research",
+        "priority": "critical",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.326844+00"
+      },
+      {
+        "id": "cc40b40d-be5a-41c8-b84a-233159fb94c3",
+        "title": "REVENUE-EXP-01: Domain Flip Pilot \u2014 Define niche filters + selection rubric",
+        "status": "waiting_approval",
+        "task_type": "analysis",
+        "priority": "critical",
+        "requires_approval": false,
+        "created_at": "2026-01-25 17:55:43.161839+00"
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 6,
+    "rowAsArray": false
+  }
+}

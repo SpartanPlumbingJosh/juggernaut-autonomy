@@ -1,0 +1,278 @@
+{
+  "ok": true,
+  "result": {
+    "fields": [
+      {
+        "name": "column_name",
+        "dataTypeID": 19,
+        "tableID": 13305,
+        "columnID": 4,
+        "dataTypeSize": 64,
+        "dataTypeModifier": -1,
+        "format": "text"
+      },
+      {
+        "name": "data_type",
+        "dataTypeID": 1043,
+        "tableID": 13305,
+        "columnID": 8,
+        "dataTypeSize": -1,
+        "dataTypeModifier": -1,
+        "format": "text"
+      }
+    ],
+    "rows": [
+      {
+        "column_name": "id",
+        "data_type": "uuid"
+      },
+      {
+        "column_name": "goal_id",
+        "data_type": "uuid"
+      },
+      {
+        "column_name": "parent_task_id",
+        "data_type": "uuid"
+      },
+      {
+        "column_name": "assigned_worker",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "created_by",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "task_type",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "title",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "description",
+        "data_type": "text"
+      },
+      {
+        "column_name": "payload",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "priority",
+        "data_type": "USER-DEFINED"
+      },
+      {
+        "column_name": "result",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "error_message",
+        "data_type": "text"
+      },
+      {
+        "column_name": "depends_on",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "created_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "assigned_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "started_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "completed_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "deadline",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "attempt_count",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "max_attempts",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "next_retry_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "estimated_cost_cents",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "actual_cost_cents",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "requires_approval",
+        "data_type": "boolean"
+      },
+      {
+        "column_name": "approval_reason",
+        "data_type": "text"
+      },
+      {
+        "column_name": "tags",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "metadata",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "status",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "dry_run",
+        "data_type": "boolean"
+      },
+      {
+        "column_name": "dry_run_result",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "completion_evidence",
+        "data_type": "text"
+      },
+      {
+        "column_name": "root_task_id",
+        "data_type": "uuid"
+      },
+      {
+        "column_name": "failure_reason",
+        "data_type": "text"
+      },
+      {
+        "column_name": "updated_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "cost_budget",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "cost_spent",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "execution_cost",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "budget_allocated",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "budget_remaining",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "verification_status",
+        "data_type": "text"
+      },
+      {
+        "column_name": "task_level",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "implementation_plan",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "success_criteria",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "verification_result",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "verified_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "input_data",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "output_data",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "error_data",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "duration_ms",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "tokens_used",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "cost_cents",
+        "data_type": "integer"
+      },
+      {
+        "column_name": "trace_id",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "parent_log_id",
+        "data_type": "uuid"
+      },
+      {
+        "column_name": "source",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "verification_chain",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "current_gate",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "gate_evidence",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "endpoint_definition",
+        "data_type": "jsonb"
+      },
+      {
+        "column_name": "endpoint_verified",
+        "data_type": "boolean"
+      },
+      {
+        "column_name": "endpoint_verified_at",
+        "data_type": "timestamp with time zone"
+      },
+      {
+        "column_name": "stage",
+        "data_type": "character varying"
+      },
+      {
+        "column_name": "plan",
+        "data_type": "jsonb"
+      }
+    ],
+    "command": "SELECT",
+    "rowCount": 62,
+    "rowAsArray": false
+  }
+}

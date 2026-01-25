@@ -1,0 +1,5 @@
+{
+  "ok": false,
+  "error": "HTTP 400: {\"message\":\"column \\\"target_value\\\" does not exist\",\"code\":\"42703\",\"detail\":null,\"hint\":null,\"position\":\"40\",\"internalPosition\":null,\"internalQuery\":null,\"severity\":\"ERROR\",\"where\":null,\"table\":null,\"column\":null,\"schema\":null,\"dataType\":null,\"constraint\":null,\"file\":\"parse_relation.c\",\"line\":\"3716\",\"routine\":\"errorMissingColumn\"}",
+  "sql": "SELECT id, title, description, status, target_value, target_unit, deadline, created_at\n            FROM goals\n            ORDER BY created_at DESC\n            LIMIT 20;"
+}
