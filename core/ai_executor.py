@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
-DEFAULT_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "2048"))
+DEFAULT_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "4096"))
 DEFAULT_TIMEOUT_SECONDS = int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
 
 
@@ -47,11 +47,11 @@ class AIExecutor:
             "X-Title": self.title,
         }
 
-    def chat(self, messages: List[Dict[str, str]]) -> AIResponse:
+    def chat(self, messages: List[Dict[str, str]], max_tokens: Optional[int] = None) -> AIResponse:
         payload = {
             "model": self.model,
             "messages": messages,
-            "max_tokens": self.max_tokens,
+            "max_tokens": int(max_tokens) if max_tokens is not None else self.max_tokens,
         }
 
         data = json.dumps(payload).encode("utf-8")
