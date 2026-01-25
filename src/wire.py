@@ -1,339 +1,332 @@
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Optional, Sequence
+from dataclasses import dataclass
+from enum import Enum
+from typing import Dict, List
 
-try:
-    from core.conflict_manager import ConflictManager as ConflictManager  # type: ignore
-except Exception:  # pragma: no cover
-    ConflictManager = Any  # type: ignore
 
 # Constants
-DEFAULT_MAX_CONCURRENT_TASKS: int = 8
-DEFAULT_LOG_LEVEL: int = logging.INFO
+DEFAULT_TOTAL_TIME_BUDGET: float = 300.0  # seconds
+MIN_TASK_TIME: float = 1.0  # seconds
+MAX_TASK_TIME: float = 120.0  # seconds
 
+PRIORITY_WEIGHT: float = 2.0
+COMPLEXITY_WEIGHT: float = 1.0
+
+CRITICAL_PRIORITY_MULTIPLIER: float = 2.0
+HIGH_PRIORITY_MULTIPLIER: float = 1.5
+MEDIUM_PRIORITY_MULTIPLIER: float = 1.0
+LOW_PRIORITY_MULTIPLIER: float = 0.7
+
+SMALL_EPSILON: float = 1e-9
+
+
+# Logging configuration
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
+
+class Priority(Enum):
+    """Task priority levels for resource allocation."""
+
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+    CRITICAL = "critical"
 
 
 @dataclass
-class Task:
-    """Represents a unit of work assigned to an agent.
+class TaskSpec:
+    """Specification for a single task requiring a time budget.
 
     Attributes:
-        task_id: Unique identifier of the task.
-        agent_id: Identifier of the agent responsible for the task.
-        payload: Arbitrary data representing the task specifics.
-        priority: Priority of the task; lower numbers can represent higher priority.
-        resources: Collection of resource identifiers the task needs.
+        task_id: Unique identifier for the task.
+        priority: Priority level of the task.
+        estimated_complexity: Relative complexity (e.g., 1.0 simple, 10.0 very complex).
+        min_time: Minimum allowable time budget for the task.
+        max_time: Maximum allowable time budget for the task.
     """
 
     task_id: str
-    agent_id: str
-    payload: Dict[str, Any]
-    priority: int = 0
-    resources: Sequence[str] = field(default_factory=list)
+    priority: Priority
+    estimated_complexity: float
+    min_time: float = MIN_TASK_TIME
+    max_time: float = MAX_TASK_TIME
 
 
-@dataclass
-class TaskResult:
-    """Represents the result of an executed task.
+class ResourceAllocationError(Exception):
+    """Domain-specific exception for resource allocation errors."""
 
-    Attributes:
-        task_id: Identifier of the completed task.
-        agent_id: Identifier of the agent that executed the task.
-        success: Whether the task completed successfully.
-        result: Optional payload with the result of the task.
-        error: Optional error message if execution failed.
+
+class ResourceAllocator:
+    """Allocator that computes dynamic time budgets for tasks.
+
+    The allocator distributes a global time budget across multiple tasks
+    based on priority and estimated complexity, enforcing per-task min/max
+    constraints.
     """
 
-    task_id: str
-    agent_id: str
-    success: bool
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
-
-
-class MultiAgentExecutor:
-    """Executes tasks for multiple agents with L5 conflict detection and resolution.
-
-    This executor integrates with the `core.conflict_manager.ConflictManager`
-    to provide Level 5 multi-agent conflict detection and resolution before
-    executing tasks.
-    """
-
-    def __init__(
-        self,
-        conflict_manager: Optional[Any] = None,
-        max_concurrent_tasks: int = DEFAULT_MAX_CONCURRENT_TASKS,
-    ) -> None:
-        """Initializes the multi-agent executor.
+    def __init__(self, total_time_budget: float) -> None:
+        """Initialize the resource allocator.
 
         Args:
-            conflict_manager: Optional externally provided ConflictManager instance.
-                If not provided, a new instance is created.
-            max_concurrent_tasks: Maximum number of tasks to execute concurrently.
+            total_time_budget: Total time budget in seconds to be allocated.
+
+        Raises:
+            ValueError: If total_time_budget is non-positive.
         """
-        self.conflict_manager: Optional[Any] = conflict_manager
-        self.max_concurrent_tasks: int = max_concurrent_tasks
-        logger.debug(
-            "MultiAgentExecutor initialized with max_concurrent_tasks=%d",
-            self.max_concurrent_tasks,
-        )
+        if total_time_budget <= 0:
+            raise ValueError("Total time budget must be positive.")
+        self.total_time_budget = total_time_budget
 
-    def _apply_conflict_resolution(self, tasks: Sequence[Task]) -> List[Task]:
-        """Detects and resolves conflicts among a collection of tasks.
-
-        This method wires into the `core.conflict_manager.ConflictManager`
-        by calling its conflict detection and resolution methods. It is
-        intentionally defensive to support different underlying implementations
-        of the conflict manager.
-
-        The expected API of ConflictManager is one of:
-          - detect_conflicts(tasks) -> conflicts
-            resolve_conflicts(conflicts, tasks) -> resolved_tasks
-          - detect_and_resolve_conflicts(tasks) -> resolved_tasks
+    def _priority_multiplier(self, priority: Priority) -> float:
+        """Get weighting multiplier for a given priority.
 
         Args:
-            tasks: Collection of tasks to analyze.
+            priority: Task priority.
 
         Returns:
-            A list of tasks after conflict resolution.
+            Multiplier used to scale the task weight.
         """
-        task_list: List[Task] = list(tasks)
+        if priority == Priority.CRITICAL:
+            return CRITICAL_PRIORITY_MULTIPLIER
+        if priority == Priority.HIGH:
+            return HIGH_PRIORITY_MULTIPLIER
+        if priority == Priority.MEDIUM:
+            return MEDIUM_PRIORITY_MULTIPLIER
+        return LOW_PRIORITY_MULTIPLIER
 
-        if self.conflict_manager is None:
-            return task_list
+    def _compute_weights(self, tasks: List[TaskSpec]) -> Dict[str, float]:
+        """Compute relative allocation weights for each task.
 
-        logger.debug("Starting conflict detection for %d tasks", len(tasks))
+        Args:
+            tasks: List of task specifications.
 
-        try:
-            # Preferred combined API: detect_and_resolve_conflicts
-            if hasattr(self.conflict_manager, "detect_and_resolve_conflicts"):
+        Returns:
+            Mapping of task_id to computed weight.
+        """
+        weights: Dict[str, float] = {}
+        for task in tasks:
+            priority_component = PRIORITY_WEIGHT * self._priority_multiplier(task.priority)
+            complexity_component = COMPLEXITY_WEIGHT * max(task.estimated_complexity, SMALL_EPSILON)
+            weight = priority_component * complexity_component
+            weights[task.task_id] = max(weight, SMALL_EPSILON)
+        return weights
+
+    def _validate_tasks(self, tasks: List[TaskSpec]) -> None:
+        """Validate task constraints before allocation.
+
+        Args:
+            tasks: List of task specifications to validate.
+
+        Raises:
+            ValueError: If any task has invalid min_time or max_time constraints.
+        """
+        seen: set[str] = set()
+        for task in tasks:
+            if task.task_id in seen:
+                raise ValueError(f"Duplicate task_id detected: '{task.task_id}'")
+            seen.add(task.task_id)
+
+        for idx, task in enumerate(tasks):
+            if task.min_time < 0:
+                logger.error(
+                    "Task %s (index %d) has negative min_time: %.3f",
+                    task.task_id, idx, task.min_time
+                )
+                raise ValueError(
+                    f"Task '{task.task_id}' has invalid min_time={task.min_time:.3f} "
+                    "(must be non-negative)"
+                )
+            if task.max_time < 0:
+                logger.error(
+                    "Task %s (index %d) has negative max_time: %.3f",
+                    task.task_id, idx, task.max_time
+                )
+                raise ValueError(
+                    f"Task '{task.task_id}' has invalid max_time={task.max_time:.3f} "
+                    "(must be non-negative)"
+                )
+            if task.min_time > task.max_time:
+                logger.error(
+                    "Task %s (index %d) has min_time (%.3f) > max_time (%.3f)",
+                    task.task_id, idx, task.min_time, task.max_time
+                )
+                raise ValueError(
+                    f"Task '{task.task_id}' has min_time={task.min_time:.3f} > "
+                    f"max_time={task.max_time:.3f}"
+                )
+
+    def allocate(self, tasks: List[TaskSpec]) -> Dict[str, float]:
+        """Allocate time budgets dynamically across tasks.
+
+        Args:
+            tasks: List of task specifications to allocate time for.
+
+        Returns:
+            Mapping of task_id to allocated time in seconds.
+
+        Raises:
+            ResourceAllocationError: If constraints cannot be satisfied.
+            ValueError: If tasks list is empty or contains invalid tasks.
+        """
+        if not tasks:
+            raise ValueError("At least one task is required for allocation.")
+
+        logger.debug("Starting allocation for %d tasks with total budget %.3f", len(tasks), self.total_time_budget)
+
+        # Validate all tasks before proceeding
+        self._validate_tasks(tasks)
+
+        min_time_sum = sum(task.min_time for task in tasks)
+        if min_time_sum > self.total_time_budget:
+            message = (
+                "Total minimum time requirements exceed available budget: "
+                f"required={min_time_sum:.3f}, available={self.total_time_budget:.3f}"
+            )
+            logger.error(message)
+            raise ResourceAllocationError(message)
+
+        # Reserve the minimum time for each task first
+        remaining_budget = self.total_time_budget - min_time_sum
+        logger.debug("Reserved minimum times (%.3f), remaining budget: %.3f", min_time_sum, remaining_budget)
+
+        weights = self._compute_weights(tasks)
+        total_weight = sum(weights.values())
+
+        # Initial allocation proportional to weights (or even share if weights are negligible)
+        allocations: Dict[str, float] = {}
+        if total_weight <= SMALL_EPSILON:
+            # In pathological case, distribute remaining budget evenly but respect max_time
+            logger.warning("Total weight is extremely small; distributing remaining budget evenly.")
+            even_share = remaining_budget / len(tasks) if tasks else 0.0
+            for task in tasks:
+                tentative = task.min_time + even_share
+                clamped = max(task.min_time, min(tentative, task.max_time))
+                allocations[task.task_id] = clamped
+        else:
+            for task in tasks:
+                extra_share = remaining_budget * (weights[task.task_id] / total_weight)
+                allocated = task.min_time + extra_share
+                clamped = max(task.min_time, min(allocated, task.max_time))
+                allocations[task.task_id] = clamped
                 logger.debug(
-                    "Using ConflictManager.detect_and_resolve_conflicts API for conflict handling"
-                )
-                resolved_tasks: Any = self.conflict_manager.detect_and_resolve_conflicts(
-                    task_list
-                )  # type: ignore[attr-defined]
-                resolved_list: List[Task] = list(resolved_tasks)
-                logger.info(
-                    "Conflict detection and resolution completed; %d tasks after resolution",
-                    len(resolved_list),
-                )
-                return resolved_list
-
-            conflicts: Any = None
-            resolved: Any = None
-
-            # Fallback: separate detect_conflicts and resolve_conflicts APIs
-            if hasattr(self.conflict_manager, "detect_conflicts"):
-                logger.debug("Using ConflictManager.detect_conflicts API")
-                conflicts = self.conflict_manager.detect_conflicts(
-                    task_list
-                )  # type: ignore[attr-defined]
-                logger.info("Detected %d conflicts", len(conflicts) if conflicts is not None else 0)
-            else:
-                logger.warning(
-                    "ConflictManager has no 'detect_conflicts' method; skipping detection"
+                    "Task %s: weight=%.3f, extra_share=%.3f, raw_alloc=%.3f, clamped_alloc=%.3f",
+                    task.task_id,
+                    weights[task.task_id],
+                    extra_share,
+                    allocated,
+                    clamped,
                 )
 
-            if conflicts and hasattr(self.conflict_manager, "resolve_conflicts"):
-                logger.debug("Using ConflictManager.resolve_conflicts API")
-                resolved = self.conflict_manager.resolve_conflicts(
-                    conflicts, task_list
-                )  # type: ignore[attr-defined]
-                resolved_list = list(resolved)
-                logger.info(
-                    "Conflict resolution completed; %d tasks after resolution",
-                    len(resolved_list),
+        # Check if clamping caused unused budget, and redistribute if significant
+        used_budget = sum(allocations.values())
+        unallocated_budget = self.total_time_budget - used_budget
+        logger.debug("Initial allocations used %.3f of %.3f (unallocated: %.3f)", used_budget, self.total_time_budget, unallocated_budget)
+
+        if unallocated_budget > SMALL_EPSILON:
+            # Redistribute remaining budget among tasks that are not at max_time
+            adjustable_tasks = [task for task in tasks if allocations[task.task_id] < task.max_time - SMALL_EPSILON]
+            if adjustable_tasks:
+                logger.debug(
+                    "Redistributing %.3f additional budget among %d adjustable tasks",
+                    unallocated_budget,
+                    len(adjustable_tasks),
                 )
-                return resolved_list
+                adjustable_weights = {t.task_id: weights[t.task_id] for t in adjustable_tasks}
+                adjustable_total_weight = sum(adjustable_weights.values())
+                if adjustable_total_weight <= SMALL_EPSILON:
+                    even_extra = unallocated_budget / len(adjustable_tasks)
+                    for t in adjustable_tasks:
+                        allocations[t.task_id] = min(allocations[t.task_id] + even_extra, t.max_time)
+                else:
+                    for t in adjustable_tasks:
+                        extra = unallocated_budget * (adjustable_weights[t.task_id] / adjustable_total_weight)
+                        allocations[t.task_id] = min(allocations[t.task_id] + extra, t.max_time)
 
-            if conflicts and not hasattr(self.conflict_manager, "resolve_conflicts"):
-                logger.warning(
-                    "Conflicts were detected but ConflictManager has no "
-                    "'resolve_conflicts' method; continuing with original tasks"
-                )
-
-        except (TypeError, ValueError, RuntimeError) as exc:
-            logger.exception("Conflict resolution failed due to an error: %s", exc)
-            # In case of any error, fall back to original tasks.
-            return task_list
-
-        logger.debug(
-            "No conflict resolution API used; proceeding with %d original tasks",
-            len(task_list),
-        )
-        return task_list
-
-    def execute_task(self, task: Task) -> TaskResult:
-        """Executes a single task.
-
-        In a production system, this would dispatch work to the appropriate agent.
-        Here, it simulates execution with logging.
-
-        Args:
-            task: Task to execute.
-
-        Returns:
-            TaskResult describing the outcome of the execution.
-        """
-        logger.debug(
-            "Executing task %s for agent %s with priority %d",
-            task.task_id,
-            task.agent_id,
-            task.priority,
-        )
-        try:
-            # Placeholder for real execution logic.
-            simulated_result: Dict[str, Any] = {
-                "echo_payload": task.payload,
-                "resources_used": list(task.resources),
-            }
-            logger.info(
-                "Task %s executed successfully for agent %s",
-                task.task_id,
-                task.agent_id,
-            )
-            return TaskResult(
-                task_id=task.task_id,
-                agent_id=task.agent_id,
-                success=True,
-                result=simulated_result,
-            )
-        except (RuntimeError, ValueError) as exc:
-            logger.exception(
-                "Task %s execution failed for agent %s: %s",
-                task.task_id,
-                task.agent_id,
-                exc,
-            )
-            return TaskResult(
-                task_id=task.task_id,
-                agent_id=task.agent_id,
-                success=False,
-                error=str(exc),
-            )
-
-    def run_multi_agent_tasks(self, tasks: Iterable[Task]) -> List[TaskResult]:
-        """Runs a collection of tasks across multiple agents with L5 conflict handling.
-
-        This method performs:
-          1. Conflict detection and resolution using ConflictManager.
-          2. Concurrent execution of the resulting, conflict-free task set.
-
-        Args:
-            tasks: Iterable of tasks to run.
-
-        Returns:
-            List of TaskResult for each completed task.
-        """
-        original_tasks: List[Task] = list(tasks)
+        final_total = sum(allocations.values())
         logger.info(
-            "Starting multi-agent execution for %d tasks (pre-resolution)",
-            len(original_tasks),
+            "Resource allocation completed. Allocated %.3f seconds out of %.3f available.",
+            final_total,
+            self.total_time_budget,
         )
 
-        # Step 1: Detect and resolve conflicts with the ConflictManager.
-        resolved_tasks: List[Task] = self._apply_conflict_resolution(original_tasks)
-
-        # Step 2: Execute resolved tasks concurrently using ThreadPoolExecutor.
-        results: List[TaskResult] = []
-        with ThreadPoolExecutor(max_workers=self.max_concurrent_tasks) as executor:
-            future_to_task = {
-                executor.submit(self.execute_task, task): task
-                for task in resolved_tasks
-            }
-            for future in as_completed(future_to_task):
-                task = future_to_task[future]
-                try:
-                    result = future.result()
-                    results.append(result)
-                except Exception as exc:
-                    logger.exception(
-                        "Task %s raised an exception: %s", task.task_id, exc
-                    )
-                    results.append(
-                        TaskResult(
-                            task_id=task.task_id,
-                            agent_id=task.agent_id,
-                            success=False,
-                            error=str(exc),
-                        )
-                    )
-
-        logger.info(
-            "Multi-agent execution finished; %d results produced", len(results)
-        )
-        return results
+        return allocations
 
 
-def configure_logging(level: int = DEFAULT_LOG_LEVEL) -> None:
-    """Configures logging for the application.
+def allocate_resources(tasks: List[TaskSpec], total_time_budget: float) -> Dict[str, float]:
+    """Public API for dynamic time-budget allocation.
+
+    This function should be used by the system wherever time budgets for
+    tasks need to be determined dynamically, replacing any hardcoded
+    allocation decisions.
 
     Args:
-        level: Logging level to use for the root logger.
+        tasks: List of task specifications for which to allocate resources.
+        total_time_budget: Total time budget in seconds to be distributed
+            across all tasks.
+
+    Returns:
+        Mapping of task_id to allocated time in seconds.
+
+    Raises:
+        ResourceAllocationError: If allocation constraints cannot be satisfied.
+        ValueError: If invalid parameters are provided.
     """
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
-    )
-    logger.debug("Logging configured with level %s", logging.getLevelName(level))
+    allocator = ResourceAllocator(total_time_budget=total_time_budget)
+    return allocator.allocate(tasks)
+
+
+def _configure_root_logger() -> None:
+    """Configure the root logger if it has no handlers.
+
+    This ensures that logging output is visible when this module is executed
+    as a script, but does not interfere with applications that configure
+    logging on their own.
+    """
+    root_logger = logging.getLogger()
+    if not root_logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter(
+            fmt="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)
+        root_logger.setLevel(logging.INFO)
 
 
 def main() -> None:
-    """Entry point for running a sample multi-agent execution with conflict handling.
+    """Example entrypoint demonstrating dynamic resource allocation.
 
-    This demonstrates wiring the `core.conflict_manager.ConflictManager`
-    into the main execution path to enable L5 multi-agent conflict resolution.
+    This function is purely illustrative and can be removed or adapted
+    when integrating into the larger system.
     """
-    configure_logging()
+    _configure_root_logger()
 
-    # Create a sample set of tasks for multiple agents.
-    sample_tasks: List[Task] = [
-        Task(
-            task_id="task-1",
-            agent_id="agent-A",
-            payload={"operation": "read", "target": "resource-1"},
-            priority=1,
-            resources=["resource-1"],
-        ),
-        Task(
-            task_id="task-2",
-            agent_id="agent-B",
-            payload={"operation": "write", "target": "resource-1"},
-            priority=0,
-            resources=["resource-1"],
-        ),
-        Task(
-            task_id="task-3",
-            agent_id="agent-C",
-            payload={"operation": "compute", "target": "resource-2"},
-            priority=2,
-            resources=["resource-2"],
-        ),
+    example_tasks = [
+        TaskSpec(task_id="planning", priority=Priority.CRITICAL, estimated_complexity=8.0),
+        TaskSpec(task_id="analysis", priority=Priority.HIGH, estimated_complexity=6.0),
+        TaskSpec(task_id="retrieval", priority=Priority.MEDIUM, estimated_complexity=3.0),
+        TaskSpec(task_id="logging", priority=Priority.LOW, estimated_complexity=1.0, max_time=20.0),
     ]
 
-    executor = MultiAgentExecutor()
-    results: List[TaskResult] = executor.run_multi_agent_tasks(sample_tasks)
+    total_budget = DEFAULT_TOTAL_TIME_BUDGET
 
-    # Results are available for further processing; we only log summaries here.
-    for result in results:
-        if result.success:
-            logger.info(
-                "Result - task_id=%s agent_id=%s success=%s",
-                result.task_id,
-                result.agent_id,
-                result.success,
-            )
-        else:
-            logger.warning(
-                "Result - task_id=%s agent_id=%s success=%s error=%s",
-                result.task_id,
-                result.agent_id,
-                result.success,
-                result.error,
-            )
+    try:
+        allocations = allocate_resources(example_tasks, total_budget)
+    except (ResourceAllocationError, ValueError) as exc:
+        logger.error("Failed to allocate resources: %s", exc)
+        return
+
+    for task in example_tasks:
+        allocated_time = allocations.get(task.task_id, 0.0)
+        logger.info(
+            "Task '%s' (priority=%s, complexity=%.2f): allocated %.3f seconds",
+            task.task_id,
+            task.priority.value,
+            task.estimated_complexity,
+            allocated_time,
+        )
 
 
 if __name__ == "__main__":
