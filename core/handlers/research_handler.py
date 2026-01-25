@@ -228,6 +228,7 @@ class ResearchHandler(BaseHandler):
             List of search result dictionaries, or None if unavailable.
         """
         if not PERPLEXITY_API_KEY:
+            logger.warning("PERPLEXITY_API_KEY not set or empty")
             return None
 
         payload = {
@@ -249,7 +250,15 @@ class ResearchHandler(BaseHandler):
         try:
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
-        except Exception:
+        except urllib.error.HTTPError as e:
+            try:
+                body = e.read().decode("utf-8")
+            except Exception:
+                body = ""
+            logger.error(f"Perplexity API HTTP {e.code}: {body[:500]}")
+            return None
+        except Exception as e:
+            logger.error(f"Perplexity API call failed: {e}")
             return None
 
         choices = raw.get("choices") or []
