@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
     "ai": AIHandler,
     "database": DatabaseHandler,
-    "research": AIHandler,
+    "research": ResearchHandler,
     "scan": ScanHandler,
     "test": TestHandler,
     "workflow": AIHandler,

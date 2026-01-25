@@ -7,6 +7,7 @@ when available, with fallback to structured research documentation.
 
 import json
 import logging
+import os
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -24,6 +25,8 @@ MAX_QUERY_LENGTH = 500
 MAX_SUMMARY_LENGTH = 2000
 REQUEST_TIMEOUT_SECONDS = 30
 RESEARCH_FINDINGS_TABLE = "research_findings"
+PERPLEXITY_API_ENDPOINT = "https://api.perplexity.ai/chat/completions"
+PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "").strip()
 
 
 class ResearchHandler(BaseHandler):
@@ -216,12 +219,55 @@ class ResearchHandler(BaseHandler):
         Returns:
             List of search result dictionaries, or None if unavailable.
         """
-        # This is a placeholder for web search integration
-        # In production, this could call a search API or use MCP tools
-        
-        # For now, return None to indicate web search is not available
-        # The calling code will handle the fallback
-        return None
+        if not PERPLEXITY_API_KEY:
+            return None
+
+        payload = {
+            "model": "sonar",
+            "messages": [{"role": "user", "content": query}],
+            "return_citations": True,
+        }
+
+        req = urllib.request.Request(
+            PERPLEXITY_API_ENDPOINT,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+        choices = raw.get("choices") or []
+        answer = ""
+        if choices:
+            answer = ((choices[0] or {}).get("message") or {}).get("content") or ""
+        citations = raw.get("citations") or []
+
+        sources: List[Dict[str, Any]] = []
+        if isinstance(citations, list) and citations:
+            for url in citations[: max(1, int(max_results))]:
+                sources.append({
+                    "type": "citation",
+                    "url": url,
+                    "title": url,
+                    "snippet": (answer or "")[:400],
+                })
+        else:
+            sources.append({
+                "type": "perplexity",
+                "title": query[:120],
+                "snippet": (answer or "")[:400],
+                "raw": {"citations": citations},
+            })
+
+        return sources
 
     def _generate_summary(
         self,
