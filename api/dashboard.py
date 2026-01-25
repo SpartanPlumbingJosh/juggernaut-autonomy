@@ -30,6 +30,10 @@ if not DATABASE_URL:
 API_SECRET = os.getenv("DASHBOARD_API_SECRET")
 if not API_SECRET:
     raise ValueError("DASHBOARD_API_SECRET environment variable is required")
+
+# Simple static API key for frontend auth (optional but recommended)
+STATIC_API_KEY = os.getenv("DASHBOARD_STATIC_KEY")
+
 API_VERSION = "v1"
 
 # Rate limiting config
@@ -120,10 +124,22 @@ def validate_api_key(api_key: str) -> Optional[str]:
     """
     Validate an API key and return the user_id if valid.
     
+    Supports two auth methods:
+    1. Simple static key (DASHBOARD_STATIC_KEY) - returns "dashboard_user"
+    2. HMAC-signed keys (jug_userid_timestamp_signature)
+    
     Returns:
         user_id if valid, None if invalid
     """
-    if not api_key or not api_key.startswith("jug_"):
+    if not api_key:
+        return None
+    
+    # Check static key first (simple auth for frontend)
+    if STATIC_API_KEY and api_key == STATIC_API_KEY:
+        return "dashboard_user"
+    
+    # Check HMAC-signed key format
+    if not api_key.startswith("jug_"):
         return None
     
     try:
@@ -338,14 +354,250 @@ class DashboardData:
             task_counts = {r["status"]: int(r["count"]) for r in task_data.get("rows", [])}
             result["tasks"] = {
                 "pending": task_counts.get("pending", 0),
-                "running": task_counts.get("running", 0),
+                "in_progress": task_counts.get("in_progress", 0),
+                "running": task_counts.get("in_progress", 0),
                 "completed": task_counts.get("completed", 0),
-                "failed": task_counts.get("failed", 0)
+                "failed": task_counts.get("failed", 0),
+                "waiting_approval": task_counts.get("waiting_approval", 0)
             }
         except Exception as e:
             result["tasks"]["error"] = str(e)
         
         return result
+
+
+# ============================================================
+# TASKS ENDPOINTS (For Hierarchical Tasks UI)
+# ============================================================
+
+def get_tasks(
+    status: str = None,
+    priority: str = None,
+    worker: str = None,
+    limit: int = 50,
+    roots_only: bool = False
+) -> Dict[str, Any]:
+    """
+    Get detailed task list with filtering.
+    
+    Args:
+        status: Filter by status (pending, in_progress, completed, failed, waiting_approval)
+        priority: Filter by priority (critical, high, medium, low)
+        worker: Filter by assigned worker
+        limit: Maximum tasks to return (default 50)
+        roots_only: If true, only return tasks without a parent (top-level tasks)
+    
+    Returns:
+        Task list with summary statistics
+    """
+    conditions = []
+    
+    # Sanitize and apply filters
+    if status:
+        safe_status = sanitize_identifier(status)
+        conditions.append(f"status::text = '{safe_status}'")
+    if priority:
+        safe_priority = sanitize_identifier(priority)
+        conditions.append(f"priority = '{safe_priority}'")
+    if worker:
+        safe_worker = sanitize_identifier(worker)
+        conditions.append(f"assigned_worker = '{safe_worker}'")
+    if roots_only:
+        conditions.append("parent_task_id IS NULL")
+    
+    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+    
+    # Ensure limit is reasonable
+    limit = min(max(1, int(limit)), 200)
+    
+    sql = f"""
+        SELECT 
+            id,
+            title,
+            description,
+            task_type,
+            status::text as status,
+            priority,
+            assigned_worker,
+            parent_task_id,
+            root_task_id,
+            created_at,
+            started_at,
+            completed_at,
+            completion_evidence,
+            error_message,
+            (SELECT COUNT(*) FROM governance_tasks c WHERE c.parent_task_id = governance_tasks.id) as child_count
+        FROM governance_tasks
+        {where}
+        ORDER BY 
+            CASE priority 
+                WHEN 'critical' THEN 0
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                ELSE 3
+            END,
+            created_at DESC
+        LIMIT {limit}
+    """
+    
+    try:
+        result = query_db(sql)
+        tasks = result.get("rows", [])
+        
+        # Convert to frontend-friendly format (snake_case already, but ensure child_count is int)
+        formatted_tasks = []
+        for task in tasks:
+            formatted_tasks.append({
+                "id": task.get("id"),
+                "title": task.get("title"),
+                "description": task.get("description"),
+                "task_type": task.get("task_type"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "assigned_worker": task.get("assigned_worker"),
+                "parent_task_id": task.get("parent_task_id"),
+                "root_task_id": task.get("root_task_id"),
+                "created_at": task.get("created_at"),
+                "started_at": task.get("started_at"),
+                "completed_at": task.get("completed_at"),
+                "completion_evidence": task.get("completion_evidence"),
+                "error_message": task.get("error_message"),
+                "child_count": int(task.get("child_count", 0) or 0)
+            })
+        
+        # Get status breakdown for summary
+        status_sql = """
+            SELECT status::text as status, COUNT(*) as count 
+            FROM governance_tasks 
+            GROUP BY status
+        """
+        status_result = query_db(status_sql)
+        status_counts = {r["status"]: int(r["count"]) for r in status_result.get("rows", [])}
+        
+        return {
+            "success": True,
+            "summary": {
+                "total": sum(status_counts.values()),
+                "by_status": status_counts
+            },
+            "tasks": formatted_tasks
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_task_children(task_id: str) -> Dict[str, Any]:
+    """
+    Get child tasks for a parent task.
+    
+    Args:
+        task_id: UUID of the parent task
+    
+    Returns:
+        List of child tasks
+    """
+    if not validate_uuid(task_id):
+        return {"success": False, "error": "Invalid task_id format"}
+    
+    sql = f"""
+        SELECT 
+            id,
+            title,
+            description,
+            task_type,
+            status::text as status,
+            priority,
+            assigned_worker,
+            parent_task_id,
+            created_at,
+            started_at,
+            completed_at,
+            completion_evidence,
+            error_message,
+            (SELECT COUNT(*) FROM governance_tasks c WHERE c.parent_task_id = governance_tasks.id) as child_count
+        FROM governance_tasks
+        WHERE parent_task_id = '{task_id}'
+        ORDER BY created_at
+    """
+    
+    try:
+        result = query_db(sql)
+        tasks = result.get("rows", [])
+        
+        # Format tasks
+        formatted_tasks = []
+        for task in tasks:
+            formatted_tasks.append({
+                "id": task.get("id"),
+                "title": task.get("title"),
+                "description": task.get("description"),
+                "task_type": task.get("task_type"),
+                "status": task.get("status"),
+                "priority": task.get("priority"),
+                "assigned_worker": task.get("assigned_worker"),
+                "parent_task_id": task.get("parent_task_id"),
+                "created_at": task.get("created_at"),
+                "started_at": task.get("started_at"),
+                "completed_at": task.get("completed_at"),
+                "completion_evidence": task.get("completion_evidence"),
+                "error_message": task.get("error_message"),
+                "child_count": int(task.get("child_count", 0) or 0)
+            })
+        
+        return {
+            "success": True,
+            "parent_task_id": task_id,
+            "count": len(formatted_tasks),
+            "tasks": formatted_tasks
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def get_task_logs(task_id: str, limit: int = 50) -> Dict[str, Any]:
+    """
+    Get audit logs for a task from execution_logs table.
+    
+    Args:
+        task_id: UUID of the task
+        limit: Maximum logs to return (default 50)
+    
+    Returns:
+        List of log entries for the task
+    """
+    if not validate_uuid(task_id):
+        return {"success": False, "error": "Invalid task_id format"}
+    
+    limit = min(max(1, int(limit)), 200)
+    
+    sql = f"""
+        SELECT 
+            id,
+            task_id,
+            worker_id,
+            action,
+            level,
+            message,
+            error_data,
+            created_at
+        FROM execution_logs
+        WHERE task_id = '{task_id}'
+        ORDER BY created_at DESC
+        LIMIT {limit}
+    """
+    
+    try:
+        result = query_db(sql)
+        logs = result.get("rows", [])
+        
+        return {
+            "success": True,
+            "task_id": task_id,
+            "count": len(logs),
+            "logs": logs
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 # ============================================================
@@ -610,7 +862,7 @@ def get_agent_health() -> Dict[str, Any]:
             assigned_worker as worker_id,
             COUNT(*) FILTER (WHERE status::text = 'completed') as completed_24h,
             COUNT(*) FILTER (WHERE status::text = 'failed') as failed_24h,
-            COUNT(*) FILTER (WHERE status::text = 'running') as running
+            COUNT(*) FILTER (WHERE status::text = 'in_progress') as running
         FROM governance_tasks
         WHERE created_at >= NOW() - INTERVAL '24 hours'
         GROUP BY assigned_worker
@@ -1009,7 +1261,11 @@ DASHBOARD_FUNCTIONS = {
     "goal_progress": get_goal_progress,
     "profit_loss": get_profit_loss,
     "pending_approvals": get_pending_approvals,
-    "system_alerts": get_system_alerts
+    "system_alerts": get_system_alerts,
+    # New task endpoints for hierarchical UI
+    "tasks": get_tasks,
+    "task_children": get_task_children,
+    "task_logs": get_task_logs,
 }
 
 
@@ -1108,10 +1364,14 @@ def handle_request(
     if body:
         params.update(body)
     
-    # Add path parameters (e.g., experiment_id from /v1/experiment/123)
+    # Add path parameters (e.g., task_id from /v1/task_children/123)
     if len(path_parts) > 2:
         if endpoint == "experiment_details":
             params["experiment_id"] = path_parts[2]
+        elif endpoint == "task_children":
+            params["task_id"] = path_parts[2]
+        elif endpoint == "task_logs":
+            params["task_id"] = path_parts[2]
     
     result = get_dashboard_endpoint(endpoint, params)
     

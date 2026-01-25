@@ -3,6 +3,8 @@ Code Task Executor for JUGGERNAUT
 
 Handles autonomous code generation, PR creation, and merging for "code" type tasks.
 Integrates CodeGenerator and GitHubClient for end-to-end autonomous development.
+
+Supports multiple repositories via target_repo in task payload.
 """
 
 import logging
@@ -21,6 +23,12 @@ DEFAULT_BRANCH_PREFIX = "feature/auto"
 MAX_MERGE_WAIT_SECONDS = 300
 MERGE_CHECK_INTERVAL_SECONDS = 15
 
+# Supported repositories - add new repos here
+SUPPORTED_REPOS = {
+    "juggernaut-autonomy": "SpartanPlumbingJosh/juggernaut-autonomy",
+    "spartan-hq": "SpartanPlumbingJosh/spartan-hq",
+}
+
 
 @dataclass
 class CodeTaskResult:
@@ -34,6 +42,7 @@ class CodeTaskResult:
     files_created: Optional[List[str]] = None
     tokens_used: int = 0
     model_used: Optional[str] = None
+    target_repo: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for storage."""
@@ -46,7 +55,8 @@ class CodeTaskResult:
             "error": self.error,
             "files_created": self.files_created,
             "tokens_used": self.tokens_used,
-            "model_used": self.model_used
+            "model_used": self.model_used,
+            "target_repo": self.target_repo
         }
 
 
@@ -59,6 +69,8 @@ class CodeTaskExecutor:
     2. Generate code using AI (CodeGenerator)
     3. Create branch, commit files, create PR (GitHubClient)
     4. Optionally wait for checks and merge
+    
+    Supports multiple repositories via target_repo in task payload.
     """
     
     def __init__(
@@ -76,7 +88,7 @@ class CodeTaskExecutor:
         self.log_action = log_action_func or self._default_log
         self.auto_merge = auto_merge
         self._generator = None
-        self._github = None
+        self._github_clients: Dict[str, Any] = {}
     
     def _default_log(
         self,
@@ -96,12 +108,30 @@ class CodeTaskExecutor:
             self._generator = CodeGenerator()
         return self._generator
     
-    def _get_github(self):
-        """Lazily initialize GitHub client."""
-        if self._github is None:
+    def _get_github(self, repo: Optional[str] = None):
+        """
+        Get GitHub client for a specific repository.
+        
+        Args:
+            repo: Repository in "owner/repo" format, or short name from SUPPORTED_REPOS.
+                  Defaults to juggernaut-autonomy.
+        
+        Returns:
+            Configured GitHubClient instance.
+        """
+        # Resolve short names to full repo paths
+        if repo and repo in SUPPORTED_REPOS:
+            repo = SUPPORTED_REPOS[repo]
+        elif repo is None:
+            repo = SUPPORTED_REPOS.get("juggernaut-autonomy", 
+                                       os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy"))
+        
+        # Cache clients per repo
+        if repo not in self._github_clients:
             from src.github_automation import GitHubClient
-            self._github = GitHubClient()
-        return self._github
+            self._github_clients[repo] = GitHubClient(repo=repo)
+        
+        return self._github_clients[repo]
     
     def _sanitize_branch_name(self, title: str) -> str:
         """Create a valid git branch name from task title."""
@@ -143,14 +173,22 @@ class CodeTaskExecutor:
             task_id: Unique task identifier.
             task_title: Task title.
             task_description: Full task description.
-            task_payload: Task payload with parameters.
-            
+            task_payload: Task payload with parameters including:
+                - target_repo: Repository to work on (optional, defaults to juggernaut-autonomy)
+                - module_name: Name of module to generate
+                - target_path: Path for generated files
+                - requirements: List of requirements
+                - existing_code: Existing code context
+                
         Returns:
             CodeTaskResult with execution outcome.
         """
+        # Get target repo from payload
+        target_repo = task_payload.get("target_repo") or task_payload.get("repo")
+        
         self.log_action(
             "code_task.start",
-            f"Starting code task: {task_title}",
+            f"Starting code task: {task_title}" + (f" (repo: {target_repo})" if target_repo else ""),
             task_id=task_id
         )
         
@@ -194,8 +232,8 @@ class CodeTaskExecutor:
                     task_id=task_id
                 )
             
-            # Create branch and commit
-            github = self._get_github()
+            # Get GitHub client for the target repo
+            github = self._get_github(target_repo)
             branch_name = self._sanitize_branch_name(task_title)
             
             github.create_branch(branch_name)
@@ -237,6 +275,7 @@ JUGGERNAUT Autonomous Engine
 - Task ID: `{task_id}`
 - Model: `{generated.model_used}`
 - Tokens: {generated.tokens_used}
+- Target Repo: `{github.repo}`
 """
             
             pr_number = github.create_pr(
@@ -266,7 +305,8 @@ JUGGERNAUT Autonomous Engine
                 merged=merged,
                 files_created=files_created,
                 tokens_used=generated.tokens_used + (tests.tokens_used if tests else 0),
-                model_used=generated.model_used
+                model_used=generated.model_used,
+                target_repo=github.repo
             )
             
         except Exception as e:
@@ -277,7 +317,7 @@ JUGGERNAUT Autonomous Engine
                 level="error",
                 task_id=task_id
             )
-            return CodeTaskResult(success=False, error=error_msg)
+            return CodeTaskResult(success=False, error=error_msg, target_repo=target_repo)
     
     def _wait_and_merge(
         self,
@@ -345,7 +385,7 @@ def execute_code_task(
         task_id: Task identifier.
         task_title: Task title.
         task_description: Task description.
-        task_payload: Task payload.
+        task_payload: Task payload (can include target_repo).
         log_action_func: Optional logging function.
         auto_merge: Whether to auto-merge PRs.
         
@@ -360,6 +400,7 @@ def execute_code_task(
 __all__ = [
     "CodeTaskExecutor",
     "CodeTaskResult",
+    "SUPPORTED_REPOS",
     "get_executor",
     "execute_code_task",
 ]

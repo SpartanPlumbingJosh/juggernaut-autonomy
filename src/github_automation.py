@@ -85,6 +85,7 @@ class GitHubClient:
         self.token = token or os.getenv("GITHUB_TOKEN")
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
+        self._default_branch: Optional[str] = None
         
         if not self.token:
             logger.warning("No GITHUB_TOKEN found - API calls may fail")
@@ -185,12 +186,39 @@ class GitHubClient:
             raise last_error
         raise GitHubError("Max retries exceeded")
     
-    def get_main_sha(self, branch: str = "main") -> str:
+    def get_default_branch(self) -> str:
+        """
+        Get the default branch name for the repository.
+        
+        Returns:
+            Default branch name (e.g., "main" or "master").
+            
+        Raises:
+            GitHubError: If repo not found or API error.
+        """
+        if self._default_branch:
+            return self._default_branch
+        
+        status, data = self._make_request(
+            "GET",
+            f"/repos/{self.repo}"
+        )
+        
+        if status == 200:
+            self._default_branch = data.get("default_branch", "main")
+            logger.info(f"Default branch for {self.repo}: {self._default_branch}")
+            return self._default_branch
+        elif status == 404:
+            raise GitHubError(f"Repository '{self.repo}' not found")
+        else:
+            raise GitHubError(f"Failed to get repo info: {data.get('message', 'Unknown')}")
+    
+    def get_main_sha(self, branch: Optional[str] = None) -> str:
         """
         Get the SHA of the latest commit on a branch.
         
         Args:
-            branch: Branch name. Defaults to "main".
+            branch: Branch name. Defaults to the repo's default branch.
             
         Returns:
             Commit SHA string.
@@ -198,6 +226,9 @@ class GitHubClient:
         Raises:
             GitHubError: If branch not found or API error.
         """
+        if branch is None:
+            branch = self.get_default_branch()
+        
         status, data = self._make_request(
             "GET",
             f"/repos/{self.repo}/git/ref/heads/{branch}"
@@ -216,7 +247,7 @@ class GitHubClient:
         
         Args:
             name: New branch name (without refs/heads/ prefix).
-            from_sha: Base commit SHA. Defaults to main branch HEAD.
+            from_sha: Base commit SHA. Defaults to default branch HEAD.
             
         Returns:
             True if branch created successfully.
@@ -242,17 +273,20 @@ class GitHubClient:
         else:
             raise GitHubError(f"Failed to create branch: {data.get('message', 'Unknown')}")
     
-    def get_file_sha(self, path: str, branch: str = "main") -> Optional[str]:
+    def get_file_sha(self, path: str, branch: Optional[str] = None) -> Optional[str]:
         """
         Get the SHA of a file for update operations.
         
         Args:
             path: File path in repository.
-            branch: Branch to check.
+            branch: Branch to check. Defaults to default branch.
             
         Returns:
             File SHA if exists, None if file doesn't exist.
         """
+        if branch is None:
+            branch = self.get_default_branch()
+        
         status, data = self._make_request(
             "GET",
             f"/repos/{self.repo}/contents/{path}?ref={branch}"
@@ -316,7 +350,7 @@ class GitHubClient:
         branch: str,
         title: str,
         body: str,
-        base: str = "main",
+        base: Optional[str] = None,
         draft: bool = False
     ) -> int:
         """
@@ -326,7 +360,7 @@ class GitHubClient:
             branch: Head branch (source).
             title: PR title.
             body: PR description.
-            base: Base branch (target). Defaults to "main".
+            base: Base branch (target). Defaults to repo's default branch.
             draft: Create as draft PR.
             
         Returns:
@@ -335,6 +369,9 @@ class GitHubClient:
         Raises:
             GitHubError: If PR creation fails.
         """
+        if base is None:
+            base = self.get_default_branch()
+        
         status, data = self._make_request(
             "POST",
             f"/repos/{self.repo}/pulls",

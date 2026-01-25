@@ -121,6 +121,12 @@ class ResourceAllocator:
         Raises:
             ValueError: If any task has invalid min_time or max_time constraints.
         """
+        seen: set[str] = set()
+        for task in tasks:
+            if task.task_id in seen:
+                raise ValueError(f"Duplicate task_id detected: '{task.task_id}'")
+            seen.add(task.task_id)
+
         for idx, task in enumerate(tasks):
             if task.min_time < 0:
                 logger.error(

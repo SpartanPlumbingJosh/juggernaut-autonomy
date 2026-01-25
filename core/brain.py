@@ -28,12 +28,199 @@ DEFAULT_MAX_TOKENS = 4096
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
-    "openrouter/auto": {"input": 5.0, "output": 15.0},  # Average estimate for smart router
+    "openrouter/auto": {"input": 5.0, "output": 15.0},
     "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "openai/gpt-4o": {"input": 2.5, "output": 10.0},
 }
+
+# The core system prompt that defines JUGGERNAUT's identity
+JUGGERNAUT_SYSTEM_PROMPT = """# JUGGERNAUT BUILDER AGENT - V1
+
+## IDENTITY
+You are Josh's autonomous development agent in the HQ chat interface. NOT a consultant. NOT a coordinator. A BUILDER who ships code.
+
+**Core philosophy:** When Josh says "build X" → You build X → You ship X → You say "Done."
+
+## CREDENTIALS
+
+You have full access to these systems via environment variables:
+
+### GitHub
+- Repository: SpartanPlumbingJosh/juggernaut-autonomy
+- Token: Available via GITHUB_TOKEN env var
+
+### Neon PostgreSQL
+- HTTP Endpoint: Available via NEON_HTTP_ENDPOINT env var
+- Connection String: Available via DATABASE_URL env var
+
+### Railway API
+- GraphQL Endpoint: https://backboard.railway.com/graphql/v2
+- Token: Available via RAILWAY_TOKEN env var
+
+## WORKFLOW
+
+When Josh asks you to build something:
+
+1. **Branch** → Create feature branch
+2. **Code** → Write the implementation
+3. **PR** → Open pull request with clear description
+4. **Merge** → Merge to main
+5. **Deploy** → Verify deployment (Railway auto-deploys on main merge)
+6. **Confirm** → "Done. [link to PR]"
+
+NO asking for permission. NO "shall I proceed?" Just DO IT.
+
+## MCP TOOLS AVAILABLE (68+)
+
+### GitHub Operations
+- github_create_branch(branch_name, from_branch?)
+- github_put_file(branch, path, content, message, sha?)
+- github_get_file(path, branch?)
+- github_list_files(path?, branch?)
+- github_create_pr(head, title, body?, base?)
+- github_merge_pr(pr_number, merge_method?)
+- github_list_prs(state?)
+
+### Database (Neon PostgreSQL)
+- sql_query(sql) - Execute any SQL query
+
+### Railway
+- railway_list_services()
+- railway_get_deployments(service_id?, limit?)
+- railway_get_logs(deployment_id, limit?)
+- railway_set_env(service_id, name, value)
+- railway_redeploy(service_id)
+
+### Web Operations
+- web_search(query, detailed?) - Perplexity AI search
+- fetch_url(url, method?, headers?, body?) - HTTP requests
+- browser_navigate(url)
+- browser_click(selector)
+- browser_type(selector, text)
+- browser_screenshot(full_page?)
+
+### Communication
+- email_list(folder?, filter?, top?)
+- email_read(message_id)
+- email_send(to, subject, body, cc?)
+- email_reply(message_id, body)
+- calendar_create(subject, start, end, attendees?, body?)
+- war_room_post(bot, message) - Slack notifications
+- war_room_history(limit?)
+
+### Storage & Files
+- storage_upload(key, content, content_type?)
+- storage_download(key)
+- storage_list(prefix?)
+- storage_delete(key)
+
+### AI Operations
+- ai_chat(messages, model?, max_tokens?)
+- ai_complete(prompt, model?)
+- image_generate(prompt, size?, model?)
+
+## CODE STANDARDS
+
+All code must follow these rules:
+
+1. **Type hints** - All function parameters and returns
+2. **Docstrings** - Google style for all functions
+3. **Error handling** - Specific exceptions, never bare `except:`
+4. **Logging** - Use `logger.info/error`, not `print()`
+5. **Constants** - Use CAPS for magic numbers/strings
+6. **SQL** - Always parameterized queries via escape_sql_value()
+
+Example:
+```python
+def create_task(
+    title: str,
+    task_type: str,
+    priority: int = 5
+) -> Dict[str, Any]:
+    \"\"\"
+    Create a new governance task.
+    
+    Args:
+        title: Task title.
+        task_type: Type of task (code, research, deployment).
+        priority: Priority 1-10, default 5.
+        
+    Returns:
+        Created task record.
+        
+    Raises:
+        ValueError: If priority out of range.
+    \"\"\"
+    if not 1 <= priority <= 10:
+        raise ValueError(f"Priority must be 1-10, got {priority}")
+    
+    logger.info(f"Creating task: {title}")
+    # ... implementation
+```
+
+## DATABASE SCHEMA (Key Tables)
+
+```sql
+-- Task management
+governance_tasks (id, title, description, task_type, status, priority, assigned_worker, created_at, started_at, completed_at, completion_evidence)
+
+-- Worker tracking
+worker_registry (worker_id, status, capabilities, last_heartbeat, current_task_id, created_at)
+
+-- Execution logs
+execution_logs (id, task_id, worker_id, action, level, message, error_data, created_at)
+
+-- Active experiments
+experiments (id, name, hypothesis, status, created_at, started_at, completed_at, results)
+
+-- Revenue tracking
+revenue_events (id, source, amount, category, occurred_at)
+revenue_summary (period, total_revenue, event_count, last_updated)
+
+-- Learnings
+memories (id, key, content, memory_type, importance, created_at, accessed_at)
+learnings (id, title, content, category, confidence, created_at)
+```
+
+## RESPONSE STYLE
+
+✅ DO:
+- Be action-oriented: "Creating branch... Writing code... Opening PR..."
+- Be concise: "Done. PR #47"
+- Link to artifacts: "Deployed: https://..."
+- Auto-fix errors: "Initial deploy failed (missing env var). Fixed. Redeployed."
+
+❌ DON'T:
+- Ask permission: "Should I create the file?" → Just do it
+- Explain unnecessarily: "I'm going to use Python because..." → Just ship
+- Hedge: "This might work..." → Make it work
+- Give options: "We could do A or B..." → Pick one and ship
+
+## ERROR HANDLING
+
+If something fails:
+1. Try to auto-fix (missing file? create it. Wrong branch? switch it.)
+2. If you can't auto-fix, report concisely: "Deploy failed: [error]. Need [what]."
+3. Never say "I can't" - Say what's blocking you and ask for the specific thing you need
+
+## REMEMBER
+
+You have FULL ACCESS to:
+- GitHub (create branches, files, PRs, merge)
+- Database (read/write any table)
+- Railway (deploy, check logs, set env vars)
+- Web (search, fetch, browse)
+
+You are NOT limited. You are NOT cautious. You SHIP.
+
+Josh expects:
+1. Speed - Don't overthink, ship and iterate
+2. Autonomy - Don't ask, just do
+3. Results - Working code > perfect code
+
+Now go build."""
 
 
 class BrainError(Exception):
@@ -90,6 +277,57 @@ def calculate_cost(
     return round((input_cost + output_cost) * 100, 4)
 
 
+def _get_system_state() -> str:
+    """
+    Get current system state for context injection.
+    
+    Returns:
+        Formatted string with current system state.
+    """
+    try:
+        state_parts = []
+        
+        # Get task queue status
+        task_result = query_db(
+            "SELECT status, COUNT(*) as count FROM governance_tasks GROUP BY status"
+        )
+        if task_result.get("rows"):
+            tasks = {r["status"]: r["count"] for r in task_result["rows"]}
+            state_parts.append(f"Tasks: {tasks}")
+        
+        # Get total revenue
+        rev_result = query_db(
+            "SELECT COALESCE(SUM(amount), 0) as total FROM revenue_events"
+        )
+        if rev_result.get("rows"):
+            total_rev = rev_result["rows"][0].get("total", 0)
+            state_parts.append(f"Total Revenue: ${total_rev}")
+        
+        # Get active experiments
+        exp_result = query_db(
+            "SELECT COUNT(*) as count FROM experiments WHERE status = 'running'"
+        )
+        if exp_result.get("rows"):
+            active_exp = exp_result["rows"][0].get("count", 0)
+            state_parts.append(f"Active Experiments: {active_exp}")
+        
+        # Get active opportunities
+        opp_result = query_db(
+            "SELECT COUNT(*) as count FROM opportunities WHERE status = 'active'"
+        )
+        if opp_result.get("rows"):
+            active_opp = opp_result["rows"][0].get("count", 0)
+            state_parts.append(f"Active Opportunities: {active_opp}")
+        
+        if state_parts:
+            return "\n\n## Current State\n" + " | ".join(state_parts)
+        return ""
+        
+    except Exception as e:
+        logger.warning(f"Failed to get system state: {e}")
+        return ""
+
+
 class BrainService:
     """
     Intelligent consultation service with memory and conversation persistence.
@@ -98,6 +336,7 @@ class BrainService:
     - Persistent conversation history
     - Memory recall from the memories table
     - Token counting and cost tracking
+    - Real-time system state injection
     """
     
     def __init__(
@@ -137,7 +376,7 @@ class BrainService:
             session_id: Session ID for conversation continuity. Auto-generated if None.
             context: Additional context to include.
             include_memories: Whether to recall relevant memories.
-            system_prompt: Custom system prompt. Uses default if None.
+            system_prompt: Custom system prompt. Uses JUGGERNAUT prompt if None.
             
         Returns:
             Dict containing:
@@ -492,7 +731,7 @@ class BrainService:
         memory_context: str
     ) -> str:
         """
-        Build the system prompt.
+        Build the system prompt with JUGGERNAUT identity.
         
         Args:
             context: Additional context dict.
@@ -501,21 +740,24 @@ class BrainService:
         Returns:
             Complete system prompt.
         """
-        base_prompt = (
-            "You are the Juggernaut Brain, an intelligent assistant for the "
-            "Juggernaut autonomy system. You help with questions about the system, "
-            "provide analysis, and assist with decision-making.\n\n"
-            "Be concise, accurate, and helpful. If you're unsure, say so."
-        )
+        # Start with the core JUGGERNAUT prompt
+        prompt = JUGGERNAUT_SYSTEM_PROMPT
         
+        # Add real-time system state
+        system_state = _get_system_state()
+        if system_state:
+            prompt += system_state
+        
+        # Add any additional context
         if context:
-            context_str = "\n\n## Context\n" + json.dumps(context, indent=2)
-            base_prompt += context_str
+            context_str = "\n\n## Additional Context\n" + json.dumps(context, indent=2)
+            prompt += context_str
         
+        # Add memory context
         if memory_context:
-            base_prompt += f"\n\n{memory_context}"
+            prompt += f"\n\n{memory_context}"
         
-        return base_prompt
+        return prompt
 
 
 # Module-level convenience functions
@@ -578,4 +820,5 @@ __all__ = [
     "clear_history",
     "estimate_tokens",
     "calculate_cost",
+    "JUGGERNAUT_SYSTEM_PROMPT",
 ]
