@@ -1,5 +1,10 @@
 import importlib
+import os
+import sys
 import types
+
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 
 def test_integrate_module_imports_successfully():
