@@ -8,6 +8,7 @@ when available, with fallback to structured research documentation.
 import json
 import logging
 import os
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -27,6 +28,11 @@ REQUEST_TIMEOUT_SECONDS = 30
 RESEARCH_FINDINGS_TABLE = "research_findings"
 PERPLEXITY_API_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "").strip()
+PUPPETEER_URL = os.environ.get("PUPPETEER_URL", "").strip()
+PUPPETEER_AUTH_TOKEN = os.environ.get("PUPPETEER_AUTH_TOKEN", "jug-pup-auth-2024").strip()
+
+_DOMAIN_RE = re.compile(r"\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|co|xyz|ai|app|dev)\b", re.IGNORECASE)
+_PRICE_RE = re.compile(r"(?:\$\s?\d{1,6}(?:[\.,]\d{1,2})?)|(?:\b\d{1,6}\s?(?:usd|\$)\b)", re.IGNORECASE)
 
 
 class ResearchHandler(BaseHandler):
@@ -194,9 +200,11 @@ class ResearchHandler(BaseHandler):
             }]
 
         # Build findings structure
+        extracted_candidates = self._extract_domain_candidates_from_sources(sources, task_id)
         findings = {
             "query": query,
             "sources": sources,
+            "candidates": extracted_candidates,
             "summary": self._generate_summary(query, sources),
             "key_points": self._extract_key_points(sources),
             "confidence": self._calculate_confidence(sources),
@@ -268,6 +276,97 @@ class ResearchHandler(BaseHandler):
             })
 
         return sources
+
+
+    def _puppeteer_action(self, action: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        if not PUPPETEER_URL:
+            return None
+
+        body = json.dumps({"action": action, **(params or {})}).encode("utf-8")
+        headers = {"Content-Type": "application/json"}
+        if PUPPETEER_AUTH_TOKEN:
+            headers["Authorization"] = f"Bearer {PUPPETEER_AUTH_TOKEN}"
+
+        req = urllib.request.Request(
+            f"{PUPPETEER_URL.rstrip('/')}/action",
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+
+    def _fetch_html_via_puppeteer(self, url: str) -> Optional[str]:
+        if not url:
+            return None
+
+        nav = self._puppeteer_action("navigate", {"url": url})
+        if not nav or not nav.get("success"):
+            return None
+
+        page = self._puppeteer_action("get_text", {})
+        if not page or not page.get("success"):
+            return None
+
+        html = page.get("html")
+        if not isinstance(html, str) or not html.strip():
+            return None
+        return html
+
+
+    def _extract_domain_candidates_from_sources(
+        self,
+        sources: List[Dict[str, Any]],
+        task_id: Optional[str]
+    ) -> List[Dict[str, Any]]:
+        if not sources:
+            return []
+
+        urls: List[str] = []
+        for s in sources:
+            url = s.get("url")
+            if isinstance(url, str) and url.startswith("http"):
+                urls.append(url)
+
+        urls = urls[:5]
+        if not urls:
+            return []
+
+        candidates: Dict[str, Dict[str, Any]] = {}
+        for url in urls:
+            html = self._fetch_html_via_puppeteer(url)
+            if not html:
+                continue
+
+            found_domains = _DOMAIN_RE.findall(html)
+            if not found_domains:
+                continue
+
+            prices = _PRICE_RE.findall(html)
+            price_hint = prices[0] if prices else None
+
+            for d in found_domains[:100]:
+                key = d.lower()
+                if key not in candidates:
+                    candidates[key] = {
+                        "domain": d.lower(),
+                        "source_url": url,
+                        "price_hint": price_hint,
+                    }
+
+        if candidates:
+            self._log(
+                "handler.research.domain_candidates_extracted",
+                f"Extracted {len(candidates)} domain candidates from {len(urls)} pages",
+                task_id=task_id,
+            )
+
+        return list(candidates.values())[:50]
 
     def _generate_summary(
         self,
