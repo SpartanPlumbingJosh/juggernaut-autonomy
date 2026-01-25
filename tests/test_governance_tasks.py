@@ -1,9 +1,14 @@
 import json
 import logging
+import os
 import sqlite3
+import sys
 from datetime import datetime
 
 import pytest
+
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
 import governance_tasks
 from governance_tasks import (
@@ -98,3 +103,28 @@ def test_ensure_schema_creates_required_tables(in_memory_manager):
         "updated_at",
     }
     assert columns == expected_task_columns
+
+
+def test_create_task_persists_row(in_memory_manager):
+    task_id = in_memory_manager.create_task(name="demo", parameters={"k": "v"}, dry_run=False)
+    assert isinstance(task_id, int)
+    assert task_id > 0
+
+    row = in_memory_manager._connection.execute("SELECT name, parameters, dry_run, status FROM governance_tasks WHERE id=?", (task_id,)).fetchone()
+    assert row is not None
+    assert row["name"] == "demo"
+    assert json.loads(row["parameters"]) == {"k": "v"}
+    assert int(row["dry_run"]) == SQLITE_BOOLEAN_FALSE
+    assert row["status"] == STATUS_PENDING
+
+
+def test_execute_task_dry_run_sets_result_and_status(in_memory_manager):
+    task_id = in_memory_manager.create_task(name="demo", parameters={"x": 1}, dry_run=True)
+    updated = in_memory_manager.execute_task(task_id)
+
+    assert updated is not None
+    assert updated.id == task_id
+    assert updated.dry_run is True
+    assert updated.status == STATUS_DRY_RUN_COMPLETED
+    assert updated.dry_run_result is not None
+    assert updated.dry_run_result.get("dry_run") is True

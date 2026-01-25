@@ -6,7 +6,7 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 # Configure module-level logger
 LOGGER = logging.getLogger(__name__)
@@ -147,3 +147,137 @@ class GovernanceTaskManager:
         Returns:
             The ID of the newly created task.
         """
+
+        now = datetime.utcnow()
+        created = now.strftime(ISO_FORMAT)
+
+        sql = """
+        INSERT INTO governance_tasks (
+            name,
+            parameters,
+            dry_run,
+            dry_run_result,
+            status,
+            created_at,
+            updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """
+        params = (
+            name,
+            json.dumps(parameters),
+            SQLITE_BOOLEAN_TRUE if dry_run else SQLITE_BOOLEAN_FALSE,
+            None,
+            STATUS_PENDING,
+            created,
+            created,
+        )
+
+        try:
+            cursor = self._connection.cursor()
+            cursor.execute(sql, params)
+            self._connection.commit()
+            task_id = int(cursor.lastrowid)
+            LOGGER.info("Created governance task id=%s name=%s dry_run=%s", task_id, name, dry_run)
+            return task_id
+        except sqlite3.Error as exc:
+            LOGGER.exception("Failed to create governance task name=%s: %s", name, exc)
+            raise
+
+    def get_task(self, task_id: int) -> Optional[GovernanceTask]:
+        sql = """
+        SELECT id, name, parameters, dry_run, dry_run_result, status, created_at, updated_at
+        FROM governance_tasks
+        WHERE id = ?
+        """
+        try:
+            cursor = self._connection.cursor()
+            cursor.execute(sql, (task_id,))
+            row = cursor.fetchone()
+        except sqlite3.Error as exc:
+            LOGGER.exception("Failed to fetch governance task id=%s: %s", task_id, exc)
+            raise
+
+        if row is None:
+            return None
+        return self._row_to_task(row)
+
+    def list_tasks(self, limit: int = 100) -> List[GovernanceTask]:
+        sql = """
+        SELECT id, name, parameters, dry_run, dry_run_result, status, created_at, updated_at
+        FROM governance_tasks
+        ORDER BY id DESC
+        LIMIT ?
+        """
+        try:
+            cursor = self._connection.cursor()
+            cursor.execute(sql, (limit,))
+            rows = cursor.fetchall()
+        except sqlite3.Error as exc:
+            LOGGER.exception("Failed to list governance tasks: %s", exc)
+            raise
+        return [self._row_to_task(r) for r in rows]
+
+    def execute_task(
+        self,
+        task_id: int,
+        dry_run_simulator: Optional[Callable[[GovernanceTask], Dict[str, Any]]] = None,
+    ) -> Optional[GovernanceTask]:
+        task = self.get_task(task_id)
+        if task is None:
+            return None
+
+        now = datetime.utcnow()
+        now_str = now.strftime(ISO_FORMAT)
+
+        if task.dry_run:
+            result = (
+                dry_run_simulator(task)
+                if dry_run_simulator is not None
+                else {"dry_run": True, "task": task.name, "parameters": task.parameters}
+            )
+            sql = """
+            UPDATE governance_tasks
+            SET dry_run_result = ?, status = ?, updated_at = ?
+            WHERE id = ?
+            """
+            params = (json.dumps(result), STATUS_DRY_RUN_COMPLETED, now_str, task_id)
+        else:
+            sql = """
+            UPDATE governance_tasks
+            SET status = ?, updated_at = ?
+            WHERE id = ?
+            """
+            params = (STATUS_COMPLETED, now_str, task_id)
+
+        try:
+            cursor = self._connection.cursor()
+            cursor.execute(sql, params)
+            self._connection.commit()
+        except sqlite3.Error as exc:
+            LOGGER.exception("Failed to execute governance task id=%s: %s", task_id, exc)
+            raise
+
+        return self.get_task(task_id)
+
+    def close(self) -> None:
+        try:
+            self._connection.close()
+        except sqlite3.Error:
+            return
+
+    def _row_to_task(self, row: sqlite3.Row) -> GovernanceTask:
+        created_at = datetime.strptime(str(row["created_at"]), ISO_FORMAT)
+        updated_at = datetime.strptime(str(row["updated_at"]), ISO_FORMAT)
+        parameters = json.loads(row["parameters"]) if row["parameters"] else {}
+        dry_run_result = json.loads(row["dry_run_result"]) if row["dry_run_result"] else None
+        dry_run = bool(int(row["dry_run"]))
+        return GovernanceTask(
+            id=int(row["id"]),
+            name=str(row["name"]),
+            parameters=parameters,
+            dry_run=dry_run,
+            dry_run_result=dry_run_result,
+            status=str(row["status"]),
+            created_at=created_at,
+            updated_at=updated_at,
+        )
