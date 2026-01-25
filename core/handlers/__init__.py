@@ -22,6 +22,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 
 from .base import BaseHandler, HandlerResult
 from .ai_handler import AIHandler
+from .analysis_handler import AnalysisHandler
 from .database_handler import DatabaseHandler
 from .research_handler import ResearchHandler
 from .scan_handler import ScanHandler
@@ -33,13 +34,15 @@ logger = logging.getLogger(__name__)
 # Registry of available handlers
 _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
     "ai": AIHandler,
+    "analysis": AnalysisHandler,
+    "audit": AnalysisHandler,
+    "reporting": AnalysisHandler,
     "database": DatabaseHandler,
     "research": ResearchHandler,
     "scan": ScanHandler,
     "test": TestHandler,
     "workflow": AIHandler,
     "content_creation": AIHandler,
-    "analysis": AIHandler,
     "development": AIHandler,
     "integration": AIHandler,
     "planning": AIHandler,
@@ -181,6 +184,7 @@ __all__ = [
     "BaseHandler",
     "HandlerResult",
     "AIHandler",
+    "AnalysisHandler",
     "DatabaseHandler",
     "ResearchHandler",
     "ScanHandler",

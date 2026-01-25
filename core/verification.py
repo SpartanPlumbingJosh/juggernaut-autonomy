@@ -29,10 +29,12 @@ from core.notifications import SlackNotifier
 
 # Evidence patterns to match
 EVIDENCE_PATTERNS = {
-    "pr_merged": [
+    "pr_created": [
         r"PR #(\d+)",                            # PR #123
         r"github\.com/.*/pull/(\d+)",            # GitHub PR URL
-        r"merged?.*(pr\.merged|commit|sha)",      # Merge confirmation
+    ],
+    "pr_merged": [
+        r"merged?.*(pr\.merged|commit|sha)",      # Merge confirmation text only
     ],
     "db_row": [
         r"(inserted|created|added).*?(\d{1,10})?.*(rows?|records?)",  # DB row created
@@ -94,8 +96,34 @@ class CompletionVerifier:
         
         evidence_lower = evidence.lower()
         
-        # Check each evidence type
+        # PR evidence should never be assumed "merged" purely from a PR URL.
+        # If we have a PR reference and a GitHub token, confirm merged via API.
+        pr_url_match = re.search(r"github\.com/[^\s]+/pull/\d+", evidence_lower, re.IGNORECASE)
+        pr_num_match = re.search(r"\bpr\s*#\s*(\d+)\b", evidence_lower, re.IGNORECASE)
+        if pr_url_match or pr_num_match:
+            pr_url = pr_url_match.group(0) if pr_url_match else None
+            if not pr_url and pr_num_match:
+                pr_url = f"https://github.com/{os.getenv('GITHUB_REPO', 'SpartanPlumbingJosh/juggernaut-autonomy')}/pull/{pr_num_match.group(1)}"
+
+            try:
+                from core.pr_tracker import PRTracker
+
+                tracker = PRTracker()
+                if tracker.github_token and pr_url:
+                    status = tracker.get_pr_status(pr_url)
+                    if status and getattr(status, "state", None) and status.state.value == "merged":
+                        return (True, "pr_merged")
+                    return (True, "pr_created")
+            except Exception:
+                # If we can't confirm, treat as created (not merged).
+                return (True, "pr_created")
+
+            return (True, "pr_created")
+
+        # Check each evidence type (non-PR)
         for evidence_type, patterns in EVIDENCE_PATTERNS.items():
+            if evidence_type in ("pr_created", "pr_merged"):
+                continue
             for pattern in patterns:
                 if re.search(pattern, evidence_lower, re.IGNORECASE):
                     return (True, evidence_type)
