@@ -2044,18 +2044,56 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
             task_succeeded = success
             
         elif task.task_type == "workflow":
-            # Execute workflow steps
-            steps = task.payload.get("steps", [])
-            step_results = []
-            workflow_failed = False
-            for i, step in enumerate(steps):
-                step_success, step_output = execute_tool(step.get("tool"), step.get("params", {}))
-                step_results.append({"step": i, "success": step_success, "output": step_output})
-                if not step_success and step.get("required", True):
-                    workflow_failed = True
-                    break
-            result = {"steps": step_results, "workflow_failed": workflow_failed}
-            task_succeeded = not workflow_failed
+            steps = task.payload.get("steps")
+            if not steps:
+                handler_result = None
+                try:
+                    from core.handlers import get_handler
+
+                    task_dict = {
+                        "id": task.id,
+                        "task_type": task.task_type,
+                        "title": task.title,
+                        "description": task.description,
+                        "priority": task.priority,
+                        "payload": task.payload or {},
+                    }
+
+                    handler = get_handler("workflow", execute_sql, log_action)
+                    if handler is None:
+                        handler = get_handler("ai", execute_sql, log_action)
+                    if handler is not None:
+                        handler_result = handler.execute(task_dict)
+                except Exception as handler_err:
+                    log_action(
+                        "task.handler_dispatch_failed",
+                        f"Workflow handler dispatch failed: {str(handler_err)[:200]}",
+                        level="warn",
+                        task_id=task.id,
+                    )
+
+                if handler_result is not None:
+                    result = handler_result.to_dict()
+                    waiting = bool((handler_result.data or {}).get("waiting_approval"))
+                    if waiting:
+                        update_task_status(task.id, "waiting_approval", handler_result.data)
+                        return False, {"waiting_approval": True, **(handler_result.data or {})}
+                    task_succeeded = bool(handler_result.success)
+                else:
+                    result = {"error": "Workflow task missing 'steps' in payload", "expected_fields": ["steps"]}
+                    task_succeeded = False
+            else:
+                # Execute workflow steps
+                step_results = []
+                workflow_failed = False
+                for i, step in enumerate(steps):
+                    step_success, step_output = execute_tool(step.get("tool"), step.get("params", {}))
+                    step_results.append({"step": i, "success": step_success, "output": step_output})
+                    if not step_success and step.get("required", True):
+                        workflow_failed = True
+                        break
+                result = {"steps": step_results, "workflow_failed": workflow_failed}
+                task_succeeded = not workflow_failed
             
         elif task.task_type == "opportunity_scan":
             # Phase 5: Call the proactive opportunity scan handler
