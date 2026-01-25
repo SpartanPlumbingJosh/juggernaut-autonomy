@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.error
 import urllib.request
 from datetime import datetime, timezone
@@ -236,10 +237,37 @@ class ResearchHandler(BaseHandler):
         if not urls:
             return notes
 
+        if not PUPPETEER_URL:
+            self._log(
+                "handler.research.puppeteer_unconfigured",
+                "PUPPETEER_URL not set; skipping source fetch",
+                level="warn",
+                task_id=task_id,
+            )
+            for url in urls:
+                notes.append({"url": url, "success": False, "error": "puppeteer_unconfigured"})
+            return notes
+
+        self._log(
+            "handler.research.source_fetch_start",
+            f"Attempting to fetch {len(urls)} sources via puppeteer",
+            task_id=task_id,
+            output_data={"sources": len(urls)},
+        )
+
         for url in urls:
+            started = time.time()
             html = self._fetch_html_via_puppeteer(url)
+            elapsed_ms = int((time.time() - started) * 1000)
             if not html:
-                notes.append({"url": url, "success": False, "error": "fetch_failed"})
+                notes.append({"url": url, "success": False, "error": "fetch_failed", "elapsed_ms": elapsed_ms})
+                self._log(
+                    "handler.research.source_fetch_failed",
+                    f"Failed to fetch source: {url}",
+                    level="warn",
+                    task_id=task_id,
+                    output_data={"url": url, "elapsed_ms": elapsed_ms},
+                )
                 continue
 
             text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
@@ -250,7 +278,14 @@ class ResearchHandler(BaseHandler):
                 "success": True,
                 "snippet": snippet,
                 "snippet_length": len(snippet),
+                "elapsed_ms": elapsed_ms,
             })
+            self._log(
+                "handler.research.source_fetch_ok",
+                f"Fetched source: {url}",
+                task_id=task_id,
+                output_data={"url": url, "elapsed_ms": elapsed_ms, "snippet_length": len(snippet)},
+            )
 
         self._log(
             "handler.research.source_fetch_complete",

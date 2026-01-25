@@ -1160,7 +1160,48 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
             if isinstance(data_obj, dict):
                 summary = data_obj.get("summary")
 
-            if executed_flag or success_flag or isinstance(data_obj, (dict, list, str)):
+            if isinstance(data_obj, dict):
+                findings_obj = data_obj.get("findings")
+                if isinstance(findings_obj, dict):
+                    f_summary = findings_obj.get("summary")
+                    f_key_points = findings_obj.get("key_points")
+                    f_actions = findings_obj.get("action_items")
+                    f_risks = findings_obj.get("risks")
+                    f_conf = findings_obj.get("confidence")
+
+                    summary_line = (str(f_summary).strip()[:600] if f_summary else "").strip()
+                    key_points_lines = []
+                    if isinstance(f_key_points, list):
+                        for kp in f_key_points[:6]:
+                            if isinstance(kp, str) and kp.strip():
+                                key_points_lines.append(f"- {kp.strip()[:220]}")
+                    action_lines = []
+                    if isinstance(f_actions, list):
+                        for a in f_actions[:6]:
+                            if isinstance(a, str) and a.strip():
+                                action_lines.append(f"- {a.strip()[:220]}")
+                    risk_lines = []
+                    if isinstance(f_risks, list):
+                        for r in f_risks[:6]:
+                            if isinstance(r, str) and r.strip():
+                                risk_lines.append(f"- {r.strip()[:220]}")
+
+                    parts = []
+                    if summary_line:
+                        parts.append(f"Summary: {summary_line}")
+                    if key_points_lines:
+                        parts.append("Key points:\n" + "\n".join(key_points_lines))
+                    if action_lines:
+                        parts.append("Action items:\n" + "\n".join(action_lines))
+                    if risk_lines:
+                        parts.append("Risks:\n" + "\n".join(risk_lines))
+                    if f_conf is not None:
+                        parts.append(f"Confidence: {f_conf}")
+
+                    if parts:
+                        evidence_text = "\n\n".join(parts)[:4000]
+
+            if not evidence_text and (executed_flag or success_flag or isinstance(data_obj, (dict, list, str))):
                 summary_text = summary.strip() if isinstance(summary, str) else ""
                 if summary_text and len(summary_text) >= 20:
                     evidence_text = f"Summary: {summary_text[:400]}"
