@@ -25,6 +25,7 @@ Invalid transitions are rejected to prevent fake completions.
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -61,28 +62,26 @@ class TransitionResult:
 
 
 # Database configuration
-NEON_HOST = "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech"
-NEON_DATABASE = "neondb"
-NEON_USER = "neondb_owner"
-NEON_PASSWORD = "npg_OYkCRU4aze2l"
-NEON_HTTP_URL = f"https://{NEON_HOST}/sql"
+NEON_ENDPOINT = os.environ.get(
+    "NEON_ENDPOINT",
+    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql",
+).strip()
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 
 def _execute_sql(sql: str) -> List[Dict]:
     """Execute SQL via Neon HTTP endpoint."""
-    auth_string = f"{NEON_USER}:{NEON_PASSWORD}"
-    import base64
-    auth_bytes = base64.b64encode(auth_string.encode()).decode()
-    
+    if not DATABASE_URL:
+        raise Exception("DATABASE_URL environment variable is required for stage transitions")
+
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Basic {auth_bytes}",
-        "Neon-Connection-String": f"postgresql://{NEON_USER}:{NEON_PASSWORD}@{NEON_HOST}/{NEON_DATABASE}?sslmode=require"
+        "Neon-Connection-String": DATABASE_URL,
     }
-    
-    payload = json.dumps({"query": sql}).encode()
-    
-    req = urllib.request.Request(NEON_HTTP_URL, data=payload, headers=headers, method="POST")
+
+    payload = json.dumps({"query": sql}).encode("utf-8")
+
+    req = urllib.request.Request(NEON_ENDPOINT, data=payload, headers=headers, method="POST")
     
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:

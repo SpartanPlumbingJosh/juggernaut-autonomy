@@ -397,9 +397,18 @@ NEON_ENDPOINT = os.getenv(
     "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
 )
 WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
-LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "60"))
+LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "30"))
+MAX_TASKS_PER_LOOP = int(os.getenv("MAX_TASKS_PER_LOOP", "2"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 PORT = int(os.getenv("PORT", "8000"))
+
+DEPLOY_VERSION = "1.3.2"
+DEPLOY_COMMIT = (
+    os.getenv("RAILWAY_GIT_COMMIT_SHA")
+    or os.getenv("GIT_COMMIT")
+    or os.getenv("COMMIT_SHA")
+    or "unknown"
+)
 
 # Retry configuration
 RETRY_BASE_DELAY_SECONDS = 60  # 1 minute base delay
@@ -3104,7 +3113,8 @@ def autonomy_loop():
             
             if tasks:
                 # Try to claim and execute tasks in priority order
-                task_executed = False
+                task_executed = False  # Track if any task was executed
+                tasks_executed_this_loop = 0
                 
                 for task in tasks:
                     # Check permission BEFORE claiming (Level 3: Permission enforcement)
@@ -3177,7 +3187,9 @@ def autonomy_loop():
                     
                     # Task was executed (success or failure), we're done for this loop
                     task_executed = True
-                    break
+                    tasks_executed_this_loop += 1
+                    if tasks_executed_this_loop >= max(1, MAX_TASKS_PER_LOOP):
+                        break
                 
                 if not task_executed:
                     # All tasks either couldn't be claimed, are forbidden, or are waiting for approval
@@ -3344,18 +3356,13 @@ class HealthHandler(BaseHTTPRequestHandler):
             status = "healthy" if db_ok else "degraded"
             response = {
                 "status": status,
-                "version": "1.3.1",
+                "version": DEPLOY_VERSION,
+                "commit": DEPLOY_COMMIT,
                 "worker_id": WORKER_ID,
                 "uptime_seconds": int(uptime),
                 "database": "connected" if db_ok else "error",
-                "dry_run": DRY_RUN,
                 "loop_interval": LOOP_INTERVAL,
-                "rbac": RBAC_AVAILABLE,  # GAP-03: Report RBAC status
-                "dashboard_api": DASHBOARD_API_AVAILABLE,
-                "experiments": {
-                    "available": EXPERIMENTS_AVAILABLE,
-                    "dashboard": get_experiment_dashboard() if EXPERIMENTS_AVAILABLE else {}
-                },
+                "dry_run": DRY_RUN,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
@@ -3374,7 +3381,8 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({
                 "service": "JUGGERNAUT Autonomy Engine",
                 "status": "running",
-                "version": "1.3.1",
+                "version": DEPLOY_VERSION,
+                "commit": DEPLOY_COMMIT,
                 "endpoints": [
                     "/", "/health",
                     "/api/dashboard/stats",
@@ -3582,9 +3590,10 @@ def handle_shutdown(signum, frame):
 
 if __name__ == "__main__":
     print("=" * 60)
-    print("JUGGERNAUT AUTONOMY ENGINE v1.3.1")
+    print(f"JUGGERNAUT AUTONOMY ENGINE v{DEPLOY_VERSION}")
     print("=" * 60)
     print(f"Worker ID: {WORKER_ID}")
+    print(f"Commit: {DEPLOY_COMMIT}")
     print(f"Loop Interval: {LOOP_INTERVAL} seconds")
     print(f"Dry Run Mode: {DRY_RUN}")
     print(f"Health Port: {PORT}")

@@ -22,7 +22,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Cache bust - change this to force rebuild of COPY layers
-ARG CACHEBUST=20260125190000
+ARG CACHEBUST=20260125210000
 
 # Copy application code (these layers will rebuild when CACHEBUST changes)
 COPY main.py .

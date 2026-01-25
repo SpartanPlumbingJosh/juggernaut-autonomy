@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 from .base import BaseHandler, HandlerResult
+from core.ai_executor import AIExecutor
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -33,6 +34,9 @@ PUPPETEER_AUTH_TOKEN = os.environ.get("PUPPETEER_AUTH_TOKEN", "jug-pup-auth-2024
 
 _DOMAIN_RE = re.compile(r"\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|co|xyz|ai|app|dev)\b", re.IGNORECASE)
 _PRICE_RE = re.compile(r"(?:\$\s?\d{1,6}(?:[\.,]\d{1,2})?)|(?:\b\d{1,6}\s?(?:usd|\$)\b)", re.IGNORECASE)
+
+_RESEARCH_FINDINGS_TABLE_EXISTS: Optional[bool] = None
+_RESEARCH_FINDINGS_TABLE_MISSING_LOGGED: bool = False
 
 
 class ResearchHandler(BaseHandler):
@@ -199,19 +203,167 @@ class ResearchHandler(BaseHandler):
                 "note": "Automated web search unavailable - manual research required"
             }]
 
-        # Build findings structure
+        source_notes = self._fetch_source_notes(sources, task_id)
+
         extracted_candidates = self._extract_domain_candidates_from_sources(sources, task_id)
+        synthesized = self._synthesize(query, sources, source_notes, extracted_candidates, task_id)
+
         findings = {
             "query": query,
             "sources": sources,
+            "source_notes": source_notes,
             "candidates": extracted_candidates,
-            "summary": self._generate_summary(query, sources),
-            "key_points": self._extract_key_points(sources),
-            "confidence": self._calculate_confidence(sources),
-            "researched_at": datetime.now(timezone.utc).isoformat()
+            "summary": (synthesized or {}).get("summary") or self._generate_summary(query, sources),
+            "key_points": (synthesized or {}).get("key_points") or self._extract_key_points(sources),
+            "action_items": (synthesized or {}).get("action_items") or [],
+            "risks": (synthesized or {}).get("risks") or [],
+            "confidence": (synthesized or {}).get("confidence") or self._calculate_confidence(sources),
+            "researched_at": datetime.now(timezone.utc).isoformat(),
         }
 
         return findings
+
+
+    def _fetch_source_notes(self, sources: List[Dict[str, Any]], task_id: Optional[str]) -> List[Dict[str, Any]]:
+        urls: List[str] = []
+        for s in sources:
+            url = s.get("url")
+            if isinstance(url, str) and url.startswith("http"):
+                urls.append(url)
+        urls = urls[: max(1, DEFAULT_MAX_RESULTS)]
+
+        notes: List[Dict[str, Any]] = []
+        if not urls:
+            return notes
+
+        for url in urls:
+            html = self._fetch_html_via_puppeteer(url)
+            if not html:
+                notes.append({"url": url, "success": False, "error": "fetch_failed"})
+                continue
+
+            text = re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html))
+            text = text.strip()
+            snippet = text[:4000]
+            notes.append({
+                "url": url,
+                "success": True,
+                "snippet": snippet,
+                "snippet_length": len(snippet),
+            })
+
+        self._log(
+            "handler.research.source_fetch_complete",
+            f"Fetched {sum(1 for n in notes if n.get('success'))}/{len(notes)} sources",
+            task_id=task_id,
+        )
+        return notes
+
+
+    def _extract_json_object(self, text: str) -> Optional[Dict[str, Any]]:
+        if not isinstance(text, str) or not text:
+            return None
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\n", "", cleaned)
+            cleaned = re.sub(r"\n```$", "", cleaned)
+
+        start = cleaned.find("{")
+        if start < 0:
+            return None
+
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(cleaned)):
+            ch = cleaned[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            else:
+                if ch == '"':
+                    in_str = True
+                    continue
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = cleaned[start : i + 1]
+                        try:
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except Exception:
+                            return None
+        return None
+
+
+    def _synthesize(
+        self,
+        query: str,
+        sources: List[Dict[str, Any]],
+        source_notes: List[Dict[str, Any]],
+        candidates: List[Dict[str, Any]],
+        task_id: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        try:
+            executor = AIExecutor()
+        except Exception:
+            return None
+
+        packed_sources = []
+        for s in sources[:5]:
+            packed_sources.append({
+                "url": s.get("url"),
+                "title": s.get("title"),
+                "snippet": s.get("snippet"),
+            })
+
+        packed_notes = []
+        for n in source_notes[:5]:
+            packed_notes.append({
+                "url": n.get("url"),
+                "success": n.get("success"),
+                "snippet": n.get("snippet"),
+            })
+
+        prompt = (
+            "You are a research analyst. Produce a useful, actionable synthesis. "
+            "Return ONLY valid JSON (no markdown).\n\n"
+            "JSON schema:\n"
+            "{\n"
+            "  \"summary\": string,\n"
+            "  \"key_points\": [string],\n"
+            "  \"action_items\": [string],\n"
+            "  \"risks\": [string],\n"
+            "  \"confidence\": number\n"
+            "}\n\n"
+            f"Query: {query}\n\n"
+            f"Search sources (metadata): {json.dumps(packed_sources)[:8000]}\n\n"
+            f"Fetched page snippets: {json.dumps(packed_notes)[:8000]}\n\n"
+            f"Extracted candidates: {json.dumps(candidates)[:4000]}\n"
+        )
+
+        resp = executor.chat([
+            {"role": "system", "content": "Return ONLY JSON. No markdown. No code fences."},
+            {"role": "user", "content": prompt},
+        ])
+        parsed = self._extract_json_object(getattr(resp, "content", "") or "")
+        if not isinstance(parsed, dict):
+            return None
+
+        self._log(
+            "handler.research.synthesized",
+            "Synthesized findings with AI",
+            task_id=task_id,
+        )
+        return parsed
 
     def _attempt_web_search(
         self,
@@ -480,23 +632,28 @@ class ResearchHandler(BaseHandler):
         escaped_task_id = task_id if task_id else "NULL"
         
         try:
-            # Check if table exists first
-            check_sql = f"""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = '{RESEARCH_FINDINGS_TABLE}'
-                )
-            """
-            result = self.execute_sql(check_sql)
-            table_exists = result.get("rows", [{}])[0].get("exists", False)
-            
-            if not table_exists:
-                self._log(
-                    "handler.research.table_missing",
-                    f"Table {RESEARCH_FINDINGS_TABLE} does not exist, skipping save",
-                    level="warn",
-                    task_id=task_id
-                )
+            global _RESEARCH_FINDINGS_TABLE_EXISTS
+            global _RESEARCH_FINDINGS_TABLE_MISSING_LOGGED
+
+            if _RESEARCH_FINDINGS_TABLE_EXISTS is None:
+                check_sql = f"""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.tables 
+                        WHERE table_name = '{RESEARCH_FINDINGS_TABLE}'
+                    )
+                """
+                result = self.execute_sql(check_sql)
+                _RESEARCH_FINDINGS_TABLE_EXISTS = bool(result.get("rows", [{}])[0].get("exists", False))
+
+            if not _RESEARCH_FINDINGS_TABLE_EXISTS:
+                if not _RESEARCH_FINDINGS_TABLE_MISSING_LOGGED:
+                    self._log(
+                        "handler.research.table_missing",
+                        f"Table {RESEARCH_FINDINGS_TABLE} does not exist, skipping save",
+                        level="warn",
+                        task_id=task_id,
+                    )
+                    _RESEARCH_FINDINGS_TABLE_MISSING_LOGGED = True
                 return None
             
             insert_sql = f"""
