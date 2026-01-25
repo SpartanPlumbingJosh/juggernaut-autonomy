@@ -34,7 +34,7 @@ import urllib.request
 import urllib.error
 import subprocess
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List, Union
+from typing import Callable, Dict, Any, Optional, List, Union
 from enum import Enum
 from datetime import datetime, timezone
 
@@ -86,7 +86,7 @@ class EndpointVerifier:
         railway_token: Optional[str] = None,
         db_connection_string: Optional[str] = None,
         default_timeout: int = 30
-    ):
+    ) -> None:
         """
         Initialize the endpoint verifier.
         
@@ -105,7 +105,7 @@ class EndpointVerifier:
         self.railway_api_url = "https://backboard.railway.com/graphql/v2"
         
         # Map endpoint types to handler methods
-        self.handlers = {
+        self.handlers: Dict[EndpointType, Callable[[Dict[str, Any]], EndpointResult]] = {
             EndpointType.HTTP: self._verify_http,
             EndpointType.DB_QUERY: self._verify_db_query,
             EndpointType.FILE_EXISTS: self._verify_file_exists,
@@ -208,7 +208,7 @@ class EndpointVerifier:
         expected_body_contains = definition.get("expected_body_contains")
         expected_json_path = definition.get("expected_json_path")
         expected_json_value = definition.get("expected_json_value")
-        headers = definition.get("headers", {})
+        headers = dict(definition.get("headers") or {})
         timeout = definition.get("timeout", self.default_timeout)
         retry_count = definition.get("retry_count", 1)
         retry_delay = definition.get("retry_delay", 5)
