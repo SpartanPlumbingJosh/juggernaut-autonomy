@@ -1238,17 +1238,46 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
     created = 0
     skipped_duplicate = 0
     skipped_quality = 0
+    attempted = 0
+    insert_failed = 0
     try:
         candidates = pick_diverse_tasks(execute_sql=execute_sql, max_tasks=3, recent_limit=50, dedupe_hours=24)
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+    try:
+        log_action(
+            "proactive.diverse_candidates",
+            "Picked candidate proactive tasks",
+            level="debug",
+            output_data={"candidates": len(candidates) if isinstance(candidates, list) else 0},
+        )
+    except Exception:
+        pass
+
     for cand in candidates:
         if not isinstance(cand, ProposedTask):
             continue
+
+        attempted += 1
         payload = cand.payload if isinstance(cand.payload, dict) else {}
         if not payload.get("dedupe_key") or not payload.get("success_criteria"):
             skipped_quality += 1
+            try:
+                log_action(
+                    "proactive.diverse_candidate_skipped",
+                    "Skipped candidate due to missing required fields",
+                    level="debug",
+                    output_data={
+                        "reason": "missing_required_fields",
+                        "title": getattr(cand, "title", None),
+                        "task_type": getattr(cand, "task_type", None),
+                        "has_dedupe_key": bool(payload.get("dedupe_key")),
+                        "has_success_criteria": bool(payload.get("success_criteria")),
+                    },
+                )
+            except Exception:
+                pass
             continue
 
         title_escaped = str(cand.title).replace("'", "''")
@@ -1268,6 +1297,20 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
             )
             if existing.get("rows"):
                 skipped_duplicate += 1
+                try:
+                    log_action(
+                        "proactive.diverse_candidate_skipped",
+                        "Skipped candidate due to dedupe_key duplication",
+                        level="debug",
+                        output_data={
+                            "reason": "dedupe_key",
+                            "title": cand.title,
+                            "task_type": cand.task_type,
+                            "dedupe_key": payload.get("dedupe_key"),
+                        },
+                    )
+                except Exception:
+                    pass
                 continue
         except Exception:
             pass
@@ -1286,6 +1329,20 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
             c = int((title_cnt.get("rows") or [{}])[0].get("c") or 0)
             if c >= 2:
                 skipped_duplicate += 1
+                try:
+                    log_action(
+                        "proactive.diverse_candidate_skipped",
+                        "Skipped candidate due to title hard cap",
+                        level="debug",
+                        output_data={
+                            "reason": "title_hard_cap",
+                            "title": cand.title,
+                            "task_type": cand.task_type,
+                            "count_last_24h": c,
+                        },
+                    )
+                except Exception:
+                    pass
                 continue
         except Exception:
             pass
@@ -1311,6 +1368,7 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 output_data={"task_id": tid, "task_type": task_type, "category": payload.get("category")},
             )
         except Exception as e:
+            insert_failed += 1
             try:
                 log_action(
                     "proactive.diverse_task_create_failed",
@@ -1324,9 +1382,11 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
 
     result = {
         "success": True,
+        "tasks_attempted": attempted,
         "tasks_created": created,
         "tasks_skipped_duplicate": skipped_duplicate,
         "tasks_skipped_quality": skipped_quality,
+        "tasks_failed_insert": insert_failed,
     }
 
     if created <= 0:
@@ -1339,6 +1399,16 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
             )
         except Exception:
             pass
+
+    try:
+        log_action(
+            "proactive.diverse_summary",
+            "Diverse generation summary",
+            level="info" if created > 0 else "debug",
+            output_data=result,
+        )
+    except Exception:
+        pass
 
     return result
 
