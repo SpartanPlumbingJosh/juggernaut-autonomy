@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Any, Callable, Dict, Optional
 
 
@@ -25,7 +26,7 @@ def create_experiment_from_idea(
         "created_by": "experiment_runner",
     }
 
-    config_json = str(config).replace("'", "''")
+    config_json = json.dumps(config).replace("'", "''")
     title_esc = title.replace("'", "''")
     hyp_esc = hypothesis.replace("'", "''")
 

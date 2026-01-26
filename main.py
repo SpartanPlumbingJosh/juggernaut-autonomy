@@ -1241,10 +1241,10 @@ def _ensure_revenue_discovery_schema() -> None:
 
 def _ensure_revenue_discovery_scheduled_tasks() -> None:
     tasks = [
-        {"name": "idea_generation", "task_type": "idea_generation", "cron_expression": "daily"},
-        {"name": "idea_scoring", "task_type": "idea_scoring", "cron_expression": "daily"},
-        {"name": "experiment_review", "task_type": "experiment_review", "cron_expression": "daily"},
-        {"name": "portfolio_rebalance", "task_type": "portfolio_rebalance", "cron_expression": "weekly"},
+        {"name": "idea_generation", "task_type": "idea_generation", "cron_expression": "0 6 * * *"},
+        {"name": "idea_scoring", "task_type": "idea_scoring", "cron_expression": "0 6 * * *"},
+        {"name": "experiment_review", "task_type": "experiment_review", "cron_expression": "0 6 * * *"},
+        {"name": "portfolio_rebalance", "task_type": "portfolio_rebalance", "cron_expression": "0 6 * * 0"},
     ]
 
     for t in tasks:
