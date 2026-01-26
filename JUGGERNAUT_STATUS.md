@@ -1,6 +1,6 @@
 # JUGGERNAUT - Master Reference Document
 
-> **Last Updated:** 2026-01-25
+> **Last Updated:** 2026-01-26
 > **Purpose:** Single source of truth for all Claude sessions working on JUGGERNAUT
 > **Update Instructions:** Any Claude session that makes significant progress should update this file and push to the repo
 
@@ -34,7 +34,7 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ### Dashboard (Vercel)
 - **Project:** spartan-hq
 - **URL:** hq.spartan-plumbing.com
-- **Status:** Functional but needs Factory Floor visualization
+- **Status:** Factory Floor visualization live but still being tuned (layout + polish)
 
 ### Workers
 | Worker | Type | Status | Capabilities |
@@ -113,7 +113,7 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ### Immediate (This Week)
 | Priority | Description | Owner | Status |
 |----------|-------------|-------|--------|
-| 1 | **Factory Floor Dashboard** - Visual command center (Factorio-style) | Windsurf | 🔄 In Progress |
+| 1 | **Factory Floor Dashboard** - Visual command center (Factorio-style) | Windsurf | 🔄 In Progress (live; layout + polish ongoing) |
 | 2 | **Proactive Work Generation** - System creates its own tasks | Windsurf | Not Started |
 | 3 | **Slack Notifications** - Alerts for completions/failures | Windsurf | Not Started |
 
@@ -133,16 +133,18 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ---
 
 ## 5. RECENT FIXES (Verified Working)
-
 | Date | Fix | Verification |
 |------|-----|--------------|
 | 2026-01-25 | **AnalysisHandler** - Analysis tasks now use real SQL queries instead of AIHandler hallucinations | ✅ Task `b8d9f44c` completed with real metrics (97.4% success rate from actual DB) |
 | 2026-01-25 | **PR Evidence Classification** - PRs correctly classified as `pr_created` until GitHub API confirms merge | Implemented; awaiting end-to-end test with code task |
+| 2026-01-26 | **Factory Floor (spartan-hq)** - PixiJS visualization integrated at `/factory-floor` with live data polling | Rendering verified; ongoing layout tuning |
+| 2026-01-26 | **Queue API mismatch (spartan-hq)** - `/api/dashboard/queue` now derives queue from `/public/dashboard/tasks?status=approved` | Fix merged locally; requires deploy to verify |
+| 2026-01-26 | **Worker status mapping (spartan-hq)** - Treat `status: active` as ONLINE; heartbeat optional | Fix merged locally; requires deploy to verify |
+| 2026-01-26 | **Pixi cleanup hardening (spartan-hq)** - stop ticker, clear stage, defensive destroy | Fix merged locally; reduces unmount crash risk |
 
 ---
 
 ## 6. DASHBOARD VISION
-
 **Current State:** Text-heavy, basic cards, "dopey as fuck"
 
 **Target State:** Factorio-style visual command center
@@ -171,7 +173,6 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ---
 
 ## 7. KEY METRICS
-
 | Metric | Current Value | Target |
 |--------|---------------|--------|
 | Tasks Completed | 298 | — |
@@ -185,7 +186,6 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ## 8. CREDENTIALS & ENDPOINTS
 
 ### For Claude Ops Partner
-
 ```
 # Database (Neon PostgreSQL)
 HTTP_ENDPOINT: https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql
@@ -250,7 +250,6 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 ---
 
 ## 10. OPEN QUESTIONS
-
 - [ ] Resume Domain Flip experiment? (Requires ~$20 approval for domain purchase)
 - [ ] ServiceTitan integration for revenue tracking?
 - [ ] Voice interface (SARAH) priority?
@@ -258,8 +257,8 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 ---
 
 ## CHANGELOG
-
 | Date | Change | By |
 |------|--------|-----|
 | 2026-01-25 | Initial document creation | Claude (Ops) |
 | 2026-01-25 | AnalysisHandler fix verified | Claude (Ops) |
+| 2026-01-26 | Added Factory Floor dashboard progress + spartan-hq fixes (queue, worker status, Pixi cleanup) | Windsurf |

@@ -26,6 +26,23 @@ import logging
 # Configure module logger
 logger = logging.getLogger(__name__)
 
+SLACK_NOTIFICATIONS_AVAILABLE = False
+_slack_notifications_import_error = None
+
+try:
+    from core.slack_notifications import send_system_alert
+    SLACK_NOTIFICATIONS_AVAILABLE = True
+except ImportError as e:
+    _slack_notifications_import_error = str(e)
+
+    def send_system_alert(
+        alert_type: str,
+        component: str,
+        message: str,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        return False
+
 # ============================================================
 # CONFLICT MANAGER INTEGRATION (HIGH-07)
 # ============================================================
@@ -2189,6 +2206,39 @@ def worker_report_task_status(
                     "reported_at": report_time
                 }
             )
+
+            if SLACK_NOTIFICATIONS_AVAILABLE and status == "completed":
+                try:
+                    send_system_alert(
+                        alert_type="success",
+                        component="TaskEngine",
+                        message=f"Task completed: {task_info.get('title', 'Unknown')}",
+                        details={"task_id": task_id, "worker": worker_id},
+                    )
+                except Exception as slack_err:
+                    logger.warning(
+                        "Failed to send Slack success alert for task %s: %s",
+                        task_id,
+                        str(slack_err),
+                    )
+            elif SLACK_NOTIFICATIONS_AVAILABLE and status == "failed":
+                try:
+                    send_system_alert(
+                        alert_type="error",
+                        component="TaskEngine",
+                        message=f"Task failed: {task_info.get('title', 'Unknown')}",
+                        details={
+                            "task_id": task_id,
+                            "worker": worker_id,
+                            "reason": error or "Unknown",
+                        },
+                    )
+                except Exception as slack_err:
+                    logger.warning(
+                        "Failed to send Slack error alert for task %s: %s",
+                        task_id,
+                        str(slack_err),
+                    )
             
             # HIGH-07: Release lock on task completion or failure
             if status in ("completed", "failed") and CONFLICT_MANAGER_AVAILABLE:

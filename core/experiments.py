@@ -28,6 +28,387 @@ NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.t
 NEON_CONNECTION_STRING = "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
 
 
+_SCHEMA_ENSURED = False
+
+
+def ensure_experiment_schema() -> None:
+    global _SCHEMA_ENSURED
+    if _SCHEMA_ENSURED:
+        return
+
+    statements: List[str] = [
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS lifecycle_state TEXT;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS conclusion_outcome TEXT;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS hypothesis_defined_at TIMESTAMPTZ;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS activated_at TIMESTAMPTZ;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS measuring_started_at TIMESTAMPTZ;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS concluded_at TIMESTAMPTZ;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS success_criteria_text TEXT;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS metrics_to_track JSONB;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS expected_outcome JSONB;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS actual_outcome JSONB;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS approval_required BOOLEAN;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS approval_budget_limit NUMERIC;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS risk_assessment JSONB;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS approved_by TEXT;",
+        "ALTER TABLE experiments ADD COLUMN IF NOT EXISTS approved_at TIMESTAMPTZ;",
+    ]
+
+    create_tables: List[str] = [
+        """
+        CREATE TABLE IF NOT EXISTS experiment_task_links (
+            id UUID PRIMARY KEY,
+            experiment_id UUID NOT NULL,
+            task_id TEXT NOT NULL,
+            link_type TEXT NOT NULL,
+            notes TEXT,
+            created_by TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS experiment_metric_points (
+            id UUID PRIMARY KEY,
+            experiment_id UUID NOT NULL,
+            metric_name TEXT NOT NULL,
+            metric_value NUMERIC,
+            metric_type TEXT DEFAULT 'numeric',
+            expected_value NUMERIC,
+            expected_operator TEXT,
+            source_task_id TEXT,
+            raw_data JSONB,
+            collected_at TIMESTAMPTZ DEFAULT NOW()
+        );
+        """,
+        """
+        CREATE TABLE IF NOT EXISTS experiment_changes (
+            id UUID PRIMARY KEY,
+            experiment_id UUID NOT NULL,
+            change_type TEXT NOT NULL,
+            description TEXT,
+            change_data JSONB,
+            created_by TEXT,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            rollback_task_id TEXT,
+            reverted_at TIMESTAMPTZ,
+            revert_notes TEXT
+        );
+        """,
+    ]
+
+    for stmt in statements:
+        _execute_sql(stmt, return_results=False)
+    for stmt in create_tables:
+        _execute_sql(stmt, return_results=False)
+
+    _SCHEMA_ENSURED = True
+
+
+LIFECYCLE_DRAFT = "DRAFT"
+LIFECYCLE_HYPOTHESIS_DEFINED = "HYPOTHESIS_DEFINED"
+LIFECYCLE_ACTIVE = "ACTIVE"
+LIFECYCLE_MEASURING = "MEASURING"
+LIFECYCLE_CONCLUDED = "CONCLUDED"
+
+CONCLUSION_SUCCESS = "SUCCESS"
+CONCLUSION_FAILURE = "FAILURE"
+CONCLUSION_ROLLED_BACK = "ROLLED_BACK"
+
+
+def _normalize_lifecycle_from_status(status: Optional[str]) -> str:
+    s = (status or "").lower().strip()
+    if s in ("draft", "created"):
+        return LIFECYCLE_DRAFT
+    if s in ("approved",):
+        return LIFECYCLE_HYPOTHESIS_DEFINED
+    if s in ("running",):
+        return LIFECYCLE_ACTIVE
+    if s in ("paused",):
+        return LIFECYCLE_ACTIVE
+    if s in ("completed", "failed", "rolled_back", "cancelled"):
+        return LIFECYCLE_CONCLUDED
+    return LIFECYCLE_DRAFT
+
+
+def _ensure_experiment_lifecycle_row(experiment_id: str) -> None:
+    ensure_experiment_schema()
+    exp = get_experiment(experiment_id)
+    if not exp:
+        return
+    lifecycle_state = exp.get("lifecycle_state")
+    if lifecycle_state:
+        return
+    inferred = _normalize_lifecycle_from_status(exp.get("status"))
+    _execute_sql(
+        f"UPDATE experiments SET lifecycle_state = '{_escape_string(inferred)}' WHERE id = '{experiment_id}'",
+        return_results=False,
+    )
+
+
+def define_hypothesis(
+    experiment_id: str,
+    hypothesis: str,
+    success_criteria_text: Optional[str] = None,
+    metrics_to_track: Optional[List[str]] = None,
+    expected_outcome: Optional[Dict[str, Any]] = None,
+    updated_by: str = "SYSTEM",
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    _ensure_experiment_lifecycle_row(experiment_id)
+
+    metrics_json = json.dumps(metrics_to_track or [])
+    expected_json = json.dumps(expected_outcome or {})
+    query = f"""
+    UPDATE experiments
+    SET hypothesis = '{_escape_string(hypothesis)}',
+        success_criteria_text = {f"'{_escape_string(success_criteria_text)}'" if success_criteria_text else "success_criteria_text"},
+        metrics_to_track = '{metrics_json}'::jsonb,
+        expected_outcome = '{expected_json}'::jsonb,
+        lifecycle_state = '{LIFECYCLE_HYPOTHESIS_DEFINED}',
+        hypothesis_defined_at = COALESCE(hypothesis_defined_at, NOW()),
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query, return_results=False)
+    log_experiment_event(experiment_id, "hypothesis_defined", "Hypothesis defined", updated_by)
+    return {"success": True, "experiment_id": experiment_id, "lifecycle_state": LIFECYCLE_HYPOTHESIS_DEFINED}
+
+
+def set_experiment_approval_policy(
+    experiment_id: str,
+    approval_required: bool = True,
+    approval_budget_limit: Optional[float] = 20.0,
+    risk_assessment: Optional[Dict[str, Any]] = None,
+    updated_by: str = "SYSTEM",
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    risk_json = json.dumps(risk_assessment or {})
+    query = f"""
+    UPDATE experiments
+    SET approval_required = {str(bool(approval_required)).upper()},
+        approval_budget_limit = {approval_budget_limit if approval_budget_limit is not None else 'NULL'},
+        risk_assessment = '{risk_json}'::jsonb,
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query, return_results=False)
+    log_experiment_event(experiment_id, "approval_policy", "Approval policy updated", updated_by)
+    return {"success": True, "experiment_id": experiment_id, "approval_required": bool(approval_required)}
+
+
+def approve_experiment(experiment_id: str, approved_by: str) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    _ensure_experiment_lifecycle_row(experiment_id)
+    query = f"""
+    UPDATE experiments
+    SET approved_by = '{_escape_string(approved_by)}',
+        approved_at = NOW(),
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query, return_results=False)
+    log_experiment_event(experiment_id, "approved", "Experiment approved", approved_by)
+    return {"success": True, "experiment_id": experiment_id, "approved_by": approved_by}
+
+
+def activate_experiment(experiment_id: str, activated_by: str = "SYSTEM") -> Dict[str, Any]:
+    ensure_experiment_schema()
+    _ensure_experiment_lifecycle_row(experiment_id)
+    exp = get_experiment(experiment_id)
+    if not exp:
+        return {"success": False, "error": "Experiment not found"}
+
+    lifecycle_state = exp.get("lifecycle_state") or _normalize_lifecycle_from_status(exp.get("status"))
+    if lifecycle_state not in (LIFECYCLE_HYPOTHESIS_DEFINED, LIFECYCLE_DRAFT):
+        return {"success": False, "error": f"Cannot activate experiment from {lifecycle_state}"}
+
+    approval_required = bool(exp.get("approval_required") or exp.get("requires_approval") or False)
+    if approval_required and not exp.get("approved_by"):
+        return {"success": False, "error": "Approval required before activation"}
+
+    query = f"""
+    UPDATE experiments
+    SET lifecycle_state = '{LIFECYCLE_ACTIVE}',
+        activated_at = COALESCE(activated_at, NOW()),
+        status = COALESCE(NULLIF(status, ''), 'running'),
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query, return_results=False)
+    log_experiment_event(experiment_id, "activated", "Experiment activated", activated_by)
+    return {"success": True, "experiment_id": experiment_id, "lifecycle_state": LIFECYCLE_ACTIVE}
+
+
+def begin_measuring(experiment_id: str, started_by: str = "SYSTEM") -> Dict[str, Any]:
+    ensure_experiment_schema()
+    _ensure_experiment_lifecycle_row(experiment_id)
+    exp = get_experiment(experiment_id)
+    if not exp:
+        return {"success": False, "error": "Experiment not found"}
+
+    lifecycle_state = exp.get("lifecycle_state") or _normalize_lifecycle_from_status(exp.get("status"))
+    if lifecycle_state != LIFECYCLE_ACTIVE:
+        return {"success": False, "error": f"Cannot begin measuring from {lifecycle_state}"}
+
+    query = f"""
+    UPDATE experiments
+    SET lifecycle_state = '{LIFECYCLE_MEASURING}',
+        measuring_started_at = COALESCE(measuring_started_at, NOW()),
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query, return_results=False)
+    log_experiment_event(experiment_id, "measuring", "Experiment measuring started", started_by)
+    return {"success": True, "experiment_id": experiment_id, "lifecycle_state": LIFECYCLE_MEASURING}
+
+
+def conclude_experiment_formal(
+    experiment_id: str,
+    conclusion: str,
+    results_summary: Dict[str, Any],
+    outcome: str,
+    concluded_by: str = "SYSTEM",
+    auto_rollback: bool = True,
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    _ensure_experiment_lifecycle_row(experiment_id)
+    outcome_norm = (outcome or "").upper().strip()
+    if outcome_norm not in (CONCLUSION_SUCCESS, CONCLUSION_FAILURE, CONCLUSION_ROLLED_BACK):
+        return {"success": False, "error": f"Invalid outcome: {outcome}"}
+
+    status_map = {
+        CONCLUSION_SUCCESS: "completed",
+        CONCLUSION_FAILURE: "failed",
+        CONCLUSION_ROLLED_BACK: "rolled_back",
+    }
+    status = status_map[outcome_norm]
+
+    query = f"""
+    UPDATE experiments
+    SET lifecycle_state = '{LIFECYCLE_CONCLUDED}',
+        conclusion_outcome = '{_escape_string(outcome_norm)}',
+        concluded_at = COALESCE(concluded_at, NOW()),
+        status = '{_escape_string(status)}',
+        end_date = NOW(),
+        conclusion = '{_escape_string(conclusion)}',
+        results_summary = '{json.dumps(results_summary)}'::jsonb,
+        actual_outcome = '{json.dumps(results_summary)}'::jsonb,
+        updated_at = NOW()
+    WHERE id = '{experiment_id}'
+    """
+    _execute_sql(query, return_results=False)
+    log_experiment_event(experiment_id, "concluded", f"Outcome: {outcome_norm}. {conclusion}", concluded_by)
+
+    result = {"success": True, "experiment_id": experiment_id, "outcome": outcome_norm}
+    if outcome_norm == CONCLUSION_FAILURE and auto_rollback:
+        rollback_result = execute_rollback(
+            experiment_id=experiment_id,
+            reason=f"Auto-rollback triggered by failure: {conclusion}",
+            triggered_by=concluded_by,
+        )
+        result["rollback_triggered"] = True
+        result["rollback_result"] = rollback_result
+    return result
+
+
+def link_task_to_experiment(
+    experiment_id: str,
+    task_id: str,
+    link_type: str,
+    notes: Optional[str] = None,
+    created_by: str = "SYSTEM",
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    link_id = str(uuid.uuid4())
+    query = f"""
+    INSERT INTO experiment_task_links (id, experiment_id, task_id, link_type, notes, created_by)
+    VALUES (
+        '{link_id}',
+        '{experiment_id}',
+        '{_escape_string(task_id)}',
+        '{_escape_string(link_type)}',
+        {f"'{_escape_string(notes)}'" if notes else "NULL"},
+        '{_escape_string(created_by)}'
+    )
+    """
+    _execute_sql(query, return_results=False)
+    return {"success": True, "link_id": link_id}
+
+
+def record_metric_point(
+    experiment_id: str,
+    metric_name: str,
+    metric_value: Optional[float],
+    metric_type: str = "numeric",
+    expected_value: Optional[float] = None,
+    expected_operator: Optional[str] = None,
+    source_task_id: Optional[str] = None,
+    raw_data: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    point_id = str(uuid.uuid4())
+    query = f"""
+    INSERT INTO experiment_metric_points (
+        id, experiment_id, metric_name, metric_value, metric_type,
+        expected_value, expected_operator, source_task_id, raw_data
+    ) VALUES (
+        '{point_id}',
+        '{experiment_id}',
+        '{_escape_string(metric_name)}',
+        {metric_value if metric_value is not None else 'NULL'},
+        '{_escape_string(metric_type)}',
+        {expected_value if expected_value is not None else 'NULL'},
+        {f"'{_escape_string(expected_operator)}'" if expected_operator else "NULL"},
+        {f"'{_escape_string(source_task_id)}'" if source_task_id else "NULL"},
+        {f"'{json.dumps(raw_data)}'::jsonb" if raw_data else "NULL"}
+    )
+    """
+    _execute_sql(query, return_results=False)
+    return {"success": True, "metric_point_id": point_id}
+
+
+def record_experiment_change(
+    experiment_id: str,
+    change_type: str,
+    description: Optional[str] = None,
+    change_data: Optional[Dict[str, Any]] = None,
+    created_by: str = "SYSTEM",
+    rollback_task_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    change_id = str(uuid.uuid4())
+    query = f"""
+    INSERT INTO experiment_changes (
+        id, experiment_id, change_type, description, change_data, created_by, rollback_task_id
+    ) VALUES (
+        '{change_id}',
+        '{experiment_id}',
+        '{_escape_string(change_type)}',
+        {f"'{_escape_string(description)}'" if description else "NULL"},
+        {f"'{json.dumps(change_data)}'::jsonb" if change_data else "NULL"},
+        '{_escape_string(created_by)}',
+        {f"'{_escape_string(rollback_task_id)}'" if rollback_task_id else "NULL"}
+    )
+    """
+    _execute_sql(query, return_results=False)
+    return {"success": True, "change_id": change_id}
+
+
+def mark_change_reverted(
+    change_id: str,
+    revert_notes: Optional[str] = None,
+) -> Dict[str, Any]:
+    ensure_experiment_schema()
+    query = f"""
+    UPDATE experiment_changes
+    SET reverted_at = NOW(),
+        revert_notes = {f"'{_escape_string(revert_notes)}'" if revert_notes else "revert_notes"}
+    WHERE id = '{change_id}'
+    """
+    _execute_sql(query, return_results=False)
+    return {"success": True, "change_id": change_id}
+
+
 def _execute_sql(query: str, return_results: bool = True) -> Dict[str, Any]:
     """Execute SQL query against Neon database."""
     headers = {

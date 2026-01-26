@@ -56,6 +56,7 @@ try:
         PermissionResult,
         PermissionDenied,
         log_access_attempt,
+        get_scoped_credential,
     )
     RBAC_AVAILABLE = True
 except ImportError as e:
@@ -79,6 +80,9 @@ except ImportError as e:
     
     def log_access_attempt(*args, **kwargs):
         """Stub log_access_attempt when RBAC unavailable."""
+        return None
+
+    def get_scoped_credential(*args, **kwargs):
         return None
 
 # VERCHAIN-02: Stage Transition Enforcement
@@ -123,6 +127,16 @@ try:
         create_experiment,
         get_experiment,
         list_experiments,
+        ensure_experiment_schema,
+        define_hypothesis,
+        set_experiment_approval_policy,
+        approve_experiment,
+        activate_experiment,
+        begin_measuring,
+        conclude_experiment_formal,
+        link_task_to_experiment,
+        record_metric_point,
+        record_experiment_change,
         start_experiment,
         pause_experiment,
         record_result,
@@ -136,6 +150,16 @@ except ImportError as e:
     def create_experiment(*args, **kwargs): return None
     def get_experiment(*args, **kwargs): return None
     def list_experiments(*args, **kwargs): return []
+    def ensure_experiment_schema(*args, **kwargs): return None
+    def define_hypothesis(*args, **kwargs): return None
+    def set_experiment_approval_policy(*args, **kwargs): return None
+    def approve_experiment(*args, **kwargs): return None
+    def activate_experiment(*args, **kwargs): return None
+    def begin_measuring(*args, **kwargs): return None
+    def conclude_experiment_formal(*args, **kwargs): return None
+    def link_task_to_experiment(*args, **kwargs): return None
+    def record_metric_point(*args, **kwargs): return None
+    def record_experiment_change(*args, **kwargs): return None
     def start_experiment(*args, **kwargs): return False
     def pause_experiment(*args, **kwargs): return False
     def record_result(*args, **kwargs): return None
@@ -212,6 +236,7 @@ try:
         score_opportunity,
     )
     from core.opportunity_scan_handler import handle_opportunity_scan
+    from core.task_templates import ProposedTask, pick_diverse_tasks
     PROACTIVE_AVAILABLE = True
 except ImportError as e:
     _proactive_import_error = str(e)
@@ -223,6 +248,9 @@ except ImportError as e:
     def identify_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
     def score_opportunity(*args, **kwargs): return {"success": False, "error": "proactive not available"}
     def handle_opportunity_scan(*args, **kwargs): return {"success": False, "error": "proactive not available"}
+    class ProposedTask:  # type: ignore
+        pass
+    def pick_diverse_tasks(*args, **kwargs): return []
 
 # Phase 2.5: Error Recovery System (MED-01)
 ERROR_RECOVERY_AVAILABLE = False
@@ -267,20 +295,50 @@ try:
 except ImportError as e:
     _verification_import_error = str(e)
     # Stub for graceful degradation - allows completion without verification
-    class VerificationResult:
-        """Stub VerificationResult when verification unavailable."""
-        def __init__(self, **kwargs):
-            self.has_evidence = True  # Default to allowing completion
-            self.reason = "Verification unavailable"
-    
-    class CompletionVerifier:
-        """Stub CompletionVerifier when verification unavailable."""
-        def verify_evidence(self, evidence):
-            return (True, "unverified")  # Allow completion by default
-        def verify_task(self, task):
-            return VerificationResult(has_evidence=True)
 
 
+# Verification Chains: DB write verification producer
+DB_VERIFICATION_AVAILABLE = False
+_db_verification_import_error = None
+API_VERIFICATION_AVAILABLE = False
+_api_verification_import_error = None
+DEPLOY_VERIFICATION_AVAILABLE = False
+_deploy_verification_import_error = None
+
+try:
+    from core.verification_chains import (
+        execute_db_write_with_verification,
+        execute_api_call_with_verification,
+        execute_deploy_with_verification,
+    )
+    DB_VERIFICATION_AVAILABLE = True
+    API_VERIFICATION_AVAILABLE = True
+    DEPLOY_VERIFICATION_AVAILABLE = True
+except ImportError as e:
+    _db_verification_import_error = str(e)
+    _api_verification_import_error = str(e)
+    _deploy_verification_import_error = str(e)
+
+    def execute_db_write_with_verification(*args, **kwargs):
+        return {"status": "error", "error": "DB verification unavailable"}, {
+            "type": "db_write",
+            "verified": False,
+            "error": "DB verification unavailable",
+        }
+
+    def execute_api_call_with_verification(*args, **kwargs):
+        return {"status": "error", "error": "API verification unavailable"}, {
+            "type": "api_call",
+            "verified": False,
+            "error": "API verification unavailable",
+        }
+
+    def execute_deploy_with_verification(*args, **kwargs):
+        return {"status": "error", "error": "Deploy verification unavailable"}, {
+            "type": "railway_deploy",
+            "verified": False,
+            "error": "Deploy verification unavailable",
+        }
 # Phase 5.3: Scheduler - Scheduled Task Run Logging (FIX-03)
 SCHEDULER_AVAILABLE = False
 _scheduler_import_error = None
@@ -745,6 +803,19 @@ def log_action(
         The UUID of the created log entry, or None if logging failed
     """
     now = datetime.now(timezone.utc).isoformat()
+
+    # Fetch task type/title for verification policy decisions
+    task_type = None
+    task_title = None
+    try:
+        task_row = execute_sql(
+            f"SELECT task_type, title FROM governance_tasks WHERE id = {escape_value(task_id)} LIMIT 1"
+        )
+        if task_row.get("rows"):
+            task_type = task_row["rows"][0].get("task_type")
+            task_title = task_row["rows"][0].get("title")
+    except Exception:
+        pass
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
@@ -998,6 +1069,137 @@ def get_forbidden_actions() -> List[str]:
         return []
 
 
+def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
+    """Generate diverse, meaningful tasks when the queue is empty.
+
+    This is a best-effort helper intended to keep the system from going idle.
+    Rate limited via the scheduled_tasks.last_run_at timestamp for the
+    synthetic task name 'proactive_diverse'.
+    """
+    if not PROACTIVE_AVAILABLE:
+        return {"success": False, "error": "proactive module not available"}
+
+    try:
+        pending_res = execute_sql("SELECT COUNT(*)::int as c FROM governance_tasks WHERE status = 'pending'")
+        pending_count = int((pending_res.get("rows") or [{}])[0].get("c") or 0)
+    except Exception:
+        pending_count = 0
+
+    if pending_count > 0:
+        return {"success": True, "skipped": True, "reason": "pending_tasks_exist", "pending": pending_count}
+
+    # Rate limit: at most once per hour
+    try:
+        rate_res = execute_sql(
+            """
+            SELECT last_run_at
+            FROM scheduled_tasks
+            WHERE name = 'proactive_diverse'
+            LIMIT 1
+            """
+        )
+        if rate_res.get("rows") and rate_res["rows"][0].get("last_run_at"):
+            return {"success": True, "skipped": True, "reason": "rate_limited"}
+    except Exception:
+        pass
+
+    # Ensure scheduled_tasks row exists and is rate-limited by get_due_scheduled_tasks() policy
+    try:
+        execute_sql(
+            """
+            INSERT INTO scheduled_tasks (id, name, task_type, cron_expression, config, enabled, last_run_at)
+            VALUES (gen_random_uuid(), 'proactive_diverse', 'proactive_diverse', 'hourly', '{}'::jsonb, TRUE, NOW())
+            ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), enabled = TRUE
+            """
+        )
+    except Exception:
+        # Best-effort: continue even if scheduled_tasks isn't available
+        pass
+
+    created = 0
+    skipped_duplicate = 0
+    skipped_quality = 0
+    try:
+        candidates = pick_diverse_tasks(execute_sql=execute_sql, max_tasks=3, recent_limit=50, dedupe_hours=24)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    for cand in candidates:
+        if not isinstance(cand, ProposedTask):
+            continue
+        payload = cand.payload if isinstance(cand.payload, dict) else {}
+        if not payload.get("dedupe_key") or not payload.get("success_criteria"):
+            skipped_quality += 1
+            continue
+
+        title_escaped = str(cand.title).replace("'", "''")
+        dedupe_key_escaped = str(payload.get("dedupe_key")).replace("'", "''")
+
+        # Deduplication: dedupe_key within 24h
+        try:
+            existing = execute_sql(
+                f"""
+                SELECT id
+                FROM governance_tasks
+                WHERE payload->>'dedupe_key' = '{dedupe_key_escaped}'
+                  AND created_at > NOW() - INTERVAL '24 hours'
+                LIMIT 1
+                """
+            )
+            if existing.get("rows"):
+                skipped_duplicate += 1
+                continue
+        except Exception:
+            pass
+
+        # Hard cap: no more than 2 identical titles in last 24h
+        try:
+            title_cnt = execute_sql(
+                f"""
+                SELECT COUNT(*)::int as c
+                FROM governance_tasks
+                WHERE title = '{title_escaped}'
+                  AND created_at > NOW() - INTERVAL '24 hours'
+                """
+            )
+            c = int((title_cnt.get("rows") or [{}])[0].get("c") or 0)
+            if c >= 2:
+                skipped_duplicate += 1
+                continue
+        except Exception:
+            pass
+
+        tid = str(uuid4())
+        pay = json.dumps(payload).replace("'", "''")
+        desc = str(cand.description or "").replace("'", "''")
+        priority = str(cand.priority or "medium")
+        task_type = str(cand.task_type or "workflow")
+
+        try:
+            execute_sql(
+                f"""
+                INSERT INTO governance_tasks (id, task_type, title, description, priority, status, payload, created_by)
+                VALUES ('{tid}', '{task_type}', '{title_escaped}', '{desc}', '{priority}', 'pending', '{pay}', 'engine')
+                """
+            )
+            created += 1
+            log_action(
+                "proactive.diverse_task_created",
+                f"Created proactive task: {payload.get('dedupe_key')}",
+                level="info",
+                output_data={"task_id": tid, "task_type": task_type, "category": payload.get("category")},
+            )
+        except Exception:
+            skipped_quality += 1
+
+    return {
+        "success": True,
+        "tasks_created": created,
+        "tasks_skipped_duplicate": skipped_duplicate,
+        "tasks_skipped_quality": skipped_quality,
+    }
+
+
 def is_action_allowed(action: str) -> Tuple[bool, str]:
     """
     Check if an action is allowed for this worker.
@@ -1141,10 +1343,33 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
     the task is rejected and remains in its current state.
     """
     now = datetime.now(timezone.utc).isoformat()
+
+    # Fetch task type/title for verification policy decisions
+    task_type = None
+    task_title = None
+    try:
+        task_row = execute_sql(
+            f"SELECT task_type, title FROM governance_tasks WHERE id = {escape_value(task_id)} LIMIT 1"
+        )
+        if task_row.get("rows"):
+            task_type = task_row["rows"][0].get("task_type")
+            task_title = task_row["rows"][0].get("title")
+    except Exception:
+        pass
     
     # Build completion_evidence from result_data
     evidence_text = None
+    evidence_json = None
     if result_data and isinstance(result_data, dict):
+        if isinstance(result_data.get("completion_evidence"), dict):
+            evidence_json = result_data.get("completion_evidence")
+        elif isinstance(result_data.get("verification"), dict):
+            evidence_json = result_data.get("verification")
+        elif isinstance(result_data.get("verification"), list):
+            evidence_json = {
+                "verifications": result_data.get("verification"),
+            }
+
         pr_url = result_data.get("pr_url")
         if pr_url:
             evidence_text = pr_url
@@ -1212,7 +1437,46 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
     if status == "completed" and VERIFICATION_AVAILABLE:
         try:
             verifier = CompletionVerifier()
-            is_valid, evidence_type = verifier.verify_evidence(evidence_text)
+
+            verification_required_types = {
+                "database",
+                "deploy",
+                "deployment",
+                "api_call",
+                "tool_execution",
+                "code",
+                "github",
+            }
+            requires_verification = bool(task_type and task_type.lower() in verification_required_types)
+
+            # If structured verification was provided by a handler, use it.
+            structured_ok = None
+            structured_type = None
+            if isinstance(evidence_json, dict):
+                structured_ok = bool(
+                    evidence_json.get("verified") is True
+                    or evidence_json.get("status") in ("SUCCESS", "VERIFIED", "OK")
+                    or evidence_json.get("passed") is True
+                )
+                structured_type = evidence_json.get("type") or evidence_json.get("verification_type")
+
+            if structured_ok is not None:
+                is_valid = structured_ok
+                evidence_type = str(structured_type) if structured_type else "structured"
+            else:
+                is_valid, evidence_type = verifier.verify_evidence(evidence_text)
+
+            log_action(
+                "verification.attempt",
+                f"Verification attempt for task {task_id}: type={task_type or 'unknown'} title={task_title or ''}",
+                level="info",
+                task_id=task_id,
+                output_data={
+                    "task_type": task_type,
+                    "evidence_type": evidence_type,
+                    "has_structured": bool(evidence_json is not None),
+                },
+            )
             
             if not is_valid:
                 # Reject completion - task doesn't have valid evidence
@@ -1223,6 +1487,19 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     level="warn",
                     task_id=task_id
                 )
+
+                if requires_verification:
+                    log_action(
+                        "verification.failed",
+                        f"Verification failed for task {task_id} (required). Blocking completion.",
+                        level="warn",
+                        task_id=task_id,
+                        error_data={
+                            "task_type": task_type,
+                            "evidence_type": evidence_type,
+                            "completion_evidence": evidence_json or evidence_text,
+                        },
+                    )
                 
                 # Update task with rejection message but keep it in_progress
                 reject_sql = f"""
@@ -1243,7 +1520,8 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     pass
                 
                 # Don't proceed with completion
-                return
+                if requires_verification:
+                    return
             
             # Log successful verification
             log_action(
@@ -1270,7 +1548,9 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
         if VERIFICATION_AVAILABLE:
             cols.append("verification_status = 'verified'")
     
-    if evidence_text:
+    if evidence_json is not None:
+        cols.append(f"completion_evidence = {escape_value(json.dumps(evidence_json, default=str))}")
+    elif evidence_text:
         cols.append(f"completion_evidence = {escape_value(evidence_text)}")
     
     if result_data:
@@ -1838,16 +2118,39 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
         else:
             # Dispatch based on tool type
             tool_type = tool_config.get("tool_type", "unknown")
-            
-            if tool_type == "slack":
-                output = _execute_slack_tool(tool_name, params)
-            elif tool_type == "database":
-                output = _execute_database_tool(tool_name, params)
+
+            # Scoped RBAC enforcement per tool category
+            # (Most restrictive default when we can't infer read vs write)
+            required_scope = None
+            if tool_type == "database":
+                required_scope = "database.write" if bool(params.get("write")) else "database.read"
             elif tool_type == "http":
-                output = _execute_http_tool(tool_name, params)
-            else:
-                # Generic execution - log and mark as executed
-                output = {"status": "executed", "tool": tool_name, "tool_type": tool_type}
+                required_scope = "api.execute"
+            elif tool_type == "github":
+                required_scope = "github.write" if bool(params.get("write")) else "github.read"
+            elif tool_type == "railway":
+                required_scope = "railway.deploy" if bool(params.get("deploy")) else "railway.read"
+
+            if required_scope:
+                scope_ok, scope_reason = is_action_allowed(required_scope)
+                if not scope_ok:
+                    output = {
+                        "status": "error",
+                        "error": f"Permission denied: {scope_reason}",
+                        "blocked": True,
+                        "required_scope": required_scope,
+                    }
+                else:
+            
+                    if tool_type == "slack":
+                        output = _execute_slack_tool(tool_name, params)
+                    elif tool_type == "database":
+                        output = _execute_database_tool(tool_name, params)
+                    elif tool_type == "http":
+                        output = _execute_http_tool(tool_name, params)
+                    else:
+                        # Generic execution - log and mark as executed
+                        output = {"status": "executed", "tool": tool_name, "tool_type": tool_type}
         
         # Update tool execution record
         duration_ms = int((time.time() - start_time) * 1000)
@@ -2085,6 +2388,32 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
         # Execute based on task type
         result = {"executed": True}
         task_succeeded = True  # Track overall success
+
+        # Experiment lifecycle hooks (optional)
+        experiment_id = None
+        try:
+            if isinstance(task.payload, dict):
+                experiment_id = task.payload.get("experiment_id")
+        except Exception:
+            experiment_id = None
+
+        if EXPERIMENTS_AVAILABLE and experiment_id:
+            try:
+                ensure_experiment_schema()
+                link_task_to_experiment(
+                    experiment_id=str(experiment_id),
+                    task_id=str(task.id),
+                    link_type=str(task.task_type or "task"),
+                    notes=task.title,
+                    created_by=WORKER_ID,
+                )
+            except Exception as exp_link_err:
+                log_action(
+                    "experiment.task_link_failed",
+                    f"Failed to link task {task.id} to experiment {experiment_id}: {str(exp_link_err)[:200]}",
+                    level="warn",
+                    task_id=task.id,
+                )
         
         if task.task_type == "tool_execution":
             tool_name = task.payload.get("tool_name")
@@ -2182,56 +2511,341 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
             # Execute SQL query from payload
             sql_query = task.payload.get("sql") or task.payload.get("query")
             if not sql_query:
-                log_action("task.error", "Database task missing 'sql' in payload", 
-                          level="error", task_id=task.id)
+                log_action(
+                    "task.error",
+                    "Database task missing 'sql' in payload",
+                    level="error",
+                    task_id=task.id,
+                )
                 result = {"error": "No SQL query provided in payload", "expected_fields": ["sql", "query"]}
                 task_succeeded = False
             else:
-                # SECURITY: Check for write operations - require approval
                 sql_upper = sql_query.strip().upper()
                 first_token = sql_upper.split()[0] if sql_upper.split() else ""
                 read_only_statements = {"SELECT", "WITH", "SHOW", "EXPLAIN", "DESCRIBE"}
-                
-                if first_token not in read_only_statements:
-                    # Non-read-only query detected - require approval
-                    log_action("task.write_blocked", 
-                              f"Write operation '{first_token}' requires approval",
-                              level="warn", task_id=task.id,
-                              output_data={"statement_type": first_token, "task_id": task.id})
-                    
-                    update_task_status(task.id, "waiting_approval", {
-                        "reason": f"Write operation '{first_token}' requires human approval",
-                        "statement_type": first_token,
-                        "sql_preview": sql_query[:100] + "..." if len(sql_query) > 100 else sql_query
-                    })
-                    
-                    return False, {
-                        "waiting_approval": True,
-                        "reason": f"Write operation '{first_token}' requires approval",
-                        "statement_type": first_token
-                    }
-                
-                try:
-                    query_result = execute_sql(sql_query)
-                    result = {
-                        "executed": True,
-                        "rowCount": query_result.get("rowCount", 0),
-                        "rows_preview": query_result.get("rows", [])[:5]  # Keep in result for task storage
-                    }
-                    # SECURITY: Log only metadata, not raw SQL or row data
-                    log_action("task.database_executed", f"Query executed successfully",
-                              task_id=task.id, output_data={
-                                  "executed": True,
-                                  "rowCount": query_result.get("rowCount", 0),
-                                  "sql_length": len(sql_query),
-                                  "sql_truncated": len(sql_query) > 200
-                              })
-                except Exception as sql_error:
-                    result = {"error": str(sql_error)}
+
+                required_scope = "database.read" if first_token in read_only_statements else "database.write"
+                allowed_scope, reason_scope = is_action_allowed(required_scope)
+                if not allowed_scope:
+                    result = {"blocked": True, "reason": reason_scope, "required_scope": required_scope}
                     task_succeeded = False
-                    log_action("task.database_failed", f"SQL execution failed",
-                              level="error", task_id=task.id, 
-                              error_data={"error": str(sql_error), "sql_length": len(sql_query)})
+                    log_action(
+                        "task.blocked",
+                        f"Database task blocked: {reason_scope}",
+                        level="warn",
+                        task_id=task.id,
+                        error_data={"required_scope": required_scope},
+                    )
+                else:
+                    # Writes require approval
+                    if first_token not in read_only_statements and not task.requires_approval and not approval_bypassed:
+                        log_action(
+                            "task.write_blocked",
+                            f"Write operation '{first_token}' requires approval",
+                            level="warn",
+                            task_id=task.id,
+                            output_data={"statement_type": first_token, "task_id": task.id},
+                        )
+
+                        try:
+                            execute_sql(
+                                f"UPDATE governance_tasks SET requires_approval = TRUE WHERE id = {escape_value(task.id)}"
+                            )
+                        except Exception:
+                            pass
+
+                        ensure_approval_request(task)
+                        update_task_status(
+                            task.id,
+                            "waiting_approval",
+                            {
+                                "reason": f"Write operation '{first_token}' requires human approval",
+                                "statement_type": first_token,
+                                "sql_preview": sql_query[:100] + "..." if len(sql_query) > 100 else sql_query,
+                            },
+                        )
+
+                        return False, {
+                            "waiting_approval": True,
+                            "reason": f"Write operation '{first_token}' requires approval",
+                            "statement_type": first_token,
+                        }
+
+                    try:
+                        if first_token not in read_only_statements:
+                            if not DB_VERIFICATION_AVAILABLE:
+                                raise Exception(f"DB write verification unavailable: {_db_verification_import_error}")
+
+                            db_result, verification = execute_db_write_with_verification(
+                                execute_sql=execute_sql,
+                                sql=sql_query,
+                            )
+
+                            result = {
+                                "executed": True,
+                                "rowCount": db_result.get("rowCount", 0),
+                                "rows_preview": (
+                                    db_result.get("rows", [])[:5]
+                                    if isinstance(db_result.get("rows"), list)
+                                    else []
+                                ),
+                                "verification": verification,
+                            }
+
+                            if EXPERIMENTS_AVAILABLE and experiment_id:
+                                try:
+                                    record_experiment_change(
+                                        experiment_id=str(experiment_id),
+                                        change_type="db_write",
+                                        description=f"Database write via task {task.id}",
+                                        change_data={
+                                            "task_id": str(task.id),
+                                            "statement_type": first_token,
+                                            "sql_preview": (sql_query[:500] if isinstance(sql_query, str) else None),
+                                            "verified": bool(verification.get("verified")),
+                                        },
+                                        created_by=WORKER_ID,
+                                    )
+                                except Exception:
+                                    pass
+
+                            if not verification.get("verified"):
+                                task_succeeded = False
+                                log_action(
+                                    "task.database_verification_failed",
+                                    "DB write verification failed",
+                                    level="error",
+                                    task_id=task.id,
+                                    error_data={"statement_type": first_token, "verification": verification},
+                                )
+                            else:
+                                log_action(
+                                    "task.database_write_verified",
+                                    "DB write verified",
+                                    level="info",
+                                    task_id=task.id,
+                                    output_data={"statement_type": first_token, "verification": verification},
+                                )
+                        else:
+                            query_result = execute_sql(sql_query)
+                            result = {
+                                "executed": True,
+                                "rowCount": query_result.get("rowCount", 0),
+                                "rows_preview": query_result.get("rows", [])[:5],
+                            }
+
+                            if EXPERIMENTS_AVAILABLE and experiment_id:
+                                try:
+                                    record_metric_point(
+                                        experiment_id=str(experiment_id),
+                                        metric_name="database.row_count",
+                                        metric_value=float(query_result.get("rowCount", 0) or 0),
+                                        metric_type="count",
+                                        source_task_id=str(task.id),
+                                        raw_data={"statement_type": first_token},
+                                    )
+                                except Exception:
+                                    pass
+                            log_action(
+                                "task.database_executed",
+                                "Query executed successfully",
+                                task_id=task.id,
+                                output_data={
+                                    "executed": True,
+                                    "rowCount": query_result.get("rowCount", 0),
+                                    "sql_length": len(sql_query),
+                                    "sql_truncated": len(sql_query) > 200,
+                                },
+                            )
+                    except Exception as sql_error:
+                        result = {"error": str(sql_error)}
+                        task_succeeded = False
+                        log_action(
+                            "task.database_failed",
+                            "SQL execution failed",
+                            level="error",
+                            task_id=task.id,
+                            error_data={"error": str(sql_error), "sql_length": len(sql_query)},
+                        )
+
+        elif task.task_type == "api_call":
+            allowed_scope, reason_scope = is_action_allowed("api.execute")
+            if not allowed_scope:
+                result = {"blocked": True, "reason": reason_scope, "required_scope": "api.execute"}
+                task_succeeded = False
+                log_action(
+                    "task.blocked",
+                    f"API call task blocked: {reason_scope}",
+                    level="warn",
+                    task_id=task.id,
+                    error_data={"required_scope": "api.execute"},
+                )
+            else:
+                url = task.payload.get("url")
+                method = task.payload.get("method") or "GET"
+                headers = task.payload.get("headers") or {}
+                timeout_seconds = int(task.payload.get("timeout_seconds") or 20)
+                json_body = task.payload.get("json")
+                body = task.payload.get("body")
+
+                if not url:
+                    log_action(
+                        "task.error",
+                        "API call task missing 'url' in payload",
+                        level="error",
+                        task_id=task.id,
+                    )
+                    result = {"error": "No URL provided in payload", "expected_fields": ["url"]}
+                    task_succeeded = False
+                else:
+                    try:
+                        if not API_VERIFICATION_AVAILABLE:
+                            raise Exception(f"API call verification unavailable: {_api_verification_import_error}")
+
+                        api_result, verification = execute_api_call_with_verification(
+                            url=url,
+                            method=method,
+                            headers=headers if isinstance(headers, dict) else {},
+                            body=body,
+                            json_body=json_body,
+                            timeout_seconds=timeout_seconds,
+                        )
+
+                        result = {**(api_result or {}), "verification": verification}
+
+                        if EXPERIMENTS_AVAILABLE and experiment_id:
+                            try:
+                                record_metric_point(
+                                    experiment_id=str(experiment_id),
+                                    metric_name="api_call.verified",
+                                    metric_value=1.0 if verification.get("verified") else 0.0,
+                                    metric_type="boolean",
+                                    source_task_id=str(task.id),
+                                    raw_data={"url": url, "method": method, "status": verification.get("status")},
+                                )
+                            except Exception:
+                                pass
+                        if not verification.get("verified"):
+                            task_succeeded = False
+                            log_action(
+                                "task.api_call_verification_failed",
+                                "API call verification failed",
+                                level="error",
+                                task_id=task.id,
+                                error_data={"verification": verification},
+                            )
+                        else:
+                            log_action(
+                                "task.api_call_verified",
+                                "API call verified",
+                                level="info",
+                                task_id=task.id,
+                                output_data={"verification": verification},
+                            )
+                    except Exception as api_error:
+                        result = {"error": str(api_error)}
+                        task_succeeded = False
+                        log_action(
+                            "task.api_call_failed",
+                            "API call execution failed",
+                            level="error",
+                            task_id=task.id,
+                            error_data={"error": str(api_error)},
+                        )
+
+        elif task.task_type in ("deploy", "deployment"):
+            allowed_scope, reason_scope = is_action_allowed("railway.deploy")
+            if not allowed_scope:
+                result = {"blocked": True, "reason": reason_scope, "required_scope": "railway.deploy"}
+                task_succeeded = False
+                log_action(
+                    "task.blocked",
+                    f"Deploy task blocked: {reason_scope}",
+                    level="warn",
+                    task_id=task.id,
+                    error_data={"required_scope": "railway.deploy"},
+                )
+            else:
+                service_id = task.payload.get("service_id") or task.payload.get("railway_service_id")
+                service_name = task.payload.get("service_name") or task.payload.get("service")
+                environment_id = task.payload.get("environment_id") or "8bfa6a1a-92f4-4a42-bf51-194b1c844a76"
+                timeout_seconds = int(task.payload.get("timeout_seconds") or 300)
+
+                if not service_id:
+                    log_action(
+                        "task.error",
+                        "Deploy task missing 'service_id' in payload",
+                        level="error",
+                        task_id=task.id,
+                    )
+                    result = {"error": "No service_id provided in payload", "expected_fields": ["service_id"]}
+                    task_succeeded = False
+                else:
+                    try:
+                        if not DEPLOY_VERIFICATION_AVAILABLE:
+                            raise Exception(f"Deploy verification unavailable: {_deploy_verification_import_error}")
+
+                        railway_token = get_scoped_credential(
+                            WORKER_ID,
+                            "RAILWAY_TOKEN",
+                            required_scope="railway.deploy",
+                        )
+
+                        deploy_result, verification = execute_deploy_with_verification(
+                            service_id=service_id,
+                            service_name=service_name,
+                            environment_id=environment_id,
+                            railway_token=railway_token,
+                            timeout_seconds=timeout_seconds,
+                            poll_interval_seconds=10,
+                        )
+
+                        result = {**(deploy_result or {}), "verification": verification}
+
+                        if EXPERIMENTS_AVAILABLE and experiment_id:
+                            try:
+                                record_experiment_change(
+                                    experiment_id=str(experiment_id),
+                                    change_type="deploy",
+                                    description=f"Railway deploy via task {task.id}",
+                                    change_data={
+                                        "task_id": str(task.id),
+                                        "service_id": service_id,
+                                        "service_name": service_name,
+                                        "environment_id": environment_id,
+                                        "verified": bool(verification.get("verified")),
+                                    },
+                                    created_by=WORKER_ID,
+                                )
+                            except Exception:
+                                pass
+                        if not verification.get("verified"):
+                            task_succeeded = False
+                            log_action(
+                                "task.deploy_verification_failed",
+                                "Deploy verification failed",
+                                level="error",
+                                task_id=task.id,
+                                error_data={"verification": verification},
+                            )
+                        else:
+                            log_action(
+                                "task.deploy_verified",
+                                "Deploy verified",
+                                level="info",
+                                task_id=task.id,
+                                output_data={"verification": verification},
+                            )
+                    except Exception as deploy_error:
+                        result = {"error": str(deploy_error)}
+                        task_succeeded = False
+                        log_action(
+                            "task.deploy_failed",
+                            "Deploy execution failed",
+                            level="error",
+                            task_id=task.id,
+                            error_data={"error": str(deploy_error)},
+                        )
         
         elif task.task_type == "test":
             # Execute verification/test queries
@@ -3315,6 +3929,19 @@ def autonomy_loop():
                             fail_task_run(run_id, error_message=str(sched_error))
                 else:
                     # 3. Nothing to do - log heartbeat
+                    # Proactive diversity engine: if idle, generate 2-3 diverse meaningful tasks (rate-limited)
+                    try:
+                        gen_result = _maybe_generate_diverse_proactive_tasks()
+                        if isinstance(gen_result, dict) and gen_result.get("tasks_created"):
+                            log_action(
+                                "proactive.diverse_generation",
+                                "Generated diverse proactive tasks",
+                                level="info",
+                                output_data=gen_result,
+                            )
+                    except Exception:
+                        pass
+
                     if loop_count % 5 == 0:  # Every 5 loops
                         log_action("loop.heartbeat", f"Loop {loop_count}: No work found",
                                    output_data={"loop": loop_count, "tasks_checked": 0})

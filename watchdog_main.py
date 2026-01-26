@@ -23,7 +23,7 @@ import time
 import signal
 import logging
 import traceback
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import threading
@@ -47,6 +47,23 @@ from core.alerting import (
     check_stale_tasks,
 )
 from core.database import execute_query
+
+SLACK_NOTIFICATIONS_AVAILABLE = False
+_slack_notifications_import_error = None
+
+try:
+    from core.slack_notifications import send_system_alert
+    SLACK_NOTIFICATIONS_AVAILABLE = True
+except ImportError as e:
+    _slack_notifications_import_error = str(e)
+
+    def send_system_alert(
+        alert_type: str,
+        component: str,
+        message: str,
+        details: Optional[dict[str, Any]] = None,
+    ) -> bool:
+        return False
 
 # Configure logging
 logging.basicConfig(
@@ -238,6 +255,41 @@ def detect_and_handle_failures() -> Dict[str, Any]:
             for agent in failed_agents:
                 worker_id = agent.get('worker_id')
                 logger.info(f"Handling failure for agent: {worker_id}")
+
+                # Slack warning if heartbeat is stale > 5 minutes (avoid spam for shorter thresholds)
+                if SLACK_NOTIFICATIONS_AVAILABLE:
+                    try:
+                        last_hb_raw = agent.get('last_heartbeat')
+                        last_hb_dt: Optional[datetime] = None
+
+                        if isinstance(last_hb_raw, datetime):
+                            last_hb_dt = last_hb_raw
+                        elif isinstance(last_hb_raw, str) and last_hb_raw:
+                            try:
+                                last_hb_dt = datetime.fromisoformat(
+                                    last_hb_raw.replace('Z', '+00:00')
+                                )
+                            except Exception:
+                                last_hb_dt = None
+
+                        if last_hb_dt is not None:
+                            now_dt = datetime.now(timezone.utc)
+                            if last_hb_dt.tzinfo is None:
+                                last_hb_dt = last_hb_dt.replace(tzinfo=timezone.utc)
+
+                            if now_dt - last_hb_dt > timedelta(minutes=5):
+                                send_system_alert(
+                                    alert_type="warning",
+                                    component="Watchdog",
+                                    message=f"Worker {worker_id} heartbeat stale",
+                                    details={"worker_id": worker_id, "last_heartbeat": str(last_hb_raw)},
+                                )
+                    except Exception as slack_err:
+                        logger.warning(
+                            "Failed to send Slack stale-heartbeat alert for worker %s: %s",
+                            worker_id,
+                            str(slack_err),
+                        )
                 
                 # Create alert
                 create_alert(

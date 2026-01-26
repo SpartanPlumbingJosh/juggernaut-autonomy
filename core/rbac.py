@@ -22,6 +22,7 @@ Usage:
 import functools
 import json
 import logging
+import os
 import urllib.request
 import urllib.error
 from dataclasses import dataclass
@@ -31,6 +32,133 @@ from uuid import uuid4
 
 # Configure logging
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# SCOPE DEFINITIONS (RBAC + Scoped Credentials)
+# =============================================================================
+
+# Canonical scopes for tool/task actions.
+# Note: these are permissions strings that should appear in roles.permissions and/or worker_registry.permissions.
+SCOPES = {
+    # Database
+    "database.read",
+    "database.write",
+    "database.admin",
+    # GitHub
+    "github.read",
+    "github.write",
+    "github.admin",
+    # Railway
+    "railway.read",
+    "railway.deploy",
+    # Generic external API calls
+    "api.execute",
+}
+
+
+# Default permissions by role (fallback when DB roles table is missing/out-of-date).
+DEFAULT_ROLE_PERMISSIONS: Dict[str, List[str]] = {
+    "EXECUTOR": ["database.write", "github.write", "api.execute"],
+    "ANALYST": ["database.read", "api.execute"],
+    "ORCHESTRATOR": ["*"],
+    "STRATEGIST": ["database.read", "github.read"],
+    "WATCHDOG": ["database.read", "railway.read"],
+}
+
+
+def _normalize_str_list(value: Any) -> List[str]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return [str(v) for v in value if v is not None]
+    if isinstance(value, (tuple, set)):
+        return [str(v) for v in value if v is not None]
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return []
+        # Try JSON parsing first
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [str(v) for v in parsed if v is not None]
+        except Exception:
+            pass
+        # Comma-separated fallback
+        if "," in s:
+            return [p.strip() for p in s.split(",") if p.strip()]
+        return [s]
+    return [str(value)]
+
+
+def get_default_permissions_for_role(role_name: Optional[str]) -> List[str]:
+    if not role_name:
+        return []
+    return DEFAULT_ROLE_PERMISSIONS.get(str(role_name).upper(), [])
+
+
+def get_scoped_credential(
+    worker_id: str,
+    credential_key: str,
+    required_scope: Optional[str] = None,
+) -> Optional[str]:
+    """Retrieve a credential scoped to a worker and/or role.
+
+    Lookup order:
+    1) If a `worker_credentials` table exists, read latest active credential for (worker_id, credential_key).
+       Optional required_scope can further constrain lookup.
+    2) Environment variable fallback (most specific to least):
+       - {CREDENTIAL_KEY}__{WORKER_ID}
+       - {CREDENTIAL_KEY}__{ROLE_NAME}
+       - {CREDENTIAL_KEY}
+
+    This function does NOT log secrets. Permission checks should be enforced by callers via check_permission().
+    """
+    key = str(credential_key or "").strip()
+    if not key:
+        return None
+
+    worker = get_worker_info(worker_id)
+    role_name = (worker or {}).get("role_name")
+
+    # DB-backed credentials (optional)
+    try:
+        scope_filter = ""
+        if required_scope:
+            scope_filter = f" AND (scope = {_escape_value(required_scope)} OR scope IS NULL)"
+        sql = f"""
+        SELECT credential_value
+        FROM worker_credentials
+        WHERE worker_id = {_escape_value(worker_id)}
+          AND credential_key = {_escape_value(key)}
+          AND status = 'active'
+          {scope_filter}
+        ORDER BY created_at DESC
+        LIMIT 1
+        """
+        result = _execute_query(sql)
+        rows = result.get("rows", [])
+        if rows and rows[0].get("credential_value"):
+            return str(rows[0].get("credential_value"))
+    except Exception:
+        # Table may not exist or query may fail; fall back to env
+        pass
+
+    # Env-backed credentials
+    def _env_key(suffix: str) -> str:
+        # Env vars can't reliably contain '-' so normalize.
+        return f"{key}__{suffix}".upper().replace("-", "_")
+
+    v = os.environ.get(_env_key(worker_id))
+    if v:
+        return v
+
+    if role_name:
+        v = os.environ.get(_env_key(str(role_name)))
+        if v:
+            return v
+
+    return os.environ.get(key)
 
 # Database configuration
 NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
@@ -193,6 +321,28 @@ def get_worker_info(worker_id: str) -> Optional[Dict[str, Any]]:
         return rows[0] if rows else None
     except RBACError:
         return None
+
+
+def _expand_implied_permissions(perms: List[str]) -> List[str]:
+    """Expand implied permissions (admin implies write/read)."""
+    s = set(perms)
+
+    if "database.admin" in s:
+        s.add("database.write")
+        s.add("database.read")
+    if "database.write" in s:
+        s.add("database.read")
+
+    if "github.admin" in s:
+        s.add("github.write")
+        s.add("github.read")
+    if "github.write" in s:
+        s.add("github.read")
+
+    if "railway.deploy" in s:
+        s.add("railway.read")
+
+    return list(s)
 
 
 def get_role_permissions(role_name: str) -> Optional[Dict[str, Any]]:
@@ -358,14 +508,21 @@ def check_permission(
     # Get role permissions
     role = get_role_permissions(role_name) if role_name else None
 
-    # Combine worker-level and role-level permissions
-    worker_permissions = worker.get("permissions") or []
-    role_permissions = role.get("permissions") or [] if role else []
-    all_permissions = set(worker_permissions) | set(role_permissions)
+    # Combine worker-level and role-level permissions (robust parsing)
+    worker_permissions = _normalize_str_list(worker.get("permissions"))
 
-    # Combine forbidden actions
-    worker_forbidden = worker.get("forbidden_actions") or []
-    role_forbidden = role.get("forbidden_actions") or [] if role else []
+    role_permissions: List[str] = []
+    if role and role.get("permissions") is not None:
+        role_permissions = _normalize_str_list(role.get("permissions"))
+    else:
+        # Fallback to hard-coded defaults by role name
+        role_permissions = get_default_permissions_for_role(role_name)
+
+    all_permissions = set(_expand_implied_permissions(list(set(worker_permissions) | set(role_permissions))))
+
+    # Combine forbidden actions (robust parsing)
+    worker_forbidden = _normalize_str_list(worker.get("forbidden_actions"))
+    role_forbidden = _normalize_str_list(role.get("forbidden_actions")) if role else []
     all_forbidden = set(worker_forbidden) | set(role_forbidden)
 
     # Check if action is explicitly forbidden
