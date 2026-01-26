@@ -1099,19 +1099,39 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
             """
         )
         if rate_res.get("rows") and rate_res["rows"][0].get("last_run_at"):
-            return {"success": True, "skipped": True, "reason": "rate_limited"}
+            # Only rate-limit if it ran within the last hour
+            last_run_recent = execute_sql(
+                """
+                SELECT 1
+                FROM scheduled_tasks
+                WHERE name = 'proactive_diverse'
+                  AND last_run_at > NOW() - INTERVAL '1 hour'
+                LIMIT 1
+                """
+            )
+            if last_run_recent.get("rows"):
+                return {"success": True, "skipped": True, "reason": "rate_limited"}
     except Exception:
         pass
 
-    # Ensure scheduled_tasks row exists and is rate-limited by get_due_scheduled_tasks() policy
+    # Best-effort marker row used only for rate limiting. Avoid ON CONFLICT target because
+    # some environments may not enforce a unique constraint on (name).
     try:
-        execute_sql(
+        upd = execute_sql(
             """
-            INSERT INTO scheduled_tasks (id, name, task_type, cron_expression, config, enabled, last_run_at)
-            VALUES (gen_random_uuid(), 'proactive_diverse', 'proactive_diverse', 'hourly', '{}'::jsonb, TRUE, NOW())
-            ON CONFLICT (name) DO UPDATE SET last_run_at = NOW(), enabled = TRUE
+            UPDATE scheduled_tasks
+            SET last_run_at = NOW(), enabled = TRUE
+            WHERE name = 'proactive_diverse'
             """
         )
+        updated = int(upd.get("rowCount", 0) or 0) if isinstance(upd, dict) else 0
+        if updated <= 0:
+            execute_sql(
+                """
+                INSERT INTO scheduled_tasks (id, name, task_type, cron_expression, config, enabled, last_run_at)
+                VALUES (gen_random_uuid(), 'proactive_diverse', 'proactive_diverse', 'hourly', '{}'::jsonb, TRUE, NOW())
+                """
+            )
     except Exception:
         # Best-effort: continue even if scheduled_tasks isn't available
         pass
