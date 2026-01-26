@@ -1167,6 +1167,15 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
         pending_count = 0
 
     if pending_count > 0:
+        try:
+            log_action(
+                "proactive.diverse_skipped",
+                "Skipped diverse generation because pending tasks exist",
+                level="debug",
+                output_data={"pending": pending_count},
+            )
+        except Exception:
+            pass
         return {"success": True, "skipped": True, "reason": "pending_tasks_exist", "pending": pending_count}
 
     # Rate limit: at most once per hour
@@ -1191,6 +1200,15 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 """
             )
             if last_run_recent.get("rows"):
+                try:
+                    log_action(
+                        "proactive.diverse_skipped",
+                        "Skipped diverse generation due to rate limit",
+                        level="debug",
+                        output_data={"reason": "rate_limited"},
+                    )
+                except Exception:
+                    pass
                 return {"success": True, "skipped": True, "reason": "rate_limited"}
     except Exception:
         pass
@@ -1302,12 +1320,27 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 pass
             skipped_quality += 1
 
-    return {
+    result = {
         "success": True,
         "tasks_created": created,
         "tasks_skipped_duplicate": skipped_duplicate,
         "tasks_skipped_quality": skipped_quality,
     }
+
+    if created <= 0:
+        try:
+            log_action(
+                "proactive.diverse_no_tasks",
+                "Diverse generation produced zero tasks",
+                level="info",
+                output_data=result,
+            )
+        except Exception:
+            pass
+
+    return result
+
+
 
 
 def is_action_allowed(action: str) -> Tuple[bool, str]:
@@ -4104,6 +4137,10 @@ def autonomy_loop():
                             execute_sql("SELECT 1")
                             sched_result = {"healthy": True, "timestamp": datetime.now(timezone.utc).isoformat()}
                             sched_success = True
+                        elif sched_task_type == "proactive_diverse":
+                            # Generate diverse tasks when idle
+                            sched_result = _maybe_generate_diverse_proactive_tasks()
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success", True))
                         elif sched_task_type == "log_retention":
                             # Log retention cleanup - placeholder
                             sched_result = {"cleaned": True, "timestamp": datetime.now(timezone.utc).isoformat()}
