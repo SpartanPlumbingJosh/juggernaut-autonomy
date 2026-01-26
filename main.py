@@ -1119,7 +1119,9 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
                 cron_expression TEXT,
                 config JSONB DEFAULT '{}'::jsonb,
                 enabled BOOLEAN DEFAULT TRUE,
-                last_run_at TIMESTAMPTZ
+                last_run_at TIMESTAMPTZ,
+                next_run_at TIMESTAMPTZ,
+                interval_seconds INT
             )
             """
         )
@@ -1133,6 +1135,8 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'::jsonb",
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE",
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS interval_seconds INT",
     ]
     for sql in alter_sched:
         try:
@@ -1426,11 +1430,14 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
 def get_due_scheduled_tasks() -> List[Dict]:
     """Get scheduled tasks that are due to run."""
     sql = """
-        SELECT id, name, task_type, cron_expression, config, last_run_at, enabled
+        SELECT id, name, task_type, cron_expression, config, last_run_at, next_run_at, interval_seconds, enabled
         FROM scheduled_tasks
         WHERE enabled = TRUE
-        AND (last_run_at IS NULL OR last_run_at < NOW() - INTERVAL '1 hour')
-        ORDER BY last_run_at ASC NULLS FIRST
+        AND (
+            (next_run_at IS NOT NULL AND next_run_at <= NOW())
+            OR (next_run_at IS NULL AND last_run_at IS NULL)
+        )
+        ORDER BY next_run_at ASC NULLS FIRST, last_run_at ASC NULLS FIRST
         LIMIT 5
     """
     try:
@@ -1438,6 +1445,56 @@ def get_due_scheduled_tasks() -> List[Dict]:
         return result.get("rows", [])
     except Exception:
         return []
+
+
+def _compute_next_run_at_expr(sched_task: Dict[str, Any]) -> str:
+    interval_seconds = sched_task.get("interval_seconds")
+    cron_expression = (sched_task.get("cron_expression") or "").strip().lower()
+
+    try:
+        if interval_seconds is not None:
+            secs = int(interval_seconds)
+            if secs > 0:
+                return f"NOW() + INTERVAL '{secs} seconds'"
+    except Exception:
+        pass
+
+    if cron_expression in ("hourly", "@hourly"):
+        return "NOW() + INTERVAL '1 hour'"
+    if cron_expression in ("daily", "@daily"):
+        return "NOW() + INTERVAL '1 day'"
+    if cron_expression in ("weekly", "@weekly"):
+        return "NOW() + INTERVAL '7 days'"
+
+    # Fallback: default to hourly
+    return "NOW() + INTERVAL '1 hour'"
+
+
+def reschedule_scheduled_task(sched_task: Dict[str, Any], success: bool) -> None:
+    """Update scheduled task last_run_at/next_run_at.
+
+    If a task fails, apply a short backoff to avoid tight failure loops.
+    """
+    task_id = sched_task.get("id")
+    if not task_id:
+        return
+
+    next_expr = _compute_next_run_at_expr(sched_task)
+    if not success:
+        # 5 minute backoff on failure
+        next_expr = "NOW() + INTERVAL '5 minutes'"
+
+    try:
+        execute_sql(
+            f"""
+            UPDATE scheduled_tasks
+            SET last_run_at = NOW(),
+                next_run_at = {next_expr}
+            WHERE id = {escape_value(task_id)}
+            """
+        )
+    except Exception:
+        pass
 
 
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
@@ -3979,11 +4036,42 @@ def autonomy_loop():
                                output_data={"tasks_checked": len(tasks)})
             else:
                 # 2. Check scheduled tasks
+                try:
+                    _ensure_proactive_min_schema(execute_sql, log_action)
+                except Exception:
+                    pass
+
+                try:
+                    log_action(
+                        "scheduler.check",
+                        "Checking for due scheduled tasks",
+                        level="debug",
+                        output_data={"loop": loop_count},
+                    )
+                except Exception:
+                    pass
+
                 scheduled = get_due_scheduled_tasks()
                 if scheduled:
                     sched_task = scheduled[0]
                     sched_task_type = sched_task.get('task_type', 'unknown')
                     sched_task_id = sched_task.get('id')
+                    try:
+                        log_action(
+                            "scheduler.due_found",
+                            f"Scheduled task due: {sched_task.get('name')}",
+                            level="info",
+                            output_data={
+                                "task_id": sched_task_id,
+                                "task_type": sched_task_type,
+                                "next_run_at": str(sched_task.get("next_run_at")),
+                                "last_run_at": str(sched_task.get("last_run_at")),
+                                "cron_expression": sched_task.get("cron_expression"),
+                                "interval_seconds": sched_task.get("interval_seconds"),
+                            },
+                        )
+                    except Exception:
+                        pass
                     log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
                                  f"No pending tasks, running scheduled task (type: {sched_task_type})")
                     
@@ -4036,6 +4124,12 @@ def autonomy_loop():
                             level="info" if sched_success else "error",
                             output_data=sched_result
                         )
+
+                        # Reschedule the scheduled task
+                        try:
+                            reschedule_scheduled_task(sched_task, success=bool(sched_success))
+                        except Exception:
+                            pass
                         
                         # Complete the task run - updates scheduled_task_runs with result
                         if SCHEDULER_AVAILABLE and run_id:
@@ -4050,6 +4144,12 @@ def autonomy_loop():
                             level="error",
                             error_data={"error": str(sched_error), "traceback": traceback.format_exc()[:300]}
                         )
+
+                        # Failure reschedule/backoff
+                        try:
+                            reschedule_scheduled_task(sched_task, success=False)
+                        except Exception:
+                            pass
                         
                         # Fail the task run - updates scheduled_task_runs with error
                         if SCHEDULER_AVAILABLE and run_id:
