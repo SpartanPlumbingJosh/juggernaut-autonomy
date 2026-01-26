@@ -1261,6 +1261,7 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 SELECT id
                 FROM governance_tasks
                 WHERE payload->>'dedupe_key' = '{dedupe_key_escaped}'
+                  AND status IN ('pending', 'in_progress', 'assigned')
                   AND created_at > NOW() - INTERVAL '24 hours'
                 LIMIT 1
                 """
@@ -1278,6 +1279,7 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 SELECT COUNT(*)::int as c
                 FROM governance_tasks
                 WHERE title = '{title_escaped}'
+                  AND status IN ('pending', 'in_progress', 'assigned')
                   AND created_at > NOW() - INTERVAL '24 hours'
                 """
             )
