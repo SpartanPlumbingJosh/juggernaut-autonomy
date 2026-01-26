@@ -114,7 +114,7 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 | Priority | Description | Owner | Status |
 |----------|-------------|-------|--------|
 | 1 | **Factory Floor Dashboard** - Visual command center (Factorio-style) | Windsurf | 🔄 In Progress (live; layout + polish ongoing) |
-| 2 | **Proactive Work Generation** - System creates its own tasks | Windsurf | Not Started |
+| 2 | **Proactive Work Generation** - System creates its own tasks | Windsurf | ✅ Working (hourly generation + diagnostics) |
 | 3 | **Slack Notifications** - Alerts for completions/failures | Windsurf | Not Started |
 
 ### Short-Term (Next 2-4 Weeks)
@@ -141,6 +141,7 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 | 2026-01-26 | **Queue API mismatch (spartan-hq)** - `/api/dashboard/queue` now derives queue from `/public/dashboard/tasks?status=approved` | Fix merged locally; requires deploy to verify |
 | 2026-01-26 | **Worker status mapping (spartan-hq)** - Treat `status: active` as ONLINE; heartbeat optional | Fix merged locally; requires deploy to verify |
 | 2026-01-26 | **Pixi cleanup hardening (spartan-hq)** - stop ticker, clear stage, defensive destroy | Fix merged locally; reduces unmount crash risk |
+| 2026-01-26 | **Scheduler + proactive work generation** - Fixed scheduled execution/rescheduling, proactive_diverse handler wiring, dedupe (completed tasks no longer block), and added detailed diagnostics logging | Verified: Proactive generation working hourly; EXECUTOR claiming/completing; queue caught up |
 
 ---
 
@@ -262,3 +263,4 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 | 2026-01-25 | Initial document creation | Claude (Ops) |
 | 2026-01-25 | AnalysisHandler fix verified | Claude (Ops) |
 | 2026-01-26 | Added Factory Floor dashboard progress + spartan-hq fixes (queue, worker status, Pixi cleanup) | Windsurf |
+| 2026-01-26 | Added scheduler/proactive generation fixes status (ON CONFLICT fixes, rescheduling, proactive_diverse wiring, dedupe + diagnostics logging) + current state snapshot | Windsurf |

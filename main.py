@@ -46,6 +46,39 @@ from core.notifications import (
     notify_engine_started
 )
 
+EXPERIMENT_EXECUTOR_AVAILABLE = False
+GOAL_TRACKER_AVAILABLE = False
+LEARNING_APPLIER_AVAILABLE = False
+EXECUTIVE_REPORTER_AVAILABLE = False
+
+try:
+    from core.experiment_executor import progress_experiments
+
+    EXPERIMENT_EXECUTOR_AVAILABLE = True
+except Exception:
+    EXPERIMENT_EXECUTOR_AVAILABLE = False
+
+try:
+    from core.goal_tracker import update_goal_progress
+
+    GOAL_TRACKER_AVAILABLE = True
+except Exception:
+    GOAL_TRACKER_AVAILABLE = False
+
+try:
+    from core.learning_applier import apply_recent_learnings
+
+    LEARNING_APPLIER_AVAILABLE = True
+except Exception:
+    LEARNING_APPLIER_AVAILABLE = False
+
+try:
+    from core.executive_reporter import generate_executive_report
+
+    EXECUTIVE_REPORTER_AVAILABLE = True
+except Exception:
+    EXECUTIVE_REPORTER_AVAILABLE = False
+
 # GAP-03: RBAC Runtime Permission Enforcement
 RBAC_AVAILABLE = False
 _rbac_import_error = None
@@ -1571,8 +1604,128 @@ def _compute_next_run_at_expr(sched_task: Dict[str, Any]) -> str:
     if cron_expression in ("weekly", "@weekly"):
         return "NOW() + INTERVAL '7 days'"
 
+    if cron_expression == "0 */2 * * *":
+        return "NOW() + INTERVAL '2 hours'"
+    if cron_expression == "0 */4 * * *":
+        return "NOW() + INTERVAL '4 hours'"
+    if cron_expression == "0 0 * * *":
+        return "NOW() + INTERVAL '1 day'"
+    if cron_expression == "0 1 * * *":
+        return "NOW() + INTERVAL '1 day'"
+    if cron_expression == "0 6 * * *":
+        return "NOW() + INTERVAL '1 day'"
+
     # Fallback: default to hourly
     return "NOW() + INTERVAL '1 hour'"
+
+
+def _ensure_activation_scheduled_tasks() -> None:
+    tasks = [
+        {
+            "name": "experiment_progression",
+            "task_type": "experiment_check",
+            "cron_expression": "0 */4 * * *",
+        },
+        {
+            "name": "goal_progress_update",
+            "task_type": "goal_update",
+            "cron_expression": "0 0 * * *",
+        },
+        {
+            "name": "learning_application",
+            "task_type": "learning_apply",
+            "cron_expression": "0 1 * * *",
+        },
+        {
+            "name": "executive_report",
+            "task_type": "executive_report",
+            "cron_expression": "0 6 * * *",
+        },
+        {
+            "name": "multi_agent_rebalance",
+            "task_type": "worker_rebalance",
+            "cron_expression": "0 */2 * * *",
+        },
+    ]
+
+    for t in tasks:
+        name = str(t.get("name") or "")
+        task_type = str(t.get("task_type") or "")
+        cron_expression = str(t.get("cron_expression") or "")
+        if not name or not task_type:
+            continue
+
+        name_esc = name.replace("'", "''")
+        task_type_esc = task_type.replace("'", "''")
+        cron_esc = cron_expression.replace("'", "''")
+
+        try:
+            upd = execute_sql(
+                f"""
+                UPDATE scheduled_tasks
+                SET task_type = '{task_type_esc}',
+                    cron_expression = '{cron_esc}',
+                    enabled = TRUE
+                WHERE name = '{name_esc}'
+                """
+            )
+            updated = int(upd.get("rowCount", 0) or 0) if isinstance(upd, dict) else 0
+            if updated <= 0:
+                execute_sql(
+                    f"""
+                    INSERT INTO scheduled_tasks (id, name, task_type, cron_expression, config, enabled, next_run_at)
+                    VALUES (gen_random_uuid(), '{name_esc}', '{task_type_esc}', '{cron_esc}', '{{}}'::jsonb, TRUE, NOW())
+                    """
+                )
+        except Exception:
+            pass
+
+
+def _rebalance_pending_tasks(limit: int = 10) -> Dict[str, Any]:
+    if not ORCHESTRATION_AVAILABLE:
+        return {"success": False, "error": "orchestration module not available"}
+
+    try:
+        res = execute_sql(
+            f"""
+            SELECT id, task_type, title, description, priority, status, payload, assigned_worker, created_at, requires_approval
+            FROM governance_tasks
+            WHERE status = 'pending'
+              AND assigned_worker IS NULL
+            ORDER BY created_at ASC
+            LIMIT {int(limit)}
+            """
+        )
+        rows = res.get("rows", []) or []
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    routed = 0
+    failed = 0
+
+    for r in rows:
+        try:
+            task_obj = Task(
+                id=r.get("id"),
+                task_type=r.get("task_type") or "unknown",
+                title=r.get("title") or "",
+                description=r.get("description") or "",
+                priority=3,
+                status=r.get("status") or "pending",
+                payload=r.get("payload") or {},
+                assigned_to=r.get("assigned_worker"),
+                created_at=r.get("created_at") or "",
+                requires_approval=bool(r.get("requires_approval") or False),
+            )
+            delegated, target_worker_id, _details = delegate_to_worker(task_obj)
+            if delegated:
+                routed += 1
+            else:
+                failed += 1
+        except Exception:
+            failed += 1
+
+    return {"success": True, "tasks_considered": len(rows), "routed": routed, "failed": failed}
 
 
 def reschedule_scheduled_task(sched_task: Dict[str, Any], success: bool) -> None:
@@ -2489,11 +2642,32 @@ def _execute_http_tool(tool_name: str, params: Dict) -> Dict:
 # ORCHESTRATOR TASK DELEGATION (L5-01b)
 # ============================================================
 
+WORKER_ROUTING: Dict[str, str] = {
+    "analysis": "ANALYST",
+    "report": "ANALYST",
+    "metrics": "ANALYST",
+    "scan": "STRATEGIST",
+    "opportunity": "STRATEGIST",
+    "experiment": "STRATEGIST",
+    "health_check": "WATCHDOG",
+    "recovery": "WATCHDOG",
+    "alert": "WATCHDOG",
+    "execute": "EXECUTOR",
+    "code": "EXECUTOR",
+    "default": "EXECUTOR",
+}
+
 # Task type to worker capability mapping
 TASK_TYPE_TO_WORKER: Dict[str, str] = {
     "tool_execution": "EXECUTOR",
     "workflow": "EXECUTOR",
     "content_creation": "EXECUTOR",
+    "analysis": WORKER_ROUTING["analysis"],
+    "report": WORKER_ROUTING["report"],
+    "metrics": WORKER_ROUTING["metrics"],
+    "scan": WORKER_ROUTING["scan"],
+    "opportunity": WORKER_ROUTING["opportunity"],
+    "experiment": WORKER_ROUTING["experiment"],
     "metrics_analysis": "ANALYST",
     "report_generation": "ANALYST",
     "pattern_detection": "ANALYST",
@@ -2502,6 +2676,10 @@ TASK_TYPE_TO_WORKER: Dict[str, str] = {
     "experiment_design": "STRATEGIST",
     "health_check": "WATCHDOG",
     "error_detection": "WATCHDOG",
+    "recovery": WORKER_ROUTING["recovery"],
+    "alert": WORKER_ROUTING["alert"],
+    "execute": WORKER_ROUTING["execute"],
+    "code": WORKER_ROUTING["code"],
 }
 
 
@@ -2523,6 +2701,21 @@ def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]
     
     # Determine the best worker for this task type
     target_worker = TASK_TYPE_TO_WORKER.get(task.task_type)
+    if not target_worker:
+        # Backstop: route by prefix / coarse type
+        key = (task.task_type or "").split(".", 1)[0]
+        target_worker = WORKER_ROUTING.get(key) or WORKER_ROUTING.get("default")
+
+    try:
+        log_action(
+            "task.routed",
+            f"Routed {task.task_type} to {target_worker}",
+            level="info",
+            task_id=task.id,
+            output_data={"task_type": task.task_type, "target_worker": target_worker},
+        )
+    except Exception:
+        pass
     
     if not target_worker:
         # No specific worker mapping - check if generic task execution is needed
@@ -4147,6 +4340,11 @@ def autonomy_loop():
                     pass
 
                 try:
+                    _ensure_activation_scheduled_tasks()
+                except Exception:
+                    pass
+
+                try:
                     log_action(
                         "scheduler.check",
                         "Checking for due scheduled tasks",
@@ -4213,6 +4411,37 @@ def autonomy_loop():
                             # Generate diverse tasks when idle
                             sched_result = _maybe_generate_diverse_proactive_tasks()
                             sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success", True))
+                        elif sched_task_type == "experiment_check":
+                            if EXPERIMENT_EXECUTOR_AVAILABLE:
+                                sched_result = progress_experiments(execute_sql=execute_sql, log_action=log_action)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "experiment_executor module not available"}
+                                sched_success = False
+                        elif sched_task_type == "goal_update":
+                            if GOAL_TRACKER_AVAILABLE:
+                                sched_result = update_goal_progress(execute_sql=execute_sql, log_action=log_action)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "goal_tracker module not available"}
+                                sched_success = False
+                        elif sched_task_type == "learning_apply":
+                            if LEARNING_APPLIER_AVAILABLE:
+                                sched_result = apply_recent_learnings(execute_sql=execute_sql, log_action=log_action)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "learning_applier module not available"}
+                                sched_success = False
+                        elif sched_task_type == "executive_report":
+                            if EXECUTIVE_REPORTER_AVAILABLE:
+                                sched_result = generate_executive_report(execute_sql=execute_sql, log_action=log_action)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "executive_reporter module not available"}
+                                sched_success = False
+                        elif sched_task_type == "worker_rebalance":
+                            sched_result = _rebalance_pending_tasks(limit=10)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
                         elif sched_task_type == "log_retention":
                             # Log retention cleanup - placeholder
                             sched_result = {"cleaned": True, "timestamp": datetime.now(timezone.utc).isoformat()}
