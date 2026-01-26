@@ -79,6 +79,19 @@ try:
 except Exception:
     EXECUTIVE_REPORTER_AVAILABLE = False
 
+REVENUE_DISCOVERY_AVAILABLE = False
+try:
+    from core.portfolio_manager import (
+        generate_revenue_ideas,
+        score_pending_ideas,
+        start_experiments_from_top_ideas,
+        review_experiments_stub,
+    )
+
+    REVENUE_DISCOVERY_AVAILABLE = True
+except Exception:
+    REVENUE_DISCOVERY_AVAILABLE = False
+
 # GAP-03: RBAC Runtime Permission Enforcement
 RBAC_AVAILABLE = False
 _rbac_import_error = None
@@ -1175,6 +1188,94 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
     for sql in alter_sched:
         try:
             execute_sql(sql)
+        except Exception:
+            pass
+
+
+def _ensure_revenue_discovery_schema() -> None:
+    try:
+        execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS revenue_ideas (
+                id UUID PRIMARY KEY,
+                title VARCHAR(200),
+                description TEXT,
+                hypothesis TEXT,
+                score DECIMAL(5,2),
+                score_breakdown JSONB,
+                status VARCHAR(20),
+                estimates JSONB,
+                created_at TIMESTAMP,
+                updated_at TIMESTAMP
+            );
+            """
+        )
+    except Exception:
+        pass
+
+    try:
+        execute_sql("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS idea_id UUID")
+    except Exception:
+        pass
+
+    try:
+        execute_sql(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'experiments_idea_id_fkey'
+                ) THEN
+                    ALTER TABLE experiments
+                    ADD CONSTRAINT experiments_idea_id_fkey
+                    FOREIGN KEY (idea_id) REFERENCES revenue_ideas(id);
+                END IF;
+            END $$;
+            """
+        )
+    except Exception:
+        pass
+
+
+def _ensure_revenue_discovery_scheduled_tasks() -> None:
+    tasks = [
+        {"name": "idea_generation", "task_type": "idea_generation", "cron_expression": "daily"},
+        {"name": "idea_scoring", "task_type": "idea_scoring", "cron_expression": "daily"},
+        {"name": "experiment_review", "task_type": "experiment_review", "cron_expression": "daily"},
+        {"name": "portfolio_rebalance", "task_type": "portfolio_rebalance", "cron_expression": "weekly"},
+    ]
+
+    for t in tasks:
+        name = str(t.get("name") or "")
+        task_type = str(t.get("task_type") or "")
+        cron_expression = str(t.get("cron_expression") or "")
+        if not name or not task_type:
+            continue
+
+        name_esc = name.replace("'", "''")
+        task_type_esc = task_type.replace("'", "''")
+        cron_esc = cron_expression.replace("'", "''")
+
+        try:
+            upd = execute_sql(
+                f"""
+                UPDATE scheduled_tasks
+                SET task_type = '{task_type_esc}',
+                    cron_expression = '{cron_esc}',
+                    enabled = TRUE
+                WHERE name = '{name_esc}'
+                """
+            )
+            updated = int(upd.get("rowCount", 0) or 0) if isinstance(upd, dict) else 0
+            if updated <= 0:
+                execute_sql(
+                    f"""
+                    INSERT INTO scheduled_tasks (id, name, task_type, cron_expression, config, enabled, next_run_at)
+                    VALUES (gen_random_uuid(), '{name_esc}', '{task_type_esc}', '{cron_esc}', '{{}}'::jsonb, TRUE, NOW())
+                    """
+                )
         except Exception:
             pass
 
@@ -4352,6 +4453,16 @@ def autonomy_loop():
                     pass
 
                 try:
+                    _ensure_revenue_discovery_schema()
+                except Exception:
+                    pass
+
+                try:
+                    _ensure_revenue_discovery_scheduled_tasks()
+                except Exception:
+                    pass
+
+                try:
                     log_action(
                         "scheduler.check",
                         "Checking for due scheduled tasks",
@@ -4449,6 +4560,44 @@ def autonomy_loop():
                         elif sched_task_type == "worker_rebalance":
                             sched_result = _rebalance_pending_tasks(limit=10)
                             sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        elif sched_task_type == "idea_generation":
+                            if REVENUE_DISCOVERY_AVAILABLE:
+                                context = {
+                                    "assets": {"primary_business": "Spartan Plumbing"},
+                                    "constraints": {"max_budget": 50, "risk_tolerance": "low"},
+                                }
+                                sched_result = generate_revenue_ideas(execute_sql=execute_sql, log_action=log_action, context=context, limit=5)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "revenue discovery modules not available"}
+                                sched_success = False
+                        elif sched_task_type == "idea_scoring":
+                            if REVENUE_DISCOVERY_AVAILABLE:
+                                sched_result = score_pending_ideas(execute_sql=execute_sql, log_action=log_action, limit=20)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "revenue discovery modules not available"}
+                                sched_success = False
+                        elif sched_task_type == "experiment_review":
+                            if REVENUE_DISCOVERY_AVAILABLE:
+                                sched_result = review_experiments_stub(execute_sql=execute_sql, log_action=log_action)
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "revenue discovery modules not available"}
+                                sched_success = False
+                        elif sched_task_type == "portfolio_rebalance":
+                            if REVENUE_DISCOVERY_AVAILABLE:
+                                sched_result = start_experiments_from_top_ideas(
+                                    execute_sql=execute_sql,
+                                    log_action=log_action,
+                                    max_new=1,
+                                    min_score=60.0,
+                                    budget=20.0,
+                                )
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                            else:
+                                sched_result = {"error": "revenue discovery modules not available"}
+                                sched_success = False
                         elif sched_task_type == "log_retention":
                             # Log retention cleanup - placeholder
                             sched_result = {"cleaned": True, "timestamp": datetime.now(timezone.utc).isoformat()}
