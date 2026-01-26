@@ -1,7 +1,15 @@
 from __future__ import annotations
 
+import json
+import os
+import re
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+from core.ai_executor import AIExecutor
 
 
 @dataclass
@@ -15,75 +23,234 @@ class RevenueIdea:
 class IdeaGenerator:
     """Generates revenue opportunities based on available capabilities."""
 
+    PERPLEXITY_API_ENDPOINT = "https://api.perplexity.ai/chat/completions"
+
+    def __init__(
+        self,
+        ai: Optional[AIExecutor] = None,
+        perplexity_api_key: Optional[str] = None,
+    ) -> None:
+        self.ai = ai
+        self.perplexity_api_key = (perplexity_api_key or os.environ.get("PERPLEXITY_API_KEY") or "").strip()
+
+    def _extract_json_array(self, text: str) -> Optional[List[Dict[str, Any]]]:
+        if not isinstance(text, str) or not text.strip():
+            return None
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\n", "", cleaned)
+            cleaned = re.sub(r"\n```$", "", cleaned)
+
+        start = cleaned.find("[")
+        if start < 0:
+            return None
+
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(cleaned)):
+            ch = cleaned[i]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+                continue
+            else:
+                if ch == '"':
+                    in_str = True
+                    continue
+                if ch == "[":
+                    depth += 1
+                elif ch == "]":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = cleaned[start : i + 1]
+                        try:
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, list):
+                                out: List[Dict[str, Any]] = []
+                                for item in parsed:
+                                    if isinstance(item, dict):
+                                        out.append(item)
+                                return out
+                        except Exception:
+                            return None
+        return None
+
+    def _perplexity_search(self, query: str, max_results: int = 5) -> Optional[Dict[str, Any]]:
+        if not self.perplexity_api_key:
+            return None
+
+        payload = {
+            "model": "sonar",
+            "messages": [{"role": "user", "content": query}],
+            "return_citations": True,
+        }
+
+        req = urllib.request.Request(
+            self.PERPLEXITY_API_ENDPOINT,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.perplexity_api_key}",
+            },
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return None
+
+        choices = raw.get("choices") or []
+        answer = ""
+        if choices:
+            answer = ((choices[0] or {}).get("message") or {}).get("content") or ""
+        citations = raw.get("citations") or []
+
+        urls: List[str] = []
+        if isinstance(citations, list):
+            for u in citations[: max(1, int(max_results))]:
+                if isinstance(u, str) and u.startswith("http"):
+                    urls.append(u)
+
+        return {
+            "query": query,
+            "answer": answer,
+            "citations": urls,
+        }
+
+    async def generate_ideas_async(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
+        return self.generate_ideas(context)
+
     def generate_ideas(self, context: Dict[str, Any]) -> List[Dict[str, Any]]:
         assets = context.get("assets") or {}
         constraints = context.get("constraints") or {}
 
         max_budget = float(constraints.get("max_budget", 50) or 50)
-        risk_tolerance = str(constraints.get("risk_tolerance", "low") or "low")
-
+        expertise = str(assets.get("expertise") or assets.get("primary_business") or "trades")
         business = str(assets.get("primary_business", "Spartan Plumbing") or "Spartan Plumbing")
 
-        ideas: List[RevenueIdea] = [
-            RevenueIdea(
-                title="Automated review response service for local businesses",
-                description=(
-                    "Offer a monthly service that drafts and posts review responses for Google/Yelp. "
-                    "Use templated tone + simple QA; sell to other trades locally."
-                ),
-                hypothesis="Can convert 1 paying customer at $49/mo within 14 days",
-                estimates={
-                    "capital_required": min(20.0, max_budget),
-                    "time_to_first_dollar_days": 14,
-                    "effort_hours": 8,
-                    "scalability": 7,
-                    "risk_level": 3 if risk_tolerance == "low" else 5,
-                    "capability_fit": 8,
-                    "asset": business,
-                },
-            ),
-            RevenueIdea(
-                title="Lead qualification chatbot for trades",
-                description=(
-                    "A website widget / SMS flow that qualifies leads (service type, urgency, address) "
-                    "and schedules calls. Start as a paid setup + monthly fee."
-                ),
-                hypothesis="Can book 3 qualified leads for a single trade business within 14 days",
-                estimates={
-                    "capital_required": min(50.0, max_budget),
-                    "time_to_first_dollar_days": 21,
-                    "effort_hours": 20,
-                    "scalability": 8,
-                    "risk_level": 5,
-                    "capability_fit": 6,
-                    "asset": business,
-                },
-            ),
-            RevenueIdea(
-                title="Operational dashboard setup as-a-service",
-                description=(
-                    "Setup a lightweight ops dashboard for small service businesses: job volume, calls, reviews, "
-                    "simple KPIs. Sell as setup + retainer."
-                ),
-                hypothesis="Can sell 1 dashboard setup at $299 within 30 days",
-                estimates={
-                    "capital_required": min(0.0, max_budget),
-                    "time_to_first_dollar_days": 30,
-                    "effort_hours": 16,
-                    "scalability": 6,
-                    "risk_level": 3,
-                    "capability_fit": 7,
-                    "asset": business,
-                },
-            ),
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+        search_queries = [
+            f"profitable online business ideas {today}",
+            "trending micro-SaaS ideas 2026",
+            "AI automation business opportunities this week",
+            f"profitable side hustles for {expertise}",
         ]
 
-        return [
-            {
-                "title": i.title,
-                "description": i.description,
-                "hypothesis": i.hypothesis,
-                "estimates": i.estimates,
-            }
-            for i in ideas
-        ]
+        research_results: List[Dict[str, Any]] = []
+        for q in search_queries:
+            r = self._perplexity_search(q, max_results=5)
+            if r:
+                research_results.append(r)
+
+        if not research_results:
+            ideas: List[RevenueIdea] = [
+                RevenueIdea(
+                    title="Local review response automation",
+                    description="Review responses are a persistent pain point; offer a lightweight done-for-you service.",
+                    hypothesis="Can acquire 1 paying customer within 14 days",
+                    estimates={
+                        "capital_required": 0,
+                        "time_to_first_dollar_days": 14,
+                        "effort_hours": 8,
+                        "asset": business,
+                    },
+                )
+            ]
+            return [
+                {
+                    "title": i.title,
+                    "description": i.description,
+                    "hypothesis": i.hypothesis,
+                    "research_sources": [],
+                    "timeliness": f"Fallback (no web search configured) as of {today}",
+                    "estimates": i.estimates,
+                    "researched_at": today,
+                }
+                for i in ideas
+            ]
+
+        if self.ai is None:
+            try:
+                self.ai = AIExecutor()
+            except Exception:
+                self.ai = None
+
+        if self.ai is None:
+            out: List[Dict[str, Any]] = []
+            for rr in research_results[:5]:
+                citations = rr.get("citations") or []
+                out.append(
+                    {
+                        "title": f"Opportunity from: {rr.get('query')}",
+                        "description": (rr.get("answer") or "")[:300],
+                        "hypothesis": "Can validate demand and acquire 1 paying customer in 14 days",
+                        "research_sources": citations,
+                        "timeliness": f"Derived from web research on {today}",
+                        "estimates": {
+                            "capital_required": 0,
+                            "time_to_first_dollar_days": 14,
+                            "effort_hours": 10,
+                            "asset": business,
+                        },
+                        "researched_at": today,
+                    }
+                )
+            return out[:5]
+
+        prompt = (
+            "Return ONLY valid JSON (no markdown, no code fences).\n\n"
+            "You are generating revenue ideas for the next 14 days.\n"
+            f"Today (UTC) is {today}.\n\n"
+            "Research results (from web search):\n"
+            f"{json.dumps(research_results)[:12000]}\n\n"
+            "Available assets:\n"
+            f"- Owner runs {business} (trade expertise)\n"
+            "- Has automation tools (AI, outreach, scheduling, web research)\n"
+            f"- Budget cap: ${max_budget}\n\n"
+            "Generate 3-5 SPECIFIC, TIMELY revenue ideas. Each must include:\n"
+            "- title\n"
+            "- description (include why now / timeliness)\n"
+            "- hypothesis (testable, 14 days)\n"
+            "- research_sources (array of URLs or source names)\n"
+            "- timeliness (one sentence)\n"
+            "- estimates: {capital_required, time_to_first_dollar_days, effort_hours, monthly_potential}\n"
+            "- researched_at (YYYY-MM-DD)\n\n"
+            "Return a JSON array."
+        )
+
+        resp = self.ai.chat(
+            [
+                {"role": "system", "content": "Return ONLY JSON. No markdown. No code fences."},
+                {"role": "user", "content": prompt},
+            ]
+        )
+
+        parsed = self._extract_json_array(getattr(resp, "content", "") or "")
+        if not parsed:
+            return []
+
+        normalized: List[Dict[str, Any]] = []
+        for idea in parsed:
+            if not isinstance(idea, dict):
+                continue
+            estimates = idea.get("estimates") or {}
+            if isinstance(estimates, dict):
+                if "time_to_revenue_days" in estimates and "time_to_first_dollar_days" not in estimates:
+                    try:
+                        estimates["time_to_first_dollar_days"] = estimates.get("time_to_revenue_days")
+                    except Exception:
+                        pass
+            idea["estimates"] = estimates
+            if "researched_at" not in idea:
+                idea["researched_at"] = today
+            normalized.append(idea)
+
+        return normalized[:5]
