@@ -129,17 +129,24 @@ def signal_handler(signum: int, frame: Any) -> None:
 def register_watchdog() -> bool:
     """Register this watchdog in the worker registry."""
     try:
-        result = execute_query(
+        update_res = execute_query(
             """
-            INSERT INTO worker_registry (worker_id, name, status, capabilities, last_heartbeat)
-            VALUES ($1, $2, 'active', $3, NOW())
-            ON CONFLICT (worker_id) DO UPDATE SET
-                status = 'active',
-                last_heartbeat = NOW(),
-                capabilities = $3
+            UPDATE worker_registry
+            SET status = 'active', last_heartbeat = NOW(), capabilities = $2
+            WHERE worker_id = $1
             """,
-            [WORKER_ID, 'JUGGERNAUT Watchdog', '["health_check", "failure_detection", "auto_recovery"]']
+            [WORKER_ID, '["health_check", "failure_detection", "auto_recovery"]']
         )
+
+        updated = int(update_res.get("rowCount", 0) or 0) if isinstance(update_res, dict) else 0
+        if updated <= 0:
+            execute_query(
+                """
+                INSERT INTO worker_registry (worker_id, name, status, capabilities, last_heartbeat)
+                VALUES ($1, $2, 'active', $3, NOW())
+                """,
+                [WORKER_ID, 'JUGGERNAUT Watchdog', '["health_check", "failure_detection", "auto_recovery"]']
+            )
         logger.info(f"Watchdog registered with ID: {WORKER_ID}")
         return True
     except Exception as e:

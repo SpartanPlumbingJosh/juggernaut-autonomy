@@ -3552,16 +3552,37 @@ def autonomy_loop():
     
     # Update worker heartbeat
     now = datetime.now(timezone.utc).isoformat()
-    sql = f"""
-        INSERT INTO worker_registry (worker_id, name, status, last_heartbeat, capabilities, level, max_concurrent_tasks, permissions, forbidden_actions, approval_required_for, allowed_task_types)
-        VALUES ({escape_value(WORKER_ID)}, {escape_value(f'Autonomy Engine {WORKER_ID}')}, 'active', {escape_value(now)}, 
-                {escape_value(["task_execution", "opportunity_scan", "tool_execution"])}, 'L3', 1, {escape_value({})}, {escape_value([])}, {escape_value([])}, {escape_value([])})
-        ON CONFLICT (worker_id) DO UPDATE SET
-            status = 'active',
-            last_heartbeat = {escape_value(now)}
-    """
     try:
-        execute_sql(sql)
+        update_sql = f"""
+            UPDATE worker_registry
+            SET status = 'active', last_heartbeat = {escape_value(now)}
+            WHERE worker_id = {escape_value(WORKER_ID)}
+        """
+        update_res = execute_sql(update_sql)
+
+        updated = int(update_res.get("rowCount", 0) or 0) if isinstance(update_res, dict) else 0
+        if updated <= 0:
+            insert_sql = f"""
+                INSERT INTO worker_registry (
+                    worker_id, name, status, last_heartbeat, capabilities, level,
+                    max_concurrent_tasks, permissions, forbidden_actions,
+                    approval_required_for, allowed_task_types
+                )
+                VALUES (
+                    {escape_value(WORKER_ID)},
+                    {escape_value(f'Autonomy Engine {WORKER_ID}')},
+                    'active',
+                    {escape_value(now)},
+                    {escape_value(["task_execution", "opportunity_scan", "tool_execution"])},
+                    'L3',
+                    1,
+                    {escape_value({})},
+                    {escape_value([])},
+                    {escape_value([])},
+                    {escape_value([])}
+                )
+            """
+            execute_sql(insert_sql)
     except Exception as e:
         log_error(f"Failed to register worker: {e}")
     
