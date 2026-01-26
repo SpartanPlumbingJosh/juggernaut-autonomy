@@ -491,6 +491,7 @@ WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "30"))
 MAX_TASKS_PER_LOOP = int(os.getenv("MAX_TASKS_PER_LOOP", "2"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
+SINGLE_WORKER_MODE = os.getenv("SINGLE_WORKER_MODE", "true").lower() == "true"
 PORT = int(os.getenv("PORT", "8000"))
 
 DEPLOY_VERSION = "1.3.2"
@@ -1682,6 +1683,9 @@ def _ensure_activation_scheduled_tasks() -> None:
 
 
 def _rebalance_pending_tasks(limit: int = 10) -> Dict[str, Any]:
+    if SINGLE_WORKER_MODE:
+        return {"success": True, "tasks_considered": 0, "routed": 0, "failed": 0, "skipped": True, "reason": "single_worker_mode"}
+
     if not ORCHESTRATION_AVAILABLE:
         return {"success": False, "error": "orchestration module not available"}
 
@@ -2696,6 +2700,9 @@ def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]
     Returns:
         Tuple of (delegated: bool, worker_id: Optional[str], details: Dict)
     """
+    if SINGLE_WORKER_MODE:
+        return False, WORKER_ID, {"reason": "single_worker_mode", "message": "Routing disabled; execute locally"}
+
     if not ORCHESTRATION_AVAILABLE:
         return False, None, {"error": "orchestration module not available"}
     
@@ -4277,7 +4284,7 @@ def autonomy_loop():
                                  f"Priority {task.priority} of {len(tasks)} pending tasks")
                     
                     # L5: Try to delegate to specialized worker via ORCHESTRATOR first
-                    if ORCHESTRATION_AVAILABLE:
+                    if ORCHESTRATION_AVAILABLE and not SINGLE_WORKER_MODE:
                         delegated, target_worker_id, delegate_result = delegate_to_worker(task)
                         if delegated:
                             # BUG FIX: Check for self-delegation - if target is ourselves, execute locally
