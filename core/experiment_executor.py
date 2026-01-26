@@ -51,6 +51,7 @@ def progress_experiments(
                 "experiment_id": exp_id,
                 "experiment_name": exp_name,
                 "dedupe_key": dedupe_key,
+                "query": "Find candidate domains under $20 with flip potential (short, brandable, clean history).",
                 "success_criteria": {
                     "deliverable": "shortlist",
                     "includes": ["domain", "price", "why it might flip", "next step"],

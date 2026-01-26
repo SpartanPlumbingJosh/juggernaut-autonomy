@@ -37,9 +37,9 @@ def update_goal_progress(
     try:
         rev_res = execute_sql(
             """
-            SELECT COALESCE(SUM(amount), 0)::float as total
+            SELECT COALESCE(SUM(COALESCE(net_amount, gross_amount)), 0)::float as total
             FROM revenue_events
-            WHERE created_at >= date_trunc('month', NOW())
+            WHERE occurred_at >= date_trunc('month', NOW())
             """
         )
         revenue_total = float((rev_res.get("rows") or [{}])[0].get("total") or 0.0)
