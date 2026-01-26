@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import urllib.error
@@ -10,6 +11,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from core.ai_executor import AIExecutor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -82,12 +85,12 @@ class IdeaGenerator:
 
     def _perplexity_search(self, query: str, max_results: int = 5) -> Optional[Dict[str, Any]]:
         if not self.perplexity_api_key:
+            logger.warning("Perplexity API key not configured")
             return None
 
         payload = {
             "model": "sonar",
             "messages": [{"role": "user", "content": query}],
-            "return_citations": True,
         }
 
         req = urllib.request.Request(
@@ -103,7 +106,13 @@ class IdeaGenerator:
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 raw = json.loads(resp.read().decode("utf-8"))
-        except Exception:
+            logger.info(f"Perplexity search successful for: {query[:50]}...")
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else "no body"
+            logger.error(f"Perplexity HTTP error {e.code}: {error_body[:200]}")
+            return None
+        except Exception as e:
+            logger.error(f"Perplexity search failed: {type(e).__name__}: {e}")
             return None
 
         choices = raw.get("choices") or []
@@ -144,13 +153,18 @@ class IdeaGenerator:
             f"profitable side hustles for {expertise}",
         ]
 
+        logger.info(f"Starting idea generation with Perplexity configured: {bool(self.perplexity_api_key)}")
+
         research_results: List[Dict[str, Any]] = []
         for q in search_queries:
             r = self._perplexity_search(q, max_results=5)
             if r:
                 research_results.append(r)
 
+        logger.info(f"Perplexity returned {len(research_results)} research results")
+
         if not research_results:
+            logger.warning("No research results - using fallback ideas")
             ideas: List[RevenueIdea] = [
                 RevenueIdea(
                     title="Local review response automation",
@@ -184,6 +198,7 @@ class IdeaGenerator:
                 self.ai = None
 
         if self.ai is None:
+            logger.info("No AI executor - returning raw research results as ideas")
             out: List[Dict[str, Any]] = []
             for rr in research_results[:5]:
                 citations = rr.get("citations") or []
@@ -235,6 +250,7 @@ class IdeaGenerator:
 
         parsed = self._extract_json_array(getattr(resp, "content", "") or "")
         if not parsed:
+            logger.warning("Failed to parse AI response as JSON array")
             return []
 
         normalized: List[Dict[str, Any]] = []
@@ -253,4 +269,5 @@ class IdeaGenerator:
                 idea["researched_at"] = today
             normalized.append(idea)
 
+        logger.info(f"Generated {len(normalized)} revenue ideas from AI synthesis")
         return normalized[:5]
