@@ -1175,6 +1175,23 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
     except Exception:
         pass
 
+    # Engagement events for non-revenue performance signals (clicks/signups/etc.)
+    try:
+        execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS engagement_events (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                experiment_id UUID REFERENCES experiments(id),
+                event_type VARCHAR(50) NOT NULL,
+                source VARCHAR(100),
+                metadata JSONB DEFAULT '{}'::jsonb,
+                occurred_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            """
+        )
+    except Exception:
+        pass
+
     alter_sched = [
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS name TEXT",
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_type TEXT",
@@ -1213,8 +1230,40 @@ def _ensure_revenue_discovery_schema() -> None:
     except Exception:
         pass
 
+    # Extend revenue_ideas with evidence + constraints fields (best-effort, idempotent)
+    alter_ideas = [
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS research_sources JSONB",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS timeliness TEXT",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS evidence_type TEXT",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS evidence_details JSONB",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS reported_revenue NUMERIC",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS reported_timeline TEXT",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS capabilities_required JSONB",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS tags JSONB",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS constraints JSONB",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS decision TEXT",
+        "ALTER TABLE revenue_ideas ADD COLUMN IF NOT EXISTS rejection_reason TEXT",
+    ]
+    for sql in alter_ideas:
+        try:
+            execute_sql(sql)
+        except Exception:
+            pass
+
     try:
         execute_sql("ALTER TABLE experiments ADD COLUMN IF NOT EXISTS idea_id UUID")
+    except Exception:
+        pass
+
+    # Backfill start_date for running experiments to enable days_active logic
+    try:
+        execute_sql(
+            """
+            UPDATE experiments
+            SET start_date = COALESCE(start_date, created_at, NOW())
+            WHERE status = 'running' AND start_date IS NULL
+            """
+        )
     except Exception:
         pass
 
@@ -4564,7 +4613,15 @@ def autonomy_loop():
                             if REVENUE_DISCOVERY_AVAILABLE:
                                 context = {
                                     "assets": {"primary_business": "Spartan Plumbing"},
-                                    "constraints": {"max_budget": 50, "risk_tolerance": "low"},
+                                    "constraints": {
+                                        "max_budget": 50,
+                                        "risk_tolerance": "low",
+                                        "indie_style": True,
+                                        "email_only": True,
+                                        "no_employees": True,
+                                        "forbid_calls": True,
+                                        "prefer_digital_products": True,
+                                    },
                                 }
                                 sched_result = generate_revenue_ideas(execute_sql=execute_sql, log_action=log_action, context=context, limit=5)
                                 sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))

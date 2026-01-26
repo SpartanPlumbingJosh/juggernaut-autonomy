@@ -144,13 +144,20 @@ class IdeaGenerator:
         expertise = str(assets.get("expertise") or assets.get("primary_business") or "trades")
         business = str(assets.get("primary_business", "Spartan Plumbing") or "Spartan Plumbing")
 
+        indie_style = bool(constraints.get("indie_style", True))
+        email_only = bool(constraints.get("email_only", True))
+        no_employees = bool(constraints.get("no_employees", True))
+        forbid_calls = bool(constraints.get("forbid_calls", True))
+        prefer_digital_products = bool(constraints.get("prefer_digital_products", True))
+
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
         search_queries = [
-            f"profitable online business ideas {today}",
-            "trending micro-SaaS ideas 2026",
-            "AI automation business opportunities this week",
-            f"profitable side hustles for {expertise}",
+            f"profitable digital products ideas {today}",
+            "etsy digital product niches 2026",
+            "email marketing side hustle ideas 2026",
+            "printable templates that sell this week",
+            f"indie business ideas for {expertise} that can be sold via email",
         ]
 
         logger.info(f"Starting idea generation with Perplexity configured: {bool(self.perplexity_api_key)}")
@@ -167,14 +174,15 @@ class IdeaGenerator:
             logger.warning("No research results - using fallback ideas")
             ideas: List[RevenueIdea] = [
                 RevenueIdea(
-                    title="Local review response automation",
-                    description="Review responses are a persistent pain point; offer a lightweight done-for-you service.",
-                    hypothesis="Can acquire 1 paying customer within 14 days",
+                    title="Etsy digital template bundle for service businesses",
+                    description="Create a digital template bundle (invoice, estimate, follow-up email templates) and sell via Etsy and email list.",
+                    hypothesis="Can make first sale within 14 days via Etsy listing + email outreach",
                     estimates={
                         "capital_required": 0,
                         "time_to_first_dollar_days": 14,
                         "effort_hours": 8,
                         "asset": business,
+                        "channel": "email",
                     },
                 )
             ]
@@ -185,6 +193,13 @@ class IdeaGenerator:
                     "hypothesis": i.hypothesis,
                     "research_sources": [],
                     "timeliness": f"Fallback (no web search configured) as of {today}",
+                    "constraints": {
+                        "indie_style": indie_style,
+                        "email_only": email_only,
+                        "no_employees": no_employees,
+                        "forbid_calls": forbid_calls,
+                        "prefer_digital_products": prefer_digital_products,
+                    },
                     "estimates": i.estimates,
                     "researched_at": today,
                 }
@@ -206,14 +221,22 @@ class IdeaGenerator:
                     {
                         "title": f"Opportunity from: {rr.get('query')}",
                         "description": (rr.get("answer") or "")[:300],
-                        "hypothesis": "Can validate demand and acquire 1 paying customer in 14 days",
+                        "hypothesis": "Can validate demand and acquire 1 paying customer in 14 days via email-only outreach",
                         "research_sources": citations,
                         "timeliness": f"Derived from web research on {today}",
+                        "constraints": {
+                            "indie_style": indie_style,
+                            "email_only": email_only,
+                            "no_employees": no_employees,
+                            "forbid_calls": forbid_calls,
+                            "prefer_digital_products": prefer_digital_products,
+                        },
                         "estimates": {
                             "capital_required": 0,
                             "time_to_first_dollar_days": 14,
                             "effort_hours": 10,
                             "asset": business,
+                            "channel": "email",
                         },
                         "researched_at": today,
                     }
@@ -230,12 +253,18 @@ class IdeaGenerator:
             f"- Owner runs {business} (trade expertise)\n"
             "- Has automation tools (AI, outreach, scheduling, web research)\n"
             f"- Budget cap: ${max_budget}\n\n"
-            "Generate 3-5 SPECIFIC, TIMELY revenue ideas. Each must include:\n"
+            "Indie constraints (MUST FOLLOW):\n"
+            "- No calls. No phone sales. No meetings.\n"
+            "- Email-only customer acquisition and support.\n"
+            "- No employees / contractors required to operate.\n"
+            "- Prefer digital products / Etsy-style / self-serve offers.\n\n"
+            "Generate 3-5 SPECIFIC, TIMELY revenue ideas that comply with the constraints. Each must include:\n"
             "- title\n"
             "- description (include why now / timeliness)\n"
             "- hypothesis (testable, 14 days)\n"
             "- research_sources (array of URLs or source names)\n"
             "- timeliness (one sentence)\n"
+            "- constraints: {indie_style, email_only, no_employees, forbid_calls, prefer_digital_products}\n"
             "- estimates: {capital_required, time_to_first_dollar_days, effort_hours, monthly_potential}\n"
             "- researched_at (YYYY-MM-DD)\n\n"
             "Return a JSON array."
@@ -265,6 +294,14 @@ class IdeaGenerator:
                     except Exception:
                         pass
             idea["estimates"] = estimates
+            if "constraints" not in idea:
+                idea["constraints"] = {
+                    "indie_style": indie_style,
+                    "email_only": email_only,
+                    "no_employees": no_employees,
+                    "forbid_calls": forbid_calls,
+                    "prefer_digital_products": prefer_digital_products,
+                }
             if "researched_at" not in idea:
                 idea["researched_at"] = today
             normalized.append(idea)

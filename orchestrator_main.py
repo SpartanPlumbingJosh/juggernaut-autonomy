@@ -49,6 +49,7 @@ try:
         run_health_check,
         sync_memory_to_agents,
         write_shared_memory,
+        update_worker_heartbeat,
     )
 except ImportError as e:
     logger.error("Failed to import orchestration module: %s", str(e))
@@ -476,6 +477,12 @@ def run_orchestration_cycle() -> None:
 
     # Step 1: Discover available agents
     agents = discover_available_agents()
+
+    # Update orchestrator heartbeat (so HQ doesn't show ORCHESTRATOR stale)
+    try:
+        update_worker_heartbeat(WORKER_ID)
+    except Exception:
+        pass
 
     # Step 2: Route pending tasks
     if agents:

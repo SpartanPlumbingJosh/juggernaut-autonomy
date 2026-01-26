@@ -31,6 +31,21 @@ def generate_revenue_ideas(
         hyp_esc = str(idea.get("hypothesis") or "").replace("'", "''")
         estimates_json = json.dumps(idea.get("estimates") or {}).replace("'", "''")
 
+        research_sources_json = json.dumps(idea.get("research_sources") or []).replace("'", "''")
+        timeliness_esc = str(idea.get("timeliness") or "").replace("'", "''")
+        constraints_json = json.dumps(idea.get("constraints") or {}).replace("'", "''")
+        tags_json = json.dumps(idea.get("tags") or []).replace("'", "''")
+        evidence_type_esc = str(idea.get("evidence_type") or "").replace("'", "''")
+        evidence_details_json = json.dumps(idea.get("evidence_details") or {}).replace("'", "''")
+        reported_timeline_esc = str(idea.get("reported_timeline") or "").replace("'", "''")
+        capabilities_required_json = json.dumps(idea.get("capabilities_required") or []).replace("'", "''")
+
+        reported_revenue_val = idea.get("reported_revenue")
+        try:
+            reported_revenue_sql = "NULL" if reported_revenue_val is None else str(float(reported_revenue_val))
+        except Exception:
+            reported_revenue_sql = "NULL"
+
         try:
             existing = execute_sql(
                 f"""
@@ -48,8 +63,38 @@ def generate_revenue_ideas(
         try:
             execute_sql(
                 f"""
-                INSERT INTO revenue_ideas (id, title, description, hypothesis, score, score_breakdown, status, created_at, updated_at, estimates)
-                VALUES (gen_random_uuid(), '{title_esc}', '{desc_esc}', '{hyp_esc}', NULL, NULL, 'pending', NOW(), NOW(), '{estimates_json}'::jsonb)
+                INSERT INTO revenue_ideas (
+                    id, title, description, hypothesis,
+                    score, score_breakdown, status,
+                    created_at, updated_at,
+                    estimates,
+                    research_sources, timeliness,
+                    evidence_type, evidence_details,
+                    reported_revenue, reported_timeline,
+                    capabilities_required,
+                    tags,
+                    constraints
+                ) VALUES (
+                    gen_random_uuid(),
+                    '{title_esc}',
+                    '{desc_esc}',
+                    '{hyp_esc}',
+                    NULL,
+                    NULL,
+                    'pending',
+                    NOW(),
+                    NOW(),
+                    '{estimates_json}'::jsonb,
+                    '{research_sources_json}'::jsonb,
+                    {f"'{timeliness_esc}'" if timeliness_esc else "NULL"},
+                    {f"'{evidence_type_esc}'" if evidence_type_esc else "NULL"},
+                    '{evidence_details_json}'::jsonb,
+                    {reported_revenue_sql},
+                    {f"'{reported_timeline_esc}'" if reported_timeline_esc else "NULL"},
+                    '{capabilities_required_json}'::jsonb,
+                    '{tags_json}'::jsonb,
+                    '{constraints_json}'::jsonb
+                )
                 """
             )
             created += 1
