@@ -1069,6 +1069,78 @@ def get_forbidden_actions() -> List[str]:
         return []
 
 
+def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
+    try:
+        execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS governance_tasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_type TEXT,
+                title TEXT,
+                description TEXT,
+                priority TEXT,
+                status TEXT,
+                payload JSONB,
+                created_by TEXT,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
+            """
+        )
+    except Exception as e:
+        try:
+            log_action("schema.ensure_failed", "Failed to ensure governance_tasks", level="warn", error_data={"error": str(e)})
+        except Exception:
+            pass
+
+    # If governance_tasks already existed with a narrower schema, add missing columns.
+    alter_cols = [
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS task_type TEXT",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS title TEXT",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS description TEXT",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS priority TEXT",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS status TEXT",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS payload JSONB",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS created_by TEXT",
+        "ALTER TABLE governance_tasks ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW()",
+    ]
+    for sql in alter_cols:
+        try:
+            execute_sql(sql)
+        except Exception:
+            pass
+
+    try:
+        execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS scheduled_tasks (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                name TEXT,
+                task_type TEXT,
+                cron_expression TEXT,
+                config JSONB DEFAULT '{}'::jsonb,
+                enabled BOOLEAN DEFAULT TRUE,
+                last_run_at TIMESTAMPTZ
+            )
+            """
+        )
+    except Exception:
+        pass
+
+    alter_sched = [
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS name TEXT",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_type TEXT",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS cron_expression TEXT",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS config JSONB DEFAULT '{}'::jsonb",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS enabled BOOLEAN DEFAULT TRUE",
+        "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS last_run_at TIMESTAMPTZ",
+    ]
+    for sql in alter_sched:
+        try:
+            execute_sql(sql)
+        except Exception:
+            pass
+
+
 def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
     """Generate diverse, meaningful tasks when the queue is empty.
 
@@ -1078,6 +1150,11 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
     """
     if not PROACTIVE_AVAILABLE:
         return {"success": False, "error": "proactive module not available"}
+
+    try:
+        _ensure_proactive_min_schema(execute_sql, log_action)
+    except Exception:
+        pass
 
     try:
         pending_res = execute_sql("SELECT COUNT(*)::int as c FROM governance_tasks WHERE status = 'pending'")
@@ -1209,7 +1286,16 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 level="info",
                 output_data={"task_id": tid, "task_type": task_type, "category": payload.get("category")},
             )
-        except Exception:
+        except Exception as e:
+            try:
+                log_action(
+                    "proactive.diverse_task_create_failed",
+                    "Failed to insert governance task (schema mismatch likely)",
+                    level="warn",
+                    error_data={"error": str(e), "task_id": tid, "task_type": task_type},
+                )
+            except Exception:
+                pass
             skipped_quality += 1
 
     return {
