@@ -501,7 +501,14 @@ NEON_ENDPOINT = os.getenv(
     "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
 )
 WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
-LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL_SECONDS", "30"))
+LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL", "30"))
+
+# L4-P1: PR auto-merge (CodeRabbit-only) configuration
+ENABLE_PR_AUTO_MERGE = os.getenv("ENABLE_PR_AUTO_MERGE", "true").lower() in ("1", "true", "yes", "y")
+PR_AUTO_MERGE_INTERVAL_SECONDS = int(os.getenv("PR_AUTO_MERGE_INTERVAL_SECONDS", "60"))
+PR_AUTO_MERGE_REPO_ALLOWLIST = {
+    os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy")
+}
 MAX_TASKS_PER_LOOP = int(os.getenv("MAX_TASKS_PER_LOOP", "2"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 SINGLE_WORKER_MODE = os.getenv("SINGLE_WORKER_MODE", "true").lower() == "true"
@@ -2479,7 +2486,7 @@ def poll_approved_tasks(limit: int = 5) -> List[Task]:
         return []
 
 
-def resume_approved_task(task: Task) -> Tuple[bool, Dict[str, Any]]:
+def resume_task(task: Task) -> Tuple[bool, Dict[str, Any]]:
     """
     Resume execution of a task that was waiting for approval and has been approved.
     
@@ -3845,6 +3852,37 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                     )
                     result = code_result
                     task_succeeded = code_result.get("success", False)
+
+                    # L4-P1: If we created a PR, track it and defer completion until merged.
+                    # Policy: CodeRabbit-only, juggernaut-autonomy repo allowlist.
+                    if task_succeeded and ENABLE_PR_AUTO_MERGE:
+                        pr_url = code_result.get("pr_url")
+                        target_repo = code_result.get("target_repo")
+                        merged = bool(code_result.get("merged"))
+                        if pr_url and (target_repo in PR_AUTO_MERGE_REPO_ALLOWLIST) and not merged:
+                            try:
+                                from core.pr_tracker import PRTracker
+                                PRTracker().track_pr(str(task.id), str(pr_url))
+                            except Exception as pr_track_err:
+                                log_action(
+                                    "pr_auto_merge.track_failed",
+                                    f"Failed to track PR for auto-merge: {pr_track_err}",
+                                    level="warn",
+                                    task_id=task.id,
+                                    error_data={"pr_url": pr_url, "target_repo": target_repo},
+                                )
+
+                            # Ensure the task carries structured evidence that a PR exists.
+                            if isinstance(result, dict) and "completion_evidence" not in result:
+                                result["completion_evidence"] = {
+                                    "type": "pr_created",
+                                    "verified": True,
+                                    "pr_url": pr_url,
+                                    "pr_number": code_result.get("pr_number"),
+                                    "repo": target_repo,
+                                }
+
+                            defer_completion = True
                     
                     # Update tool_executions with result
                     if tool_exec_id:
@@ -3987,7 +4025,20 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
         # Mark based on actual success
         duration_ms = int((time.time() - start_time) * 1000)
         
-        if task_succeeded:
+        if task_succeeded and defer_completion:
+            update_task_status(task.id, "in_progress", result)
+            log_action(
+                "task.deferred_completion",
+                f"Task deferred until PR is merged: {task.title}",
+                task_id=task.id,
+                output_data={
+                    "pr_url": result.get("pr_url") if isinstance(result, dict) else None,
+                    "pr_number": result.get("pr_number") if isinstance(result, dict) else None,
+                    "target_repo": result.get("target_repo") if isinstance(result, dict) else None,
+                },
+                duration_ms=duration_ms,
+            )
+        elif task_succeeded:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
                        output_data=result, duration_ms=duration_ms)
@@ -4205,6 +4256,7 @@ def autonomy_loop():
         log_error(f"Failed to register worker: {e}")
     
     loop_count = 0
+    last_pr_auto_merge_time = 0.0
     
     while not shutdown_requested:
         loop_count += 1
@@ -4223,6 +4275,110 @@ def autonomy_loop():
                     )
             except Exception as failover_err:
                 log_error(f"Failover check failed: {failover_err}")
+
+        # L4-P1: PR auto-merge monitor (CodeRabbit-only, allowlisted repos)
+        if ENABLE_PR_AUTO_MERGE:
+            try:
+                now_ts = time.time()
+                if (now_ts - last_pr_auto_merge_time) >= PR_AUTO_MERGE_INTERVAL_SECONDS:
+                    last_pr_auto_merge_time = now_ts
+
+                    try:
+                        from core.pr_tracker import PRTracker
+                        from src.github_automation import GitHubClient
+                    except Exception:
+                        PRTracker = None  # type: ignore
+                        GitHubClient = None  # type: ignore
+
+                    if PRTracker is not None and GitHubClient is not None:
+                        # Pull oldest pending PRs first to avoid starvation.
+                        allow_repos = sorted([r for r in PR_AUTO_MERGE_REPO_ALLOWLIST if r])
+                        repo_filter = ", ".join([escape_value(r) for r in allow_repos])
+                        pr_sql = f"""
+                            SELECT task_id, repo, pr_number, pr_url
+                            FROM pr_tracking
+                            WHERE current_state NOT IN ('merged', 'closed')
+                              AND repo IN ({repo_filter})
+                            ORDER BY updated_at ASC
+                            LIMIT 10
+                        """
+                        pr_rows = execute_sql(pr_sql).get("rows", []) or []
+                        if pr_rows:
+                            tracker = PRTracker()
+                            for pr in pr_rows:
+                                task_id = str(pr.get("task_id") or "")
+                                repo = str(pr.get("repo") or "")
+                                pr_number = pr.get("pr_number")
+                                pr_url = str(pr.get("pr_url") or "")
+                                if not task_id or not repo or not pr_number or not pr_url:
+                                    continue
+
+                                # Confirm CodeRabbit approval via PRTracker (review-based)
+                                status = tracker.get_pr_status(pr_url)
+                                if not status or not status.coderabbit_approved:
+                                    continue
+                                if status.state.value in ("merged", "closed"):
+                                    continue
+                                if status.mergeable is not True:
+                                    continue
+
+                                # Confirm checks passed via GitHubClient (check-runs)
+                                gh = GitHubClient(repo=repo)
+                                gh_status = gh.get_pr_status(int(pr_number))
+                                if not gh_status.checks_passed:
+                                    continue
+
+                                try:
+                                    merge_result = tracker.merge_pr(pr_url, merge_method="squash")
+                                except TypeError:
+                                    merge_result = tracker.merge_pr(pr_url, "squash")
+
+                                if isinstance(merge_result, dict) and merge_result.get("success"):
+                                    evidence = {
+                                        "type": "pr_merged",
+                                        "verified": True,
+                                        "repo": repo,
+                                        "pr_number": int(pr_number),
+                                        "pr_url": pr_url,
+                                        "merge_method": "squash",
+                                        "coderabbit_approved": True,
+                                        "approvals": status.approvals or [],
+                                        "merged_at": datetime.now(timezone.utc).isoformat(),
+                                        "merge_commit_sha": merge_result.get("sha"),
+                                    }
+                                    update_task_status(
+                                        task_id,
+                                        "completed",
+                                        {
+                                            "completion_evidence": evidence,
+                                            "verification": evidence,
+                                            "pr_url": pr_url,
+                                            "pr_number": int(pr_number),
+                                            "target_repo": repo,
+                                            "merged": True,
+                                        },
+                                    )
+                                    log_action(
+                                        "pr_auto_merge.merged",
+                                        f"Auto-merged PR #{pr_number} after CodeRabbit approval",
+                                        level="info",
+                                        task_id=task_id,
+                                        output_data={"repo": repo, "pr_number": pr_number, "pr_url": pr_url},
+                                    )
+                                else:
+                                    log_action(
+                                        "pr_auto_merge.merge_failed",
+                                        f"Auto-merge failed for PR #{pr_number}",
+                                        level="warn",
+                                        task_id=task_id,
+                                        error_data={"repo": repo, "pr_number": pr_number, "pr_url": pr_url, "merge_result": merge_result},
+                                    )
+            except Exception as pr_auto_merge_err:
+                log_action(
+                    "pr_auto_merge.error",
+                    f"PR auto-merge monitor error: {pr_auto_merge_err}",
+                    level="warn",
+                )
 
         # CRITICAL-03c: Reset stale tasks at START of each loop cycle
         if STALE_CLEANUP_AVAILABLE:
@@ -5049,6 +5205,18 @@ if __name__ == "__main__":
     print(f"Brain API: {'available' if BRAIN_API_AVAILABLE else 'NOT AVAILABLE'}")
     if _brain_api_import_error:
         print(f"  Brain import error: {_brain_api_import_error}")
+    
+    def _env_present(key: str) -> bool:
+        return bool((os.getenv(key) or "").strip())
+    
+    print("Credentials:")
+    print(f"  OPENROUTER_API_KEY: {'set' if _env_present('OPENROUTER_API_KEY') else 'MISSING'}")
+    print(f"  GITHUB_TOKEN: {'set' if _env_present('GITHUB_TOKEN') else 'MISSING'}")
+    print(f"  GITHUB_REPO: {'set' if _env_present('GITHUB_REPO') else 'MISSING'}")
+    print(f"  RAILWAY_TOKEN: {'set' if _env_present('RAILWAY_TOKEN') else 'MISSING'}")
+    print(f"  RAILWAY_API_TOKEN: {'set' if _env_present('RAILWAY_API_TOKEN') else 'MISSING'}")
+    print(f"  DATABASE_URL: {'set' if _env_present('DATABASE_URL') else 'MISSING'}")
+    print(f"  SLACK_BOT_TOKEN: {'set' if _env_present('SLACK_BOT_TOKEN') else 'MISSING'}")
     print("=" * 60)
     
     # Register signal handlers

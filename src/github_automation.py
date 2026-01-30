@@ -226,8 +226,10 @@ class GitHubClient:
         Raises:
             GitHubError: If branch not found or API error.
         """
+        used_default = False
         if branch is None:
             branch = self.get_default_branch()
+            used_default = True
         
         status, data = self._make_request(
             "GET",
@@ -237,6 +239,35 @@ class GitHubClient:
         if status == 200:
             return data["object"]["sha"]
         elif status == 404:
+            # If the repo's default branch changed (or we cached a stale value), refresh and retry.
+            if used_default:
+                try:
+                    self._default_branch = None
+                    refreshed = self.get_default_branch()
+                    if refreshed and refreshed != branch:
+                        status2, data2 = self._make_request(
+                            "GET",
+                            f"/repos/{self.repo}/git/ref/heads/{refreshed}"
+                        )
+                        if status2 == 200:
+                            return data2["object"]["sha"]
+                except Exception:
+                    pass
+
+                # Conservative fallback for repos that still use master.
+                fallback = "master" if branch == "main" else "main"
+                try:
+                    status3, data3 = self._make_request(
+                        "GET",
+                        f"/repos/{self.repo}/git/ref/heads/{fallback}"
+                    )
+                    if status3 == 200:
+                        self._default_branch = fallback
+                        logger.info(f"Default branch fallback for {self.repo}: {fallback}")
+                        return data3["object"]["sha"]
+                except Exception:
+                    pass
+
             raise GitHubError(f"Branch '{branch}' not found")
         else:
             raise GitHubError(f"Failed to get branch SHA: {data.get('message', 'Unknown')}")
