@@ -3010,6 +3010,15 @@ def delegate_to_worker(task: Task) -> Tuple[bool, Optional[str], Dict[str, Any]]
 def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = False) -> Tuple[bool, Dict]:
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
+    original_task_type = task.task_type
+    if task.task_type in ("code_fix", "code_change", "code_implementation"):
+        task.task_type = "code"
+        try:
+            if isinstance(task.payload, dict):
+                task.payload["original_task_type"] = original_task_type
+        except Exception:
+            pass
+
     is_code_task = (task.task_type == "code")
     defer_completion = False
     
