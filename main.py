@@ -1708,7 +1708,7 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
         SELECT id, task_type, title, description, priority, status, 
                payload, assigned_worker, created_at, requires_approval
         FROM governance_tasks 
-        WHERE status IN ('pending', 'in_progress')
+        WHERE status = 'pending'
         AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
         AND (next_retry_at IS NULL OR next_retry_at < NOW())
         LIMIT {int(limit * 2)}
@@ -2188,7 +2188,7 @@ def claim_task(task_id: str) -> bool:
             started_at = COALESCE(started_at, {escape_value(now)})
         WHERE id = {escape_value(task_id)}
         AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
-        AND status IN ('pending', 'in_progress')
+        AND status = 'pending'
         RETURNING id
     """
     try:
@@ -4063,11 +4063,12 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                     "reason": f"Task type '{task.task_type}' requires human guidance",
                     "task_type": task.task_type,
                 }
+
         # Mark based on actual success
         duration_ms = int((time.time() - start_time) * 1000)
         
         if task_succeeded and defer_completion:
-            update_task_status(task.id, "in_progress", result)
+            update_task_status(task.id, "awaiting_verification", result)
             log_action(
                 "task.deferred_completion",
                 f"Task deferred until PR is merged: {task.title}",
@@ -4077,8 +4078,8 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                     "pr_number": result.get("pr_number") if isinstance(result, dict) else None,
                     "target_repo": result.get("target_repo") if isinstance(result, dict) else None,
                 },
-                duration_ms=duration_ms,
             )
+            return True, result
         elif task_succeeded:
             update_task_status(task.id, "completed", result)
             log_action("task.completed", f"Task completed: {task.title}", task_id=task.id,
