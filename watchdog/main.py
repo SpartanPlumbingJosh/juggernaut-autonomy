@@ -113,26 +113,35 @@ def _issue_to_task(issue: Dict[str, Any]) -> Dict[str, Any]:
 def main() -> None:
     os.environ.setdefault("WORKER_ID", "WATCHDOG")
 
-    start_health_server(int(os.getenv("PORT", "8000")))
+    print(f"WATCHDOG starting (worker_id={WORKER_ID})", flush=True)
+
+    port = int(os.getenv("PORT", "8000"))
+    print(f"WATCHDOG starting health server on port {port}", flush=True)
+
+    start_health_server(port)
+    print("WATCHDOG health server started", flush=True)
 
     railway = RailwayMonitor()
     vercel = VercelMonitor()
 
+    print("WATCHDOG monitors initialized", flush=True)
+
     while True:
-        _send_heartbeat()
         issues = []
         try:
             issues.extend(railway.poll())
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"WATCHDOG railway poll error: {e}", flush=True)
 
         try:
             issues.extend(vercel.poll())
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"WATCHDOG vercel poll error: {e}", flush=True)
 
         for issue in issues:
             _issue_to_task(issue)
+
+        _send_heartbeat()
 
         time.sleep(max(5, POLL_INTERVAL_SECONDS))
 
