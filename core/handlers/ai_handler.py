@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from core.ai_executor import AIExecutor
@@ -7,6 +8,11 @@ from core.ai_executor import AIExecutor
 from .base import BaseHandler, HandlerResult
 
 logger = logging.getLogger(__name__)
+
+
+def _truthy_env(name: str, default: str = "") -> bool:
+    value = os.getenv(name, default)
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _strip_code_fences(text: str) -> str:
@@ -96,6 +102,8 @@ class AIHandler(BaseHandler):
             task_id=task_id,
         )
 
+        plan_only = _truthy_env("AIHANDLER_PLAN_ONLY", "0")
+
         system = (
             "You are JUGGERNAUT ENGINE, an autonomous execution agent. "
             "Return a single JSON object. No markdown, no code fences, no prose outside JSON.\n\n"
@@ -110,6 +118,14 @@ class AIHandler(BaseHandler):
             "- Never include secrets.\n"
             "- Keep summary under 600 characters.\n"
         )
+
+        if plan_only:
+            system = (
+                system
+                + "\nPlan-only mode is enabled. Do not claim execution. "
+                + "Return success=false and put a concise executable plan inside result. "
+                + "The plan should include steps, required tools, and expected artifacts.\n"
+            )
 
         user = {
             "task_type": task_type,
@@ -154,12 +170,19 @@ class AIHandler(BaseHandler):
         if not isinstance(result_obj, dict):
             result_obj = {"value": result_obj}
 
+        if plan_only:
+            success = False
+
         data = {
             "executed": True,
             "summary": summary,
             "result": result_obj,
             "model": self.executor.model,
         }
+
+        if plan_only:
+            data["waiting_approval"] = True
+            data["reason"] = "AI plan-only mode enabled (AIHANDLER_PLAN_ONLY=1)"
 
         self._log(
             "handler.ai.complete",
