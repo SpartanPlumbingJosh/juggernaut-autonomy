@@ -36,7 +36,7 @@ def create_fix_task(
             FROM governance_tasks
             WHERE task_type = 'fix'
               AND payload->>'issue_key' = $1
-              AND created_at > NOW() - INTERVAL '24 hours'
+              AND status NOT IN ('completed', 'cancelled')
             LIMIT 1
             """,
             [issue_key],
