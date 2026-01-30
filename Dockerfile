@@ -29,6 +29,7 @@ COPY main.py .
 COPY core/ ./core/
 COPY api/ ./api/
 COPY src/ ./src/
+COPY watchdog/ ./watchdog/
 
 # Set ownership
 RUN chown -R juggernaut:juggernaut /app
