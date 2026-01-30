@@ -26,6 +26,9 @@ from api.internal_dashboard import router as internal_dashboard_router
 # Public (browser-direct) dashboard endpoints - no auth required
 from api.public_dashboard import router as public_dashboard_router
 
+# Approvals API (authenticated via INTERNAL_API_SECRET)
+from api.approvals_api import router as approvals_api_router
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -37,6 +40,9 @@ app.include_router(internal_dashboard_router)
 
 # Public routes (no auth, CORS-enabled for browser access)
 app.include_router(public_dashboard_router)
+
+# Approval queue routes (authenticated)
+app.include_router(approvals_api_router)
 
 # CORS configuration
 app.add_middleware(
@@ -84,6 +90,9 @@ async def health():
             "/public/dashboard/cost",
             "/public/dashboard/revenue/summary",
             "/public/dashboard/alerts"
+            ,
+            # Approvals API (authenticated)
+            "/api/approvals"
         ]
     }
 
