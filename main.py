@@ -4561,7 +4561,7 @@ def autonomy_loop():
             if approved_tasks:
                 for approved_task in approved_tasks:
                     # Resume execution of approved task
-                    success, result = resume_approved_task(approved_task)
+                    success, result = resume_task(approved_task)
                     if success:
                         log_action(
                             "approval.completed",
