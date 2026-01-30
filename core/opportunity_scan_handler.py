@@ -237,11 +237,16 @@ def _create_diverse_tasks(execute_sql, log_action, config):
         priority = str(cand.priority or "medium")
         task_type = str(cand.task_type or "workflow")
 
+        if task_type in ("health_check", "recovery", "alert"):
+            payload["original_task_type"] = task_type
+            task_type = "workflow"
+            pay = json.dumps(payload).replace("'", "''")
+
         try:
             execute_sql(
                 f"""
-                INSERT INTO governance_tasks (id, task_type, title, description, priority, status, payload, created_by)
-                VALUES ('{tid}', '{task_type}', '{title_escaped}', '{desc}', '{priority}', 'pending', '{pay}', 'engine')
+                INSERT INTO governance_tasks (id, task_type, title, description, priority, status, payload, created_by, assigned_worker)
+                VALUES ('{tid}', '{task_type}', '{title_escaped}', '{desc}', '{priority}', 'pending', '{pay}', 'engine', NULL)
                 """
             )
             tasks_created += 1

@@ -1547,12 +1547,16 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
         desc = str(cand.description or "").replace("'", "''")
         priority = str(cand.priority or "medium")
         task_type = str(cand.task_type or "workflow")
+        if task_type in ("health_check", "recovery", "alert"):
+            payload["original_task_type"] = task_type
+            task_type = "workflow"
+            pay = json.dumps(payload).replace("'", "''")
 
         try:
             execute_sql(
                 f"""
-                INSERT INTO governance_tasks (id, task_type, title, description, priority, status, payload, created_by)
-                VALUES ('{tid}', '{task_type}', '{title_escaped}', '{desc}', '{priority}', 'pending', '{pay}', 'engine')
+                INSERT INTO governance_tasks (id, task_type, title, description, priority, status, payload, created_by, assigned_worker)
+                VALUES ('{tid}', '{task_type}', '{title_escaped}', '{desc}', '{priority}', 'pending', '{pay}', 'engine', NULL)
                 """
             )
             created += 1
@@ -2967,6 +2971,7 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
     """Execute a single task with full Level 3 compliance and L2 risk assessment."""
     start_time = time.time()
     is_code_task = (task.task_type == "code")
+    defer_completion = False
     
     # L2: Assess risk before execution
     risk_score, risk_level, risk_factors = assess_task_risk(task)
