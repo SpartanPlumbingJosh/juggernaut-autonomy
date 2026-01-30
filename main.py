@@ -5280,7 +5280,13 @@ if __name__ == "__main__":
 
     if (WORKER_ID or "").upper() == "WATCHDOG":
         print("WATCHDOG worker must use the watchdog entrypoint: python watchdog/main.py")
-        raise SystemExit(0)
+        try:
+            from watchdog.main import main as watchdog_main
+
+            watchdog_main()
+            raise SystemExit(0)
+        except Exception:
+            raise SystemExit(0)
     
     # Register signal handlers
     signal.signal(signal.SIGTERM, handle_shutdown)
