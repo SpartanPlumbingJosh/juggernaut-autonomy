@@ -127,6 +127,12 @@ def register_worker(
 
 def update_worker_status(worker_id: str, status: str) -> bool:
     """Update worker status (active, idle, busy, paused, error, offline)."""
+    try:
+        normalized = (status or "").strip().lower()
+    except Exception:
+        normalized = ""
+    if normalized == "idle" or not normalized:
+        status = "active"
     sql = f"""
     UPDATE worker_registry
     SET status = {_format_value(status)}, updated_at = NOW()
@@ -192,7 +198,7 @@ def find_workers_by_capability(capability: str) -> List[Dict]:
     SELECT worker_id, name, capabilities, health_score, status
     FROM worker_registry
     WHERE capabilities @> {_format_value([capability])}
-      AND status IN ('active', 'idle')
+      AND status = 'active'
     ORDER BY health_score DESC
     """
     try:
@@ -845,7 +851,7 @@ def can_worker_execute(worker_id: str, task_type: str, estimated_cost_cents: int
         return {"can_execute": False, "reason": "Worker not found"}
     
     # Check status
-    if worker.get("status") not in ("active", "idle"):
+    if worker.get("status") not in ("active", "degraded"):
         return {"can_execute": False, "reason": f"Worker status is {worker.get('status')}"}
     
     # Check allowed task types

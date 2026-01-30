@@ -377,7 +377,7 @@ def get_fallback_worker(
     sql = f"""
     SELECT worker_id, name, health_score
     FROM worker_registry
-    WHERE status IN ('active', 'idle')
+    WHERE status IN ('active', 'busy', 'degraded')
       AND health_score >= 0.5
       AND (allowed_task_types = '[]'::JSONB OR allowed_task_types @> {_format_value([task_type])})
       {excluded_sql}

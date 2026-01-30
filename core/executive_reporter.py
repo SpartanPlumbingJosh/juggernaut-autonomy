@@ -51,7 +51,7 @@ def generate_executive_report(
             """
             SELECT COUNT(*)::int as c
             FROM worker_registry
-            WHERE status IN ('active', 'idle')
+            WHERE status IN ('active', 'busy', 'degraded')
               AND last_heartbeat > NOW() - INTERVAL '10 minutes'
             """
         )

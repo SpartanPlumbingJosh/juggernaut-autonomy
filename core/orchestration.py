@@ -1715,7 +1715,7 @@ def _activate_backup_agent_impl(
         sql = f"""
         SELECT worker_id
         FROM worker_registry
-        WHERE status = 'idle'
+        WHERE status = 'active'
           AND health_score >= 0.7
           AND worker_id != {_format_value(failed_worker_id)}
         ORDER BY health_score DESC
