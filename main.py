@@ -103,6 +103,7 @@ try:
         PermissionDenied,
         log_access_attempt,
         get_scoped_credential,
+        get_worker_info,
     )
     RBAC_AVAILABLE = True
 except ImportError as e:
@@ -129,6 +130,9 @@ except ImportError as e:
         return None
 
     def get_scoped_credential(*args, **kwargs):
+        return None
+
+    def get_worker_info(*args, **kwargs):
         return None
 
 # VERCHAIN-02: Stage Transition Enforcement
@@ -1650,6 +1654,23 @@ def is_action_allowed(action: str) -> Tuple[bool, str]:
             return False, f"Action '{action}' is forbidden by pattern '{pattern}'"
     
     return True, "Action allowed"
+
+
+def get_worker_capabilities(worker_id: str) -> List[str]:
+    """Get worker capabilities from RBAC worker registry if available."""
+    if not RBAC_AVAILABLE:
+        return []
+
+    try:
+        worker = get_worker_info(worker_id)
+        if not worker:
+            return []
+        caps = worker.get("capabilities") or []
+        if isinstance(caps, str):
+            return [caps]
+        return list(caps)
+    except Exception:
+        return []
 
 
 def check_cost_limit(estimated_cost: float) -> Tuple[bool, str]:
@@ -4595,6 +4616,18 @@ def autonomy_loop():
                         log_action("task.skipped", f"Task skipped (forbidden): {reason}", 
                                    level="warn", task_id=task.id)
                         continue  # Skip forbidden tasks without claiming
+
+                    # Capability check BEFORE claiming (avoid claiming tasks we can't execute)
+                    worker_capabilities = get_worker_capabilities(WORKER_ID)
+                    if task.task_type == "code" and ("task.execute" not in worker_capabilities and "*" not in worker_capabilities):
+                        log_action(
+                            "task.skipped",
+                            "Task skipped (missing capability: task.execute)",
+                            level="warn",
+                            task_id=task.id,
+                            output_data={"worker_id": WORKER_ID, "capabilities": worker_capabilities, "required": "task.execute"},
+                        )
+                        continue  # Skip this task, let another worker claim it
                     
                     # Try to claim this task
                     if not claim_task(task.id):
