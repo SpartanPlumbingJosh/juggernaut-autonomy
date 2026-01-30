@@ -5250,6 +5250,15 @@ def handle_shutdown(signum, frame):
 # ============================================================
 
 if __name__ == "__main__":
+    if (WORKER_ID or "").upper() == "WATCHDOG":
+        try:
+            from watchdog.main import main as watchdog_main
+
+            watchdog_main()
+            raise SystemExit(0)
+        except Exception:
+            raise SystemExit(0)
+
     print("=" * 60)
     print(f"JUGGERNAUT AUTONOMY ENGINE v{DEPLOY_VERSION}")
     print("=" * 60)
@@ -5277,16 +5286,6 @@ if __name__ == "__main__":
     print(f"  DATABASE_URL: {'set' if _env_present('DATABASE_URL') else 'MISSING'}")
     print(f"  SLACK_BOT_TOKEN: {'set' if _env_present('SLACK_BOT_TOKEN') else 'MISSING'}")
     print("=" * 60)
-
-    if (WORKER_ID or "").upper() == "WATCHDOG":
-        print("WATCHDOG worker must use the watchdog entrypoint: python watchdog/main.py")
-        try:
-            from watchdog.main import main as watchdog_main
-
-            watchdog_main()
-            raise SystemExit(0)
-        except Exception:
-            raise SystemExit(0)
     
     # Register signal handlers
     signal.signal(signal.SIGTERM, handle_shutdown)
