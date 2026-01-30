@@ -548,6 +548,7 @@ shutdown_requested = False
 class TaskStatus(Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
+    AWAITING_PR_MERGE = "awaiting_pr_merge"
     COMPLETED = "completed"
     FAILED = "failed"
     BLOCKED = "blocked"
@@ -1186,23 +1187,6 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
     except Exception:
         pass
 
-    # Engagement events for non-revenue performance signals (clicks/signups/etc.)
-    try:
-        execute_sql(
-            """
-            CREATE TABLE IF NOT EXISTS engagement_events (
-                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                experiment_id UUID REFERENCES experiments(id),
-                event_type VARCHAR(50) NOT NULL,
-                source VARCHAR(100),
-                metadata JSONB DEFAULT '{}'::jsonb,
-                occurred_at TIMESTAMPTZ DEFAULT NOW()
-            );
-            """
-        )
-    except Exception:
-        pass
-
     alter_sched = [
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS name TEXT",
         "ALTER TABLE scheduled_tasks ADD COLUMN IF NOT EXISTS task_type TEXT",
@@ -1218,6 +1202,62 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
             execute_sql(sql)
         except Exception:
             pass
+
+    try:
+        execute_sql(
+            """
+            CREATE TABLE IF NOT EXISTS pr_tracking (
+                id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                task_id UUID,
+                repo TEXT,
+                pr_number INT,
+                pr_url TEXT,
+                current_state TEXT,
+                review_status TEXT,
+                mergeable BOOLEAN,
+                coderabbit_comments JSONB DEFAULT '{}'::jsonb,
+                merged_at TIMESTAMPTZ,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                updated_at TIMESTAMPTZ DEFAULT NOW()
+            );
+            """
+        )
+        execute_sql("CREATE UNIQUE INDEX IF NOT EXISTS pr_tracking_repo_pr_number_uq ON pr_tracking(repo, pr_number);")
+        execute_sql("CREATE INDEX IF NOT EXISTS pr_tracking_task_id_idx ON pr_tracking(task_id);")
+    except Exception:
+        pass
+
+
+def _ensure_pr_monitor_scheduled_task() -> None:
+    name = "pr_merge_monitor"
+    task_type = "pr_merge_monitor"
+    cron_expression = "every_5_minutes"
+
+    name_esc = name.replace("'", "''")
+    task_type_esc = task_type.replace("'", "''")
+    cron_esc = cron_expression.replace("'", "''")
+
+    try:
+        upd = execute_sql(
+            f"""
+            UPDATE scheduled_tasks
+            SET task_type = '{task_type_esc}',
+                cron_expression = '{cron_esc}',
+                interval_seconds = 300,
+                enabled = TRUE
+            WHERE name = '{name_esc}'
+            """
+        )
+        updated = int(upd.get("rowCount", 0) or 0) if isinstance(upd, dict) else 0
+        if updated <= 0:
+            execute_sql(
+                f"""
+                INSERT INTO scheduled_tasks (id, name, task_type, cron_expression, config, enabled, next_run_at, interval_seconds)
+                VALUES (gen_random_uuid(), '{name_esc}', '{task_type_esc}', '{cron_esc}', '{{}}'::jsonb, TRUE, NOW(), 300)
+                """
+            )
+    except Exception:
+        pass
 
 
 def _ensure_revenue_discovery_schema() -> None:
@@ -3859,6 +3899,10 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
         elif task.task_type == "code":
             # Autonomous code generation handler (PR #185)
             if CODE_TASK_AVAILABLE:
+                try:
+                    _ensure_proactive_min_schema(execute_sql, log_action)
+                except Exception:
+                    pass
                 # Log tool execution start to tool_executions table
                 tool_exec_id = None
                 code_start_time = time.time()
@@ -3888,6 +3932,20 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                               level="warn", task_id=task.id)
                 
                 try:
+                    original_status = task.status
+                    flip_sql = f"""
+                        UPDATE governance_tasks
+                        SET status = '{TaskStatus.AWAITING_PR_MERGE.value}',
+                            updated_at = NOW()
+                        WHERE id = {escape_value(str(task.id))}
+                          AND assigned_worker = {escape_value(WORKER_ID)}
+                          AND status = 'in_progress'
+                        RETURNING id
+                    """
+                    flip_res = execute_sql(flip_sql)
+                    if not (flip_res.get("rows") or []):
+                        raise Exception("Failed to transition task to awaiting_pr_merge")
+
                     code_result = execute_code_task(
                         task_id=task.id,
                         task_title=task.title,
@@ -3899,26 +3957,48 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                     result = code_result
                     task_succeeded = code_result.get("success", False)
 
-                    # L4-P1: If we created a PR, track it and defer completion until merged.
-                    # Policy: CodeRabbit-only, juggernaut-autonomy repo allowlist.
-                    if task_succeeded and ENABLE_PR_AUTO_MERGE:
+                    if not task_succeeded:
+                        try:
+                            execute_sql(
+                                f"""
+                                UPDATE governance_tasks
+                                SET status = {escape_value(original_status)},
+                                    updated_at = NOW()
+                                WHERE id = {escape_value(str(task.id))}
+                                  AND assigned_worker = {escape_value(WORKER_ID)}
+                                  AND status = '{TaskStatus.AWAITING_PR_MERGE.value}'
+                                """
+                            )
+                        except Exception:
+                            pass
+                    else:
                         pr_url = code_result.get("pr_url")
                         target_repo = code_result.get("target_repo")
                         merged = bool(code_result.get("merged"))
-                        if pr_url and (target_repo in PR_AUTO_MERGE_REPO_ALLOWLIST) and not merged:
+
+                        if pr_url and not merged:
                             try:
                                 from core.pr_tracker import PRTracker
-                                PRTracker().track_pr(str(task.id), str(pr_url))
-                            except Exception as pr_track_err:
-                                log_action(
-                                    "pr_auto_merge.track_failed",
-                                    f"Failed to track PR for auto-merge: {pr_track_err}",
-                                    level="warn",
-                                    task_id=task.id,
-                                    error_data={"pr_url": pr_url, "target_repo": target_repo},
-                                )
 
-                            # Ensure the task carries structured evidence that a PR exists.
+                                PRTracker().track_pr(str(task.id), str(pr_url))
+                            except Exception:
+                                try:
+                                    pr_number = code_result.get("pr_number")
+                                    repo_esc = str(target_repo or "").replace("'", "''")
+                                    url_esc = str(pr_url).replace("'", "''")
+                                    execute_sql(
+                                        f"""
+                                        INSERT INTO pr_tracking (task_id, repo, pr_number, pr_url, current_state, review_status)
+                                        VALUES ('{task.id}'::uuid, '{repo_esc}', {int(pr_number) if pr_number is not None else 'NULL'}, '{url_esc}', 'created', 'pending')
+                                        ON CONFLICT (repo, pr_number) DO UPDATE SET
+                                            task_id = EXCLUDED.task_id,
+                                            pr_url = EXCLUDED.pr_url,
+                                            updated_at = NOW()
+                                        """
+                                    )
+                                except Exception:
+                                    pass
+
                             if isinstance(result, dict) and "completion_evidence" not in result:
                                 result["completion_evidence"] = {
                                     "type": "pr_created",
@@ -3929,6 +4009,7 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                                 }
 
                             defer_completion = True
+
                     
                     # Update tool_executions with result
                     if tool_exec_id:
@@ -3960,6 +4041,19 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                 except Exception as code_err:
                     result = {"error": str(code_err), "task_type": "code"}
                     task_succeeded = False
+
+                    try:
+                        execute_sql(
+                            f"""
+                            UPDATE governance_tasks
+                            SET status = {escape_value(original_status if 'original_status' in locals() else task.status)},
+                                updated_at = NOW()
+                            WHERE id = {escape_value(str(task.id))}
+                              AND assigned_worker = {escape_value(WORKER_ID)}
+                            """
+                        )
+                    except Exception:
+                        pass
                     
                     # Update tool_executions with error
                     if tool_exec_id:
@@ -4073,7 +4167,7 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
         duration_ms = int((time.time() - start_time) * 1000)
         
         if task_succeeded and defer_completion:
-            update_task_status(task.id, "awaiting_verification", result)
+            update_task_status(task.id, TaskStatus.AWAITING_PR_MERGE.value, result)
             log_action(
                 "task.deferred_completion",
                 f"Task deferred until PR is merged: {task.title}",
@@ -4582,6 +4676,37 @@ def autonomy_loop():
                         f"Stale cleanup failed: {cleanup_err}",
                         level="warn"
                     )
+
+            # PR merge monitor should run even when pending work exists.
+            try:
+                _ensure_proactive_min_schema(execute_sql, log_action)
+            except Exception:
+                pass
+
+            try:
+                _ensure_pr_monitor_scheduled_task()
+            except Exception:
+                pass
+
+            try:
+                due = get_due_scheduled_tasks()
+                pr_due = None
+                for d in due or []:
+                    if (d.get("task_type") or "") == "pr_merge_monitor":
+                        pr_due = d
+                        break
+                if pr_due:
+                    from src.scheduled.pr_monitor import monitor_pending_prs
+
+                    pr_res = monitor_pending_prs(
+                        execute_sql=execute_sql,
+                        log_action=log_action,
+                        enable_auto_merge=bool(ENABLE_PR_AUTO_MERGE),
+                        repo_allowlist=list(PR_AUTO_MERGE_REPO_ALLOWLIST),
+                    )
+                    reschedule_scheduled_task(pr_due, success=bool(isinstance(pr_res, dict) and pr_res.get("success", True)))
+            except Exception:
+                pass
             
             # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
             approved_tasks = poll_approved_tasks(limit=3)
@@ -4717,6 +4842,11 @@ def autonomy_loop():
                     pass
 
                 try:
+                    _ensure_pr_monitor_scheduled_task()
+                except Exception:
+                    pass
+
+                try:
                     _ensure_revenue_discovery_schema()
                 except Exception:
                     pass
@@ -4793,6 +4923,20 @@ def autonomy_loop():
                             # Generate diverse tasks when idle
                             sched_result = _maybe_generate_diverse_proactive_tasks()
                             sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success", True))
+                        elif sched_task_type == "pr_merge_monitor":
+                            try:
+                                from src.scheduled.pr_monitor import monitor_pending_prs
+
+                                sched_result = monitor_pending_prs(
+                                    execute_sql=execute_sql,
+                                    log_action=log_action,
+                                    enable_auto_merge=bool(ENABLE_PR_AUTO_MERGE),
+                                    repo_allowlist=list(PR_AUTO_MERGE_REPO_ALLOWLIST),
+                                )
+                                sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success", True))
+                            except Exception as pr_mon_err:
+                                sched_result = {"success": False, "error": str(pr_mon_err)}
+                                sched_success = False
                         elif sched_task_type == "experiment_check":
                             if EXPERIMENT_EXECUTOR_AVAILABLE:
                                 sched_result = progress_experiments(execute_sql=execute_sql, log_action=log_action)

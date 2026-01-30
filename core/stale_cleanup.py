@@ -133,6 +133,12 @@ def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[d
             )
         WHERE status = 'in_progress'
           AND started_at < NOW() - INTERVAL '{threshold_minutes} minutes'
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pr_tracking p
+              WHERE p.task_id = governance_tasks.id
+                AND p.current_state NOT IN ('merged', 'closed')
+          )
         RETURNING id, title, task_type, 
                   (metadata->>'previous_assigned_worker') as previous_worker,
                   (metadata->>'previous_started_at') as previous_started;
