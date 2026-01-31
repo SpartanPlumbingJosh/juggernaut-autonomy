@@ -3,13 +3,14 @@ JUGGERNAUT Dashboard API - FastAPI Server
 Runs on Railway as a persistent service instead of Vercel serverless.
 """
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import uvicorn
 import os
 import logging
 import json
+from typing import Any, Dict, List, Optional
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -17,8 +18,12 @@ logger = logging.getLogger(__name__)
 # Import all dashboard functions
 from api.dashboard import (
     handle_request,
-    API_VERSION
+    API_VERSION,
+    check_rate_limit,
+    validate_api_key,
 )
+
+from core.ai_executor import AIExecutor
 
 # Internal (service-to-service) dashboard endpoints
 from api.internal_dashboard import router as internal_dashboard_router
@@ -60,6 +65,73 @@ async def root():
         "status": "healthy",
         "service": "juggernaut-dashboard-api",
         "version": API_VERSION
+    }
+
+
+def _require_dashboard_auth(authorization: Optional[str]) -> str:
+    token = (authorization or "").replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing API key")
+
+    user_id = validate_api_key(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if not check_rate_limit(user_id):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    return user_id
+
+
+@app.post("/api/chat")
+@app.post("/api/chat/completions")
+async def chat(
+    authorization: Optional[str] = Header(default=None),
+    body: Dict[str, Any] = Body(default=None),
+):
+    _require_dashboard_auth(authorization)
+    payload = body or {}
+
+    system_prompt = (
+        os.getenv("JUGGERNAUT_CHAT_SYSTEM")
+        or "You are JUGGERNAUT, a standalone $0-$100M autonomous indie agent. Respond concisely and directly."
+    )
+
+    messages: List[Dict[str, str]] = []
+    raw_messages = payload.get("messages")
+    if isinstance(raw_messages, list):
+        for m in raw_messages:
+            if not isinstance(m, dict):
+                continue
+            role = str(m.get("role") or "").strip() or "user"
+            content = str(m.get("content") or "")
+            messages.append({"role": role, "content": content})
+
+    if not messages:
+        text = (
+            payload.get("message")
+            or payload.get("prompt")
+            or payload.get("text")
+            or ""
+        )
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": str(text)},
+        ]
+    else:
+        if messages[0].get("role") != "system":
+            messages.insert(0, {"role": "system", "content": system_prompt})
+
+    try:
+        executor = AIExecutor()
+        resp = executor.chat(messages)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Chat failed: {e}")
+
+    return {
+        "success": True,
+        "reply": resp.content,
+        "model": executor.model,
     }
 
 @app.get("/health")
