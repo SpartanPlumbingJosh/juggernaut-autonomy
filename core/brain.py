@@ -294,6 +294,7 @@ def _get_system_state() -> str:
         text = str(value or "")
         text = text.replace("\r", " ").replace("\n", " ")
         text = text.replace("```", "'''")
+        text = text.replace("DATA START", "DATA_START").replace("DATA END", "DATA_END")
         return " ".join(text.split())
 
     sections = []
@@ -325,12 +326,13 @@ def _get_system_state() -> str:
             FROM worker_registry
             WHERE last_heartbeat > NOW() - INTERVAL '10 minutes'
             ORDER BY last_heartbeat DESC
+            LIMIT 20
             """
         )
         if worker_result.get("rows"):
             worker_lines = []
             for row in worker_result["rows"]:
-                worker_id = row.get("worker_id", "unknown")[:20]
+                worker_id = str(row.get("worker_id") or "unknown")[:20]
                 status = row.get("status", "unknown")
                 seconds_ago = int(row.get("seconds_since_heartbeat", 0))
                 if seconds_ago < 60:
