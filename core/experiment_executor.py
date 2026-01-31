@@ -16,6 +16,43 @@ from uuid import uuid4
 logger = logging.getLogger(__name__)
 
 
+def _normalize_task_priority(value: Any) -> str:
+    """Normalize legacy integer priorities to DB enum values."""
+
+    allowed = {"low", "medium", "high", "critical"}
+
+    if value is None:
+        return "medium"
+
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in allowed:
+            return v
+        if v.isdigit():
+            try:
+                value = int(v)
+            except Exception:
+                return "medium"
+        else:
+            return "medium"
+
+    if isinstance(value, (int, float)):
+        n = int(value)
+        # Legacy convention: lower number == higher priority.
+        if n <= 1:
+            return "high"
+        if n == 2:
+            return "medium"
+        if n == 3:
+            return "medium"
+        if n == 4:
+            return "low"
+        if n >= 5:
+            return "low"
+
+    return "medium"
+
+
 # Task templates for each experiment type
 EXPERIMENT_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
     "review_response_service": [
@@ -229,7 +266,7 @@ def create_task_for_experiment(
     title = (template.get("title") or "Experiment Task").replace("'", "''")
     task_type = template.get("task_type", "research")
     description = (template.get("description") or "").replace("'", "''")
-    priority = template.get("priority", 5)
+    priority = _normalize_task_priority(template.get("priority"))
     phase = template.get("phase", 1)
 
     # Build payload with experiment reference
@@ -258,7 +295,7 @@ def create_task_for_experiment(
                 '{description}',
                 '{task_type}',
                 'pending',
-                {priority},
+                '{priority}'::task_priority,
                 '{payload_json}'::jsonb,
                 '{tags_json}'::jsonb,
                 '{now}',
