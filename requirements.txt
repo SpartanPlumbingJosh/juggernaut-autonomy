@@ -1,8 +1,7 @@
 # JUGGERNAUT Autonomy Engine Dependencies
 # ==========================================
-# Minimal dependencies - we use stdlib where possible
-
-# No external dependencies required!
+# Minimal dependencies - we use stdlib where possible, but some features
+# require external libraries.
 # The autonomy engine uses only Python standard library:
 # - urllib.request for HTTP (database, APIs)
 # - json for data serialization
@@ -10,8 +9,12 @@
 # - threading for background tasks
 # - datetime, time, os, sys for basics
 
-# Required for core/experiments.py
+# External dependencies
+# - httpx: required for core/experiments.py
+# - pypdf: required for /api/files/upload (PDF text extraction)
 httpx==0.27.0
+
+pypdf>=6.6.0
 
 # Optional (uncomment if needed):
 # psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)
