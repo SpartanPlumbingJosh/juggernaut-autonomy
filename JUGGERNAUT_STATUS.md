@@ -1,6 +1,6 @@
 # JUGGERNAUT - Master Reference Document
 
-> **Last Updated:** 2026-01-26
+> **Last Updated:** 2026-01-31
 > **Purpose:** Single source of truth for all Claude sessions working on JUGGERNAUT
 > **Update Instructions:** Any Claude session that makes significant progress should update this file and push to the repo
 
@@ -44,6 +44,50 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 | ANALYST | specialist | ✅ Active | metrics.analyze, pattern.detect, report.generate |
 | STRATEGIST | specialist | ✅ Active | goal.decompose, experiment.design |
 | WATCHDOG | monitor | ✅ Active | health.check, error.detect, alert.send |
+
+### Neural Chat System
+AI-powered chat interface for querying and controlling JUGGERNAUT systems.
+
+**Capabilities:**
+- **Real-time Data Access**: Queries live database for task counts, worker status, revenue metrics
+- **Tool Execution**: Can execute 68+ MCP tools including:
+  - `sql_query` - Database queries
+  - `github_*` - Repository operations (create branches, PRs, files)
+  - `railway_*` - Infrastructure management (deployments, logs)
+  - `war_room_*` - Slack communication
+  - `hq_execute` - Governance task creation
+- **Governance Task Fallback**: Creates follow-up tasks when tool execution fails
+- **Session Persistence**: Maintains conversation history across sessions
+
+**Architecture:**
+```
+User → spartan-hq frontend → Brain API → OpenRouter (function calling)
+                                      → MCP Server (tool execution)
+                                      → PostgreSQL (state/history)
+```
+
+**API Endpoints:**
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/brain/consult` | POST | Main chat endpoint with tool execution |
+| `/api/chat/sessions` | GET | List chat sessions |
+| `/api/chat/sessions` | POST | Create new session |
+| `/api/chat/sessions/{id}` | GET | Get session with messages |
+| `/api/chat/sessions/{id}/messages` | POST | Append message to session |
+
+**Response Format:**
+```json
+{
+  "response": "string",
+  "session_id": "uuid",
+  "tool_executions": [
+    {"tool": "sql_query", "success": true, "arguments": {...}, "result": {...}}
+  ],
+  "iterations": 2,
+  "input_tokens": 1500,
+  "output_tokens": 500
+}
+```
 
 ---
 

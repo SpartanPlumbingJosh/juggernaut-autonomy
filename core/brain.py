@@ -701,12 +701,31 @@ class BrainService:
                 # Execute tool via MCP server
                 tool_result = self._execute_tool(tool_name, arguments)
 
-                tool_executions.append({
+                # Build execution record
+                execution_record = {
                     "tool": tool_name,
                     "arguments": arguments,
                     "result": tool_result,
                     "success": "error" not in tool_result
-                })
+                }
+
+                # Create fallback governance task if tool execution failed
+                # Don't create fallback for hq_execute failures to avoid recursion
+                if "error" in tool_result and tool_name != "hq_execute":
+                    fallback = self._create_fallback_task(
+                        tool_name,
+                        arguments,
+                        tool_result.get("error", "Unknown error"),
+                        question
+                    )
+                    execution_record["fallback_task_created"] = True
+                    # Extract task ID from result if available
+                    if isinstance(fallback.get("result"), dict):
+                        execution_record["fallback_task_id"] = fallback["result"].get("id")
+                    elif isinstance(fallback, dict) and "id" in fallback:
+                        execution_record["fallback_task_id"] = fallback["id"]
+
+                tool_executions.append(execution_record)
 
                 # Add assistant message with tool call
                 messages.append({
@@ -989,6 +1008,62 @@ class BrainService:
         except Exception as e:
             logger.error(f"Tool execution failed: {e}")
             return {"error": str(e)}
+
+    def _create_fallback_task(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        error: str,
+        user_question: str
+    ) -> Dict[str, Any]:
+        """
+        Create governance task when tool execution fails or is deferred.
+
+        When the Brain cannot execute a tool directly (due to errors, permissions,
+        or complexity), this creates a governance_task for human/worker follow-up.
+
+        Args:
+            tool_name: Name of the failed tool.
+            arguments: Arguments that were passed to the tool.
+            error: Error message from the failure.
+            user_question: Original user question for context.
+
+        Returns:
+            Result from hq_execute task.create, or error dict if creation fails.
+        """
+        task_params = {
+            "title": f"[Neural Chat] Failed: {tool_name}",
+            "description": f"""Tool execution failed during Neural Chat consultation.
+
+**User Question:** {user_question}
+
+**Tool:** {tool_name}
+**Arguments:**
+```json
+{json.dumps(arguments, indent=2)}
+```
+
+**Error:** {error}
+
+**Action Required:** Review and execute manually or investigate the underlying issue.""",
+            "priority": "medium",
+            "task_type": "review"
+        }
+
+        logger.info(f"Creating fallback task for failed tool: {tool_name}")
+
+        # Use hq_execute to create the task (avoid recursion by not creating
+        # fallback for hq_execute failures)
+        try:
+            result = self._execute_tool("hq_execute", {
+                "action": "task.create",
+                "params": task_params
+            })
+            logger.info(f"Fallback task created: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Failed to create fallback task: {e}")
+            return {"error": str(e), "success": False}
 
     def _load_history(self, session_id: str) -> List[Dict[str, str]]:
         """
