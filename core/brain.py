@@ -457,6 +457,7 @@ class BrainService:
         return {
             "response": response_text,
             "session_id": session_id,
+            "is_new_session": is_new_session,
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
             "cost_cents": cost_cents,
@@ -590,7 +591,7 @@ class BrainService:
                 f"""
                 SELECT role, content
                 FROM chat_messages
-                WHERE session_id = {escape_sql_value(session_id)}
+                WHERE session_id = {escape_sql_value(session_id)}::uuid
                 ORDER BY created_at DESC
                 LIMIT {MAX_CONVERSATION_HISTORY}
                 """
