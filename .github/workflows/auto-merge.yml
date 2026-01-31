@@ -105,6 +105,13 @@ jobs:
           PR_NUMBER="${{ steps.pr-info.outputs.pr_number }}"
           
           echo "Merging PR #$PR_NUMBER..."
-          gh pr merge $PR_NUMBER --squash --auto
+          set +e
+          gh pr merge "$PR_NUMBER" --squash --auto --delete-branch --yes
+          rc=$?
+          set -e
+          if [ $rc -ne 0 ]; then
+            echo "::notice::Auto-merge not available; performing squash merge"
+            gh pr merge "$PR_NUMBER" --squash --delete-branch --yes
+          fi
           
           echo "::notice::Successfully merged PR #$PR_NUMBER"

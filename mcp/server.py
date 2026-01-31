@@ -734,7 +734,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 return [TextContent(type="text", text=json.dumps({"error": "Puppeteer not configured"}))]
             action = name.replace("browser_", "")
             async with aiohttp.ClientSession() as session:
-                async with session.post(f"{PUPPETEER_URL}/action", json={"action": action, **arguments}, headers={"Authorization": f"Bearer jug-pup-auth-2024"}) as resp:
+                async with session.post(
+                    f"{PUPPETEER_URL}/action",
+                    json={"action": action, **arguments},
+                    headers={"Authorization": "Bearer jug-pup-auth-2024"},
+                ) as resp:
                     result = await resp.json()
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
@@ -763,15 +767,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         
         elif name == "st_create_customer":
             data = {"name": arguments.get("name")}
-            if arguments.get("address"): data["address"] = arguments.get("address")
-            if arguments.get("phones"): data["phones"] = arguments.get("phones")
-            if arguments.get("email"): data["email"] = arguments.get("email")
+            if arguments.get("address"):
+                data["address"] = arguments.get("address")
+            if arguments.get("phones"):
+                data["phones"] = arguments.get("phones")
+            if arguments.get("email"):
+                data["email"] = arguments.get("email")
             result = await servicetitan_api("POST", f"crm/v2/tenant/{ST_TENANT_ID}/customers", data)
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
         elif name == "st_list_jobs":
             endpoint = f"jpm/v2/tenant/{ST_TENANT_ID}/jobs?page={arguments.get('page', 1)}"
-            if arguments.get("status"): endpoint += f"&status={arguments.get('status')}"
+            if arguments.get("status"):
+                endpoint += f"&status={arguments.get('status')}"
             result = await servicetitan_api("GET", endpoint)
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
@@ -781,7 +789,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         
         elif name == "st_list_invoices":
             endpoint = f"accounting/v2/tenant/{ST_TENANT_ID}/invoices?page={arguments.get('page', 1)}"
-            if arguments.get("status"): endpoint += f"&status={arguments.get('status')}"
+            if arguments.get("status"):
+                endpoint += f"&status={arguments.get('status')}"
             result = await servicetitan_api("GET", endpoint)
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
@@ -1005,11 +1014,15 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             async with aiohttp.ClientSession() as session:
                 kwargs = {"headers": headers}
                 if body:
-                    try: kwargs["json"] = json.loads(body)
-                    except: kwargs["data"] = body
+                    try:
+                        kwargs["json"] = json.loads(body)
+                    except Exception:
+                        kwargs["data"] = body
                 async with session.request(method, url, **kwargs) as resp:
-                    try: result = await resp.json()
-                    except: result = {"text": await resp.text(), "status": resp.status}
+                    try:
+                        result = await resp.json()
+                    except Exception:
+                        result = {"text": await resp.text(), "status": resp.status}
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
         return [TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
@@ -1028,16 +1041,25 @@ async def handle_webhook(scope, receive, send):
     while True:
         message = await receive()
         body += message.get("body", b"")
-        if not message.get("more_body"): break
-    try: data = json.loads(body.decode())
-    except: data = {"raw": body.decode()}
+        if not message.get("more_body"):
+            break
+    try:
+        data = json.loads(body.decode())
+    except Exception:
+        data = {"raw": body.decode()}
     path = scope.get("path", "")
     source = path.split("/")[-1] if path.count("/") > 2 else "unknown"
     event = {"id": str(uuid.uuid4()), "source": source, "timestamp": time.time(), "data": data}
     webhook_events.append(event)
-    if len(webhook_events) > 1000: webhook_events.pop(0)
-    try: await execute_sql("INSERT INTO webhook_events (id, source, data, created_at) VALUES ($1, $2, $3, NOW())", [event["id"], source, json.dumps(data)])
-    except: pass
+    if len(webhook_events) > 1000:
+        webhook_events.pop(0)
+    try:
+        await execute_sql(
+            "INSERT INTO webhook_events (id, source, data, created_at) VALUES ($1, $2, $3, NOW())",
+            [event["id"], source, json.dumps(data)],
+        )
+    except Exception:
+        pass
     await send({"type": "http.response.start", "status": 200, "headers": [[b"content-type", b"application/json"]]})
     await send({"type": "http.response.body", "body": json.dumps({"received": True, "event_id": event["id"]}).encode()})
 
@@ -1051,19 +1073,22 @@ sse_transport = SseServerTransport("/messages")
 def check_auth(scope) -> bool:
     query_string = scope.get("query_string", b"").decode()
     params = dict(p.split("=", 1) for p in query_string.split("&") if "=" in p)
-    if params.get("token") == MCP_AUTH_TOKEN: return True
+    if params.get("token") == MCP_AUTH_TOKEN:
+        return True
     headers = dict(scope.get("headers", []))
     auth = headers.get(b"authorization", b"").decode()
     return auth.startswith("Bearer ") and auth[7:] == MCP_AUTH_TOKEN
 
 async def send_response(send, status: int, body: bytes, content_type: bytes = b"application/json", extra_headers=None):
     headers = [[b"content-type", content_type], [b"access-control-allow-origin", b"*"], [b"access-control-allow-methods", b"GET, POST, OPTIONS"], [b"access-control-allow-headers", b"*"]]
-    if extra_headers: headers.extend(extra_headers)
+    if extra_headers:
+        headers.extend(extra_headers)
     await send({"type": "http.response.start", "status": status, "headers": headers})
     await send({"type": "http.response.body", "body": body})
 
 async def app(scope, receive, send):
-    if scope["type"] != "http": return
+    if scope["type"] != "http":
+        return
     path, method = scope["path"], scope["method"]
     logger.info(f"{method} {path}")
     

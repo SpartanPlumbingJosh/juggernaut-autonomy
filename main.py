@@ -4631,12 +4631,12 @@ def autonomy_loop():
             if approval_result.get("auto_approved"):
                 for task_id in approval_result["auto_approved"]:
                     log_action("approval.auto_timeout_processed",
-                              f"Task auto-approved after timeout",
+                              "Task auto-approved after timeout",
                               task_id=task_id)
             if approval_result.get("escalated"):
                 for task_id in approval_result["escalated"]:
                     log_action("approval.timeout_escalated",
-                              f"High-risk task escalated due to approval timeout",
+                              "High-risk task escalated due to approval timeout",
                               task_id=task_id)
         except Exception as approval_err:
             log_error(f"Approval timeout check failed: {approval_err}")
@@ -4647,12 +4647,12 @@ def autonomy_loop():
             if orphan_result.get("reset"):
                 for task_id in orphan_result["reset"]:
                     log_action("task.orphan_processed",
-                              f"Orphaned task reset to pending",
+                              "Orphaned task reset to pending",
                               task_id=task_id)
             if orphan_result.get("created_approvals"):
                 for task_id in orphan_result["created_approvals"]:
                     log_action("approval.orphan_created_processed",
-                              f"Created approval for orphaned high-priority task",
+                              "Created approval for orphaned high-priority task",
                               task_id=task_id)
         except Exception as orphan_err:
             log_error(f"Orphaned task handler failed: {orphan_err}")

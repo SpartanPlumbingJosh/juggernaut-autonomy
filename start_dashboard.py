@@ -10,7 +10,7 @@ if not os.getenv("DASHBOARD_API_SECRET"):
     os.environ["DASHBOARD_API_SECRET"] = "spartan-dashboard-secret-2025"
 
 print("=== Starting Spartan HQ Dashboard API ===")
-print(f"Database: Neon PostgreSQL")
+print("Database: Neon PostgreSQL")
 print(f"API Secret: {'Set' if os.getenv('DASHBOARD_API_SECRET') else 'Missing'}")
 print(f"Port: {os.getenv('PORT', 8000)}")
 print("\nEndpoints:")
