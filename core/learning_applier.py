@@ -24,11 +24,11 @@ def apply_recent_learnings(
     created = 0
     considered = 0
 
-    for l in rows:
+    for row in rows:
         considered += 1
-        category = str(l.get("category") or "")
-        summary = str(l.get("summary") or "")
-        learning_id = str(l.get("id") or "")
+        category = str(row.get("category") or "")
+        summary = str(row.get("summary") or "")
+        learning_id = str(row.get("id") or "")
         if not summary:
             continue
 

@@ -96,7 +96,7 @@ class handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     from http.server import HTTPServer
     
-    print(f"Starting JUGGERNAUT Dashboard API server...")
+    print("Starting JUGGERNAUT Dashboard API server...")
     print(f"API Version: {API_VERSION}")
     print(f"Test endpoint: http://localhost:8000/{API_VERSION}/overview")
     

@@ -158,7 +158,7 @@ Module name: {module_name}
 """
         
         if requirements:
-            user_prompt += f"\nRequirements:\n" + "\n".join(f"- {r}" for r in requirements)
+            user_prompt += "\nRequirements:\n" + "\n".join(f"- {r}" for r in requirements)
         
         if existing_code:
             user_prompt += f"\n\nExisting code to extend/modify:\n```python\n{existing_code}\n```"

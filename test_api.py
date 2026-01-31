@@ -67,7 +67,7 @@ def main():
         if "error" in result:
             print(f"  ✗ Error: {result['error']}")
         else:
-            print(f"  ✓ Success")
+            print("  ✓ Success")
             if "body" in result:
                 body = result["body"]
                 if "success" in body and not body["success"]:

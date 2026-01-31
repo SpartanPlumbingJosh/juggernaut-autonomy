@@ -244,13 +244,13 @@ def update_scheduled_task(
         set_clauses.append(f"next_run_at = ${param_idx}")
         params.append(next_run.isoformat())
         param_idx += 1
-        set_clauses.append(f"schedule_type = 'cron'")
+        set_clauses.append("schedule_type = 'cron'")
     elif "interval_seconds" in updates:
         next_run = datetime.utcnow() + timedelta(seconds=updates["interval_seconds"])
         set_clauses.append(f"next_run_at = ${param_idx}")
         params.append(next_run.isoformat())
         param_idx += 1
-        set_clauses.append(f"schedule_type = 'interval'")
+        set_clauses.append("schedule_type = 'interval'")
     
     set_clauses.append("updated_at = NOW()")
     

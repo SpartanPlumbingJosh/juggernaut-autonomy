@@ -833,7 +833,7 @@ def require_capability(
 
             if worker_id is None:
                 raise PermissionDenied(
-                    reason=f"Could not determine worker_id",
+                    reason="Could not determine worker_id",
                     action=f"capability:{capability}",
                 )
 
