@@ -131,13 +131,15 @@ def _get_brain_service():
 
 def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Handle POST /api/brain/consult request.
+    Handle POST /api/brain/consult request with optional MCP tool execution.
 
     Accepts:
         {
             "question": "Your question here",
             "session_id": "optional-session-id",
-            "context": {"optional": "context data"}
+            "context": {"optional": "context data"},
+            "enable_tools": true,  // Enable MCP tool execution (default: true)
+            "include_memories": true
         }
 
     Returns:
@@ -146,10 +148,12 @@ def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[s
             "response": "AI response text",
             "session_id": "session-id-used",
             "memories_used": [...],
+            "tool_executions": [{"tool": "sql_query", "arguments": {...}, "result": {...}}],
             "cost_cents": 0.05,
             "input_tokens": 150,
             "output_tokens": 200,
-            "model": "anthropic/claude-sonnet-4-20250514"
+            "iterations": 2,
+            "model": "openrouter/auto"
         }
 
     Args:
@@ -171,27 +175,42 @@ def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[s
 
     session_id = body.get("session_id")
     context = body.get("context")
+    enable_tools = body.get("enable_tools", True)  # Tools enabled by default
+    include_memories = body.get("include_memories", True)
 
     try:
         brain = _get_brain_service()
         if brain is None:
             return _error_response(503, "Brain service not available")
-        
-        result = brain.consult(
-            question=question,
-            session_id=session_id,
-            context=context,
-            include_memories=body.get("include_memories", True)
-        )
+
+        # Use tool-enabled consultation when tools are enabled
+        if enable_tools:
+            result = brain.consult_with_tools(
+                question=question,
+                session_id=session_id,
+                context=context,
+                include_memories=include_memories,
+                enable_tools=True
+            )
+        else:
+            # Fall back to non-tool consultation
+            result = brain.consult(
+                question=question,
+                session_id=session_id,
+                context=context,
+                include_memories=include_memories
+            )
 
         return _make_response(200, {
             "success": True,
             "response": result.get("response", ""),
             "session_id": result.get("session_id", ""),
             "memories_used": result.get("memories_used", []),
+            "tool_executions": result.get("tool_executions", []),
             "cost_cents": result.get("cost_cents", 0),
             "input_tokens": result.get("input_tokens", 0),
             "output_tokens": result.get("output_tokens", 0),
+            "iterations": result.get("iterations", 1),
             "model": result.get("model", "")
         })
 

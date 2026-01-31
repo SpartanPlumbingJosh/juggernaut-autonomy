@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 
 from .database import query_db, escape_sql_value
+from .mcp_tool_schemas import get_tool_schemas
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -28,6 +29,11 @@ MAX_CONVERSATION_HISTORY = 20
 MAX_MEMORIES_TO_RECALL = 10
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_SESSION_TITLE = "New Chat"
+
+# MCP Tool Execution Configuration
+MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://juggernaut-mcp-production.up.railway.app")
+MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
+MAX_TOOL_ITERATIONS = 10  # Prevent infinite tool loops
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
@@ -576,7 +582,183 @@ class BrainService:
             "memories_used": memories_used,
             "model": self.model
         }
-    
+
+    def consult_with_tools(
+        self,
+        question: str,
+        session_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        include_memories: bool = True,
+        system_prompt: Optional[str] = None,
+        enable_tools: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Consult the brain with MCP tool execution capability.
+
+        This implements an agentic loop:
+        1. Send question to OpenRouter with tool definitions
+        2. If model requests tool calls, execute them via MCP server
+        3. Feed results back to model
+        4. Repeat until model provides final response (no more tool calls)
+
+        Args:
+            question: The question or prompt to send.
+            session_id: Session ID for conversation continuity.
+            context: Additional context to include.
+            include_memories: Whether to recall relevant memories.
+            system_prompt: Custom system prompt. Uses JUGGERNAUT prompt if None.
+            enable_tools: Whether to enable tool calling (default: True).
+
+        Returns:
+            Dict containing:
+                - response: The AI response text
+                - session_id: Session ID used
+                - tool_executions: List of tools executed with results
+                - input_tokens: Estimated input tokens
+                - output_tokens: Estimated output tokens
+                - cost_cents: Estimated cost
+                - iterations: Number of API calls made
+        """
+        if not self.api_key:
+            raise APIError("OPENROUTER_API_KEY not configured")
+
+        # Ensure session exists
+        session_id, is_new_session = self._ensure_session(session_id)
+
+        # Load history and memories
+        history = self._load_history(session_id)
+        is_first_exchange = len(history) == 0
+
+        memories_used: List[Dict[str, Any]] = []
+        memory_context = ""
+        if include_memories:
+            memories_used = self._recall_memories(question)
+            if memories_used:
+                memory_context = self._format_memories(memories_used)
+
+        # Build system prompt
+        if system_prompt is None:
+            system_prompt = self._build_system_prompt(context, memory_context)
+        elif memory_context:
+            system_prompt = f"{system_prompt}\n\n{memory_context}"
+
+        # Build initial messages
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": question})
+
+        # Get tool schemas if enabled
+        tools = get_tool_schemas() if enable_tools else None
+
+        # Track metrics
+        tool_executions: List[Dict[str, Any]] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        iterations = 0
+        response_text = ""
+
+        # Agentic loop - continue until no more tool calls
+        while iterations < MAX_TOOL_ITERATIONS:
+            iterations += 1
+
+            # Estimate tokens for this iteration
+            input_text = "".join(
+                str(m.get("content", "")) for m in messages if m.get("content")
+            )
+            total_input_tokens += estimate_tokens(input_text)
+
+            # Call API with tools
+            try:
+                response_text, tool_calls = self._call_api_with_tools(messages, tools)
+            except APIError as e:
+                logger.error(f"API call failed on iteration {iterations}: {e}")
+                if iterations == 1:
+                    raise  # First call failed, propagate error
+                break  # Subsequent call failed, return what we have
+
+            total_output_tokens += estimate_tokens(response_text)
+
+            # If no tool calls, we're done
+            if not tool_calls:
+                logger.info(f"Consultation complete after {iterations} iteration(s)")
+                break
+
+            # Process each tool call
+            for tool_call in tool_calls:
+                func = tool_call.get("function", {})
+                tool_name = func.get("name", "unknown")
+                arguments_str = func.get("arguments", "{}")
+                tool_call_id = tool_call.get("id", f"call_{uuid4().hex[:8]}")
+
+                try:
+                    arguments = json.loads(arguments_str) if arguments_str else {}
+                except json.JSONDecodeError:
+                    arguments = {}
+                    logger.warning(f"Failed to parse tool arguments: {arguments_str}")
+
+                logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+
+                # Execute tool via MCP server
+                tool_result = self._execute_tool(tool_name, arguments)
+
+                tool_executions.append({
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result": tool_result,
+                    "success": "error" not in tool_result
+                })
+
+                # Add assistant message with tool call
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [tool_call]
+                })
+
+                # Add tool result message
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps(tool_result, default=str)
+                })
+
+        # Calculate cost
+        cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
+
+        # Store conversation (just the user question and final response)
+        self._store_message(session_id, "user", question)
+        if response_text:
+            self._store_message(session_id, "assistant", response_text)
+
+        # Generate title if first exchange
+        if is_first_exchange and response_text:
+            self._maybe_generate_title(session_id, question, response_text)
+
+        logger.info(
+            "Brain consultation with tools complete",
+            extra={
+                "session_id": session_id,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "cost_cents": cost_cents,
+                "tool_calls": len(tool_executions),
+                "iterations": iterations
+            }
+        )
+
+        return {
+            "response": response_text,
+            "session_id": session_id,
+            "is_new_session": is_new_session,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "cost_cents": cost_cents,
+            "memories_used": memories_used,
+            "model": self.model,
+            "tool_executions": tool_executions,
+            "iterations": iterations
+        }
+
     def get_history(
         self,
         session_id: str,
@@ -687,7 +869,127 @@ class BrainService:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse API response: {e}")
             raise APIError(f"Invalid API response: {e}")
-    
+
+    def _call_api_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]] = None
+    ) -> Tuple[str, List[Dict[str, Any]]]:
+        """
+        Call the OpenRouter API with optional tool/function calling support.
+
+        Args:
+            messages: List of message dicts with role and content.
+            tools: Optional list of tool definitions for function calling.
+
+        Returns:
+            Tuple of (response_content, tool_calls) where tool_calls may be empty.
+
+        Raises:
+            APIError: If API call fails.
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://juggernaut-autonomy.railway.app",
+            "X-Title": "Juggernaut Brain"
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.max_tokens
+        }
+
+        # Add tools if provided
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            OPENROUTER_ENDPOINT,
+            data=data,
+            headers=headers,
+            method="POST"
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=120) as response:
+                result = json.loads(response.read().decode("utf-8"))
+
+                choices = result.get("choices", [])
+                if not choices:
+                    raise APIError("No choices in API response")
+
+                message = choices[0].get("message", {})
+                content = message.get("content", "") or ""
+                tool_calls = message.get("tool_calls", [])
+
+                return content, tool_calls
+
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8")
+            logger.error(f"OpenRouter API error: HTTP {e.code} - {error_body}")
+            raise APIError(f"API error {e.code}: {error_body}")
+        except urllib.error.URLError as e:
+            logger.error(f"OpenRouter API connection error: {e}")
+            raise APIError(f"Connection error: {e}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse API response: {e}")
+            raise APIError(f"Invalid API response: {e}")
+
+    def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Execute a tool via the MCP server HTTP endpoint.
+
+        Args:
+            tool_name: Name of the tool to execute (e.g., "sql_query").
+            arguments: Tool-specific arguments.
+
+        Returns:
+            Tool execution result as a dict.
+
+        Raises:
+            APIError: If tool execution fails.
+        """
+        if not MCP_AUTH_TOKEN:
+            raise APIError("MCP_AUTH_TOKEN not configured for tool execution")
+
+        url = f"{MCP_SERVER_URL}/tools/execute?token={MCP_AUTH_TOKEN}"
+        headers = {
+            "Content-Type": "application/json"
+        }
+
+        payload = {
+            "tool": tool_name,
+            "arguments": arguments
+        }
+
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+
+        try:
+            with urllib.request.urlopen(req, timeout=60) as response:
+                result_text = response.read().decode("utf-8")
+                logger.info(f"Tool {tool_name} executed successfully")
+                try:
+                    return json.loads(result_text)
+                except json.JSONDecodeError:
+                    # Tool returned non-JSON text
+                    return {"result": result_text}
+
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8")
+            logger.error(f"Tool execution error: HTTP {e.code} - {error_body}")
+            return {"error": f"Tool error {e.code}: {error_body}"}
+        except urllib.error.URLError as e:
+            logger.error(f"Tool execution connection error: {e}")
+            return {"error": f"Connection error: {e}"}
+        except Exception as e:
+            logger.error(f"Tool execution failed: {e}")
+            return {"error": str(e)}
+
     def _load_history(self, session_id: str) -> List[Dict[str, str]]:
         """
         Load conversation history from chat_messages table for API context.
