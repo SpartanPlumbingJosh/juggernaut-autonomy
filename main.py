@@ -1231,7 +1231,7 @@ def _ensure_proactive_min_schema(execute_sql, log_action) -> None:
 def _ensure_pr_monitor_scheduled_task() -> None:
     name = "pr_merge_monitor"
     task_type = "pr_merge_monitor"
-    cron_expression = "every_5_minutes"
+    cron_expression = "*/5 * * * *"
 
     name_esc = name.replace("'", "''")
     task_type_esc = task_type.replace("'", "''")

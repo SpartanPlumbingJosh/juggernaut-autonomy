@@ -12,6 +12,10 @@ from watchdog.monitors.vercel_monitor import VercelMonitor
 
 WORKER_ID = os.getenv("WORKER_ID", "WATCHDOG")
 POLL_INTERVAL_SECONDS = int(os.getenv("WATCHDOG_POLL_INTERVAL", "60"))
+ENABLE_EXTERNAL_POLLING = (
+    os.getenv("WATCHDOG_ENABLE_EXTERNAL_POLLING", "0").strip().lower() in ("1", "true", "yes", "y", "on")
+    and os.getenv("WATCHDOG_ALLOW_EXTERNAL_POLLING", "0").strip().lower() in ("1", "true", "yes", "y", "on")
+)
 
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -121,22 +125,27 @@ def main() -> None:
     start_health_server(port)
     print("WATCHDOG health server started", flush=True)
 
-    railway = RailwayMonitor()
-    vercel = VercelMonitor()
-
-    print("WATCHDOG monitors initialized", flush=True)
+    railway = None
+    vercel = None
+    if ENABLE_EXTERNAL_POLLING:
+        railway = RailwayMonitor()
+        vercel = VercelMonitor()
+        print("WATCHDOG monitors initialized", flush=True)
+    else:
+        print("WATCHDOG external polling disabled", flush=True)
 
     while True:
         issues = []
-        try:
-            issues.extend(railway.poll())
-        except Exception as e:
-            print(f"WATCHDOG railway poll error: {e}", flush=True)
+        if ENABLE_EXTERNAL_POLLING:
+            try:
+                issues.extend(railway.poll())
+            except Exception as e:
+                print(f"WATCHDOG railway poll error: {e}", flush=True)
 
-        try:
-            issues.extend(vercel.poll())
-        except Exception as e:
-            print(f"WATCHDOG vercel poll error: {e}", flush=True)
+            try:
+                issues.extend(vercel.poll())
+            except Exception as e:
+                print(f"WATCHDOG vercel poll error: {e}", flush=True)
 
         for issue in issues:
             _issue_to_task(issue)

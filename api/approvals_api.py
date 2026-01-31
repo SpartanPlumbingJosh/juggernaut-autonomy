@@ -12,12 +12,14 @@ from api.dashboard import query_db, validate_uuid
 _INTERNAL_API_SECRET = os.getenv("INTERNAL_API_SECRET")
 
 
-def _require_internal_auth(authorization: Optional[str]) -> None:
+def _require_internal_auth(authorization: Optional[str], internal_secret: Optional[str]) -> None:
     if not _INTERNAL_API_SECRET:
         raise HTTPException(status_code=500, detail="INTERNAL_API_SECRET not configured")
 
     token = ""
-    if authorization:
+    if internal_secret:
+        token = str(internal_secret).strip()
+    elif authorization:
         token = authorization.replace("Bearer ", "")
 
     if not token or not hmac.compare_digest(token, _INTERNAL_API_SECRET):
@@ -45,9 +47,10 @@ router = APIRouter(prefix="/api/approvals")
 @router.get("")
 def approvals_list(
     authorization: Optional[str] = Header(default=None),
+    x_internal_api_secret: Optional[str] = Header(default=None, alias="X-Internal-Api-Secret"),
     limit: int = Query(50, ge=1, le=200),
 ) -> Dict[str, Any]:
-    _require_internal_auth(authorization)
+    _require_internal_auth(authorization, x_internal_api_secret)
 
     safe_limit = max(1, min(int(limit), 200))
 
@@ -105,9 +108,10 @@ def approvals_list(
 def approvals_approve(
     task_id: str,
     authorization: Optional[str] = Header(default=None),
+    x_internal_api_secret: Optional[str] = Header(default=None, alias="X-Internal-Api-Secret"),
     body: Dict[str, Any] = Body(default=None),
 ) -> Dict[str, Any]:
-    _require_internal_auth(authorization)
+    _require_internal_auth(authorization, x_internal_api_secret)
     body = body or {}
 
     if not validate_uuid(task_id):
@@ -235,9 +239,10 @@ def approvals_approve(
 def approvals_reject(
     task_id: str,
     authorization: Optional[str] = Header(default=None),
+    x_internal_api_secret: Optional[str] = Header(default=None, alias="X-Internal-Api-Secret"),
     body: Dict[str, Any] = Body(default=None),
 ) -> Dict[str, Any]:
-    _require_internal_auth(authorization)
+    _require_internal_auth(authorization, x_internal_api_secret)
     body = body or {}
 
     if not validate_uuid(task_id):
