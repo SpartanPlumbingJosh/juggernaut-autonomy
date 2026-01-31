@@ -1139,7 +1139,66 @@ async def app(scope, receive, send):
         tool_count = len(await list_tools())
         await send_response(send, 200, json.dumps({"name": "juggernaut-mcp", "version": "10.0", "tools": tool_count}).encode())
         return
-    
+
+    # HTTP Tool Execution Endpoint - POST /tools/execute
+    # Allows BrainService to execute MCP tools directly via HTTP
+    if path == "/tools/execute" and method == "POST":
+        if not check_auth(scope):
+            await send_response(send, 401, b'{"error":"Unauthorized"}')
+            return
+
+        # Read request body
+        body = b""
+        while True:
+            message = await receive()
+            body += message.get("body", b"")
+            if not message.get("more_body"):
+                break
+
+        try:
+            data = json.loads(body.decode())
+            tool_name = data.get("tool")
+            arguments = data.get("arguments", {})
+
+            if not tool_name:
+                await send_response(send, 400, b'{"error":"Missing tool name"}')
+                return
+
+            logger.info(f"HTTP tool execution: {tool_name}")
+            result = await call_tool(tool_name, arguments)
+            response_text = result[0].text if result else '{"error":"No result"}'
+            await send_response(send, 200, response_text.encode())
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON in tool request: {e}")
+            await send_response(send, 400, json.dumps({"error": f"Invalid JSON: {e}"}).encode())
+        except Exception as e:
+            logger.exception(f"Tool execution error: {e}")
+            await send_response(send, 500, json.dumps({"error": str(e)}).encode())
+        return
+
+    # HTTP Tool List Endpoint - GET /tools/list
+    # Returns available tools with schemas for function calling
+    if path == "/tools/list" and method == "GET":
+        if not check_auth(scope):
+            await send_response(send, 401, b'{"error":"Unauthorized"}')
+            return
+
+        try:
+            tools = await list_tools()
+            tool_list = [
+                {
+                    "name": t.name,
+                    "description": t.description,
+                    "inputSchema": t.inputSchema
+                }
+                for t in tools
+            ]
+            await send_response(send, 200, json.dumps({"tools": tool_list}).encode())
+        except Exception as e:
+            logger.exception(f"Error listing tools: {e}")
+            await send_response(send, 500, json.dumps({"error": str(e)}).encode())
+        return
+
     await send_response(send, 404, b'{"error":"Not found"}')
 
 if __name__ == "__main__":
