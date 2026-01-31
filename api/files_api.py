@@ -33,6 +33,7 @@ Authentication:
 from __future__ import annotations
 
 import base64
+import binascii
 import io
 import json
 import logging
@@ -55,6 +56,9 @@ CORS_HEADERS = {
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 MAX_EXTRACTED_CHARS = 250_000
+
+# Approx max base64 length of MAX_UPLOAD_BYTES (including padding)
+MAX_BASE64_LEN = ((MAX_UPLOAD_BYTES + 2) // 3) * 4
 
 ALLOWED_EXTENSIONS = {"txt", "md", "csv", "json", "pdf"}
 
@@ -134,11 +138,22 @@ def _store_temp_file(file_id: str, filename: str, raw: bytes) -> Optional[str]:
 
 def _extract_text_from_pdf(raw: bytes) -> str:
     from pypdf import PdfReader
+    from pypdf.errors import FileNotDecryptedError
 
-    reader = PdfReader(io.BytesIO(raw))
+    reader = PdfReader(io.BytesIO(raw), strict=False)
+
+    if getattr(reader, "is_encrypted", False):
+        try:
+            reader.decrypt("")
+        except Exception:
+            return ""
+
     parts = []
     for page in reader.pages:
-        txt = page.extract_text() or ""
+        try:
+            txt = page.extract_text() or ""
+        except FileNotDecryptedError:
+            return ""
         if txt:
             parts.append(txt)
     return "\n\n".join(parts).strip()
@@ -179,9 +194,12 @@ def upload_file(body: Dict[str, Any], params: Dict[str, Any], headers: Dict[str,
     if ext not in ALLOWED_EXTENSIONS:
         return _error_response(415, f"Unsupported file type: {ext or 'unknown'}")
 
+    if len(content_base64) > MAX_BASE64_LEN:
+        return _error_response(413, f"File too large (max {MAX_UPLOAD_BYTES} bytes)")
+
     try:
-        raw = base64.b64decode(content_base64, validate=False)
-    except Exception:
+        raw = base64.b64decode(content_base64, validate=True)
+    except (binascii.Error, ValueError):
         return _error_response(400, "Invalid base64 payload")
 
     if len(raw) > MAX_UPLOAD_BYTES:

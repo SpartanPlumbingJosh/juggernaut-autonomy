@@ -5381,6 +5381,21 @@ class HealthHandler(BaseHTTPRequestHandler):
         path = self.path.split('?')[0]
         
         content_length = int(self.headers.get('Content-Length', 0))
+
+        # Early size guard for file uploads (base64 + JSON overhead)
+        if path.startswith("/api/files/"):
+            max_b64_len = ((10 * 1024 * 1024 + 2) // 3) * 4
+            if content_length > (max_b64_len + 4096):
+                self.send_response(413)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": "File too large"
+                }).encode())
+                return
+
         body = {}
         if content_length > 0:
             body_bytes = self.rfile.read(content_length)
