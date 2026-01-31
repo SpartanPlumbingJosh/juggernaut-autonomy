@@ -3,6 +3,8 @@ JUGGERNAUT Brain Module
 
 Provides intelligent consultation capabilities using OpenRouter API with
 conversation history persistence and memory recall.
+
+Uses the chat_sessions and chat_messages tables for persistence (PR #259).
 """
 
 import json
@@ -25,6 +27,7 @@ OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 MAX_CONVERSATION_HISTORY = 20
 MAX_MEMORIES_TO_RECALL = 10
 DEFAULT_MAX_TOKENS = 4096
+DEFAULT_SESSION_TITLE = "New Chat"
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
@@ -370,14 +373,16 @@ class BrainService:
     ) -> Dict[str, Any]:
         """
         Consult the brain with a question.
-        
+
+        Uses chat_sessions and chat_messages tables for persistence.
+
         Args:
             question: The question or prompt to send.
-            session_id: Session ID for conversation continuity. Auto-generated if None.
+            session_id: Session ID (UUID) for conversation continuity. Creates new session if None.
             context: Additional context to include.
             include_memories: Whether to recall relevant memories.
             system_prompt: Custom system prompt. Uses JUGGERNAUT prompt if None.
-            
+
         Returns:
             Dict containing:
                 - response: The AI response text
@@ -390,11 +395,14 @@ class BrainService:
         """
         if not self.api_key:
             raise APIError("OPENROUTER_API_KEY not configured")
-        
-        # Generate or validate session ID
-        if session_id is None:
-            session_id = f"brain-{uuid4().hex[:12]}"
-        
+
+        # Ensure session exists in chat_sessions table
+        session_id, is_new_session = self._ensure_session(session_id)
+
+        # Load conversation history
+        history = self._load_history(session_id)
+        is_first_exchange = len(history) == 0
+
         # Recall relevant memories
         memories_used: List[Dict[str, Any]] = []
         memory_context = ""
@@ -402,38 +410,39 @@ class BrainService:
             memories_used = self._recall_memories(question)
             if memories_used:
                 memory_context = self._format_memories(memories_used)
-        
-        # Load conversation history
-        history = self._load_history(session_id)
-        
+
         # Build system prompt
         if system_prompt is None:
             system_prompt = self._build_system_prompt(context, memory_context)
         elif memory_context:
             system_prompt = f"{system_prompt}\n\n{memory_context}"
-        
+
         # Build messages
         messages = [{"role": "system", "content": system_prompt}]
         messages.extend(history)
         messages.append({"role": "user", "content": question})
-        
+
         # Estimate input tokens
         input_text = system_prompt + question + "".join(
             m.get("content", "") for m in history
         )
         input_tokens = estimate_tokens(input_text)
-        
+
         # Call API
         response_text = self._call_api(messages)
         output_tokens = estimate_tokens(response_text)
-        
+
         # Calculate cost
         cost_cents = calculate_cost(self.model, input_tokens, output_tokens)
-        
-        # Store conversation
-        self._store_message(session_id, "user", question, estimate_tokens(question))
-        self._store_message(session_id, "assistant", response_text, output_tokens)
-        
+
+        # Store conversation in chat_messages
+        self._store_message(session_id, "user", question)
+        self._store_message(session_id, "assistant", response_text)
+
+        # Auto-generate title after first exchange if session has default title
+        if is_first_exchange:
+            self._maybe_generate_title(session_id, question, response_text)
+
         logger.info(
             "Brain consultation complete",
             extra={
@@ -444,7 +453,7 @@ class BrainService:
                 "memories_count": len(memories_used)
             }
         )
-        
+
         return {
             "response": response_text,
             "session_id": session_id,
@@ -461,21 +470,21 @@ class BrainService:
         limit: int = MAX_CONVERSATION_HISTORY
     ) -> List[Dict[str, Any]]:
         """
-        Get conversation history for a session.
-        
+        Get conversation history from chat_messages table.
+
         Args:
             session_id: Session ID to retrieve history for.
             limit: Maximum messages to return.
-            
+
         Returns:
-            List of message dicts with role, content, created_at.
+            List of message dicts with id, role, content, created_at.
         """
         try:
             result = query_db(
                 f"""
-                SELECT role, content, token_count, created_at, metadata
-                FROM brain_conversations
-                WHERE session_id = {escape_sql_value(session_id)}
+                SELECT id, role, content, created_at
+                FROM chat_messages
+                WHERE session_id = {escape_sql_value(session_id)}::uuid
                 ORDER BY created_at DESC
                 LIMIT {limit}
                 """
@@ -484,31 +493,31 @@ class BrainService:
             # Reverse to get chronological order
             return list(reversed(rows))
         except Exception as e:
-            logger.error(f"Failed to get history: {e}")
+            logger.error(f"Failed to get history from chat_messages: {e}")
             raise DatabaseError(f"Failed to retrieve history: {e}")
     
     def clear_history(self, session_id: str) -> Dict[str, Any]:
         """
-        Clear conversation history for a session.
-        
+        Clear conversation history from chat_messages table for a session.
+
         Args:
             session_id: Session ID to clear.
-            
+
         Returns:
             Dict with deleted count.
         """
         try:
             result = query_db(
                 f"""
-                DELETE FROM brain_conversations
-                WHERE session_id = {escape_sql_value(session_id)}
+                DELETE FROM chat_messages
+                WHERE session_id = {escape_sql_value(session_id)}::uuid
                 """
             )
             deleted = result.get("rowCount", 0)
             logger.info(f"Cleared {deleted} messages for session {session_id}")
             return {"session_id": session_id, "deleted": deleted}
         except Exception as e:
-            logger.error(f"Failed to clear history: {e}")
+            logger.error(f"Failed to clear history from chat_messages: {e}")
             raise DatabaseError(f"Failed to clear history: {e}")
     
     def _call_api(self, messages: List[Dict[str, str]]) -> str:
@@ -568,11 +577,11 @@ class BrainService:
     
     def _load_history(self, session_id: str) -> List[Dict[str, str]]:
         """
-        Load conversation history for API context.
-        
+        Load conversation history from chat_messages table for API context.
+
         Args:
             session_id: Session to load history for.
-            
+
         Returns:
             List of message dicts formatted for API.
         """
@@ -580,7 +589,7 @@ class BrainService:
             result = query_db(
                 f"""
                 SELECT role, content
-                FROM brain_conversations
+                FROM chat_messages
                 WHERE session_id = {escape_sql_value(session_id)}
                 ORDER BY created_at DESC
                 LIMIT {MAX_CONVERSATION_HISTORY}
@@ -593,48 +602,149 @@ class BrainService:
                 for r in reversed(rows)
             ]
         except Exception as e:
-            logger.warning(f"Failed to load history: {e}")
+            logger.warning(f"Failed to load history from chat_messages: {e}")
             return []
-    
+
+    def _ensure_session(self, session_id: Optional[str]) -> Tuple[str, bool]:
+        """
+        Ensure a chat session exists, creating one if needed.
+
+        Args:
+            session_id: Existing session ID or None to create new.
+
+        Returns:
+            Tuple of (session_id, is_new_session).
+        """
+        if session_id:
+            # Check if session exists
+            try:
+                result = query_db(
+                    f"""
+                    SELECT id FROM chat_sessions
+                    WHERE id = {escape_sql_value(session_id)}::uuid
+                    """
+                )
+                if result.get("rows"):
+                    return session_id, False
+            except Exception as e:
+                logger.warning(f"Failed to check session existence: {e}")
+
+        # Create new session
+        new_id = str(uuid4())
+        try:
+            query_db(
+                f"""
+                INSERT INTO chat_sessions (id, user_id, title)
+                VALUES (
+                    {escape_sql_value(new_id)}::uuid,
+                    'operator',
+                    {escape_sql_value(DEFAULT_SESSION_TITLE)}
+                )
+                """
+            )
+            logger.info(f"Created new chat session: {new_id}")
+            return new_id, True
+        except Exception as e:
+            logger.error(f"Failed to create session: {e}")
+            # Return the ID anyway - messages might still work
+            return new_id, True
+
+    def _maybe_generate_title(
+        self,
+        session_id: str,
+        user_message: str,
+        assistant_response: str
+    ) -> None:
+        """
+        Generate a title for the session if it still has the default title.
+
+        Uses OpenRouter to generate a short descriptive title from the first exchange.
+
+        Args:
+            session_id: Session ID to update.
+            user_message: First user message.
+            assistant_response: First assistant response.
+        """
+        try:
+            # Check if session still has default title
+            result = query_db(
+                f"""
+                SELECT title FROM chat_sessions
+                WHERE id = {escape_sql_value(session_id)}::uuid
+                """
+            )
+            if not result.get("rows"):
+                return
+
+            current_title = result["rows"][0].get("title", "")
+            if current_title != DEFAULT_SESSION_TITLE:
+                return  # Already has a custom title
+
+            # Generate title using OpenRouter
+            title_prompt = (
+                "Generate a very short title (3-6 words max) for this conversation. "
+                "Return ONLY the title, no quotes or punctuation.\n\n"
+                f"User: {user_message[:200]}\n"
+                f"Assistant: {assistant_response[:200]}"
+            )
+
+            messages = [{"role": "user", "content": title_prompt}]
+            generated_title = self._call_api(messages)
+
+            # Clean up the title
+            generated_title = generated_title.strip().strip('"\'')[:50]
+
+            if generated_title:
+                query_db(
+                    f"""
+                    UPDATE chat_sessions
+                    SET title = {escape_sql_value(generated_title)}
+                    WHERE id = {escape_sql_value(session_id)}::uuid
+                    """
+                )
+                logger.info(f"Generated title for session {session_id}: {generated_title}")
+
+        except Exception as e:
+            logger.warning(f"Failed to generate session title: {e}")
+            # Non-critical, don't raise
+
     def _store_message(
         self,
         session_id: str,
         role: str,
-        content: str,
-        token_count: int,
-        metadata: Optional[Dict] = None
+        content: str
     ) -> None:
         """
-        Store a message in conversation history.
-        
+        Store a message in chat_messages table and update session timestamp.
+
         Args:
-            session_id: Session ID.
-            role: Message role (user/assistant).
+            session_id: Session ID (UUID).
+            role: Message role (user/assistant/system).
             content: Message content.
-            token_count: Token count.
-            metadata: Optional metadata.
         """
         try:
-            msg_id = str(uuid4())
-            meta_json = json.dumps(metadata or {})
-            
+            # Insert message into chat_messages
             query_db(
                 f"""
-                INSERT INTO brain_conversations
-                (id, session_id, role, content, token_count, created_at, metadata)
+                INSERT INTO chat_messages (session_id, role, content)
                 VALUES (
-                    {escape_sql_value(msg_id)},
-                    {escape_sql_value(session_id)},
+                    {escape_sql_value(session_id)}::uuid,
                     {escape_sql_value(role)},
-                    {escape_sql_value(content)},
-                    {token_count},
-                    NOW(),
-                    {escape_sql_value(meta_json)}::jsonb
+                    {escape_sql_value(content)}
                 )
                 """
             )
+
+            # Update session's updated_at timestamp
+            query_db(
+                f"""
+                UPDATE chat_sessions
+                SET updated_at = NOW()
+                WHERE id = {escape_sql_value(session_id)}::uuid
+                """
+            )
         except Exception as e:
-            logger.error(f"Failed to store message: {e}")
+            logger.error(f"Failed to store message in chat_messages: {e}")
             # Don't raise - conversation can continue without persistence
     
     def _recall_memories(self, query: str) -> List[Dict[str, Any]]:
