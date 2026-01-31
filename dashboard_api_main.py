@@ -83,13 +83,32 @@ def _require_dashboard_auth(authorization: Optional[str]) -> str:
     return user_id
 
 
+def _require_chat_auth(authorization: Optional[str]) -> str:
+    token = (authorization or "").replace("Bearer ", "").strip()
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing API key")
+
+    internal_secret = (os.getenv("INTERNAL_API_SECRET") or "").strip()
+    if internal_secret and token == internal_secret:
+        return "internal"
+
+    user_id = validate_api_key(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid API key")
+
+    if not check_rate_limit(user_id):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+
+    return user_id
+
+
 @app.post("/api/chat")
 @app.post("/api/chat/completions")
 async def chat(
     authorization: Optional[str] = Header(default=None),
     body: Dict[str, Any] = Body(default=None),
 ):
-    _require_dashboard_auth(authorization)
+    _require_chat_auth(authorization)
     payload = body or {}
 
     system_prompt = (
