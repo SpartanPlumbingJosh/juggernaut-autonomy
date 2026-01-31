@@ -1043,10 +1043,12 @@ async def handle_webhook(scope, receive, send):
         body += message.get("body", b"")
         if not message.get("more_body"):
             break
+
+    decoded = body.decode("utf-8", "replace")
     try:
-        data = json.loads(body.decode())
+        data = json.loads(decoded)
     except Exception:
-        data = {"raw": body.decode()}
+        data = {"raw": decoded}
     path = scope.get("path", "")
     source = path.split("/")[-1] if path.count("/") > 2 else "unknown"
     event = {"id": str(uuid.uuid4()), "source": source, "timestamp": time.time(), "data": data}
