@@ -249,6 +249,28 @@ except ImportError as e:
     def handle_brain_request(*args, **kwargs): 
         return {"status": 503, "body": {"success": False, "error": "brain api not available"}}
 
+# Chat Sessions API for spartan-hq frontend
+CHAT_API_AVAILABLE = False
+_chat_api_import_error = None
+
+try:
+    from api.chat_sessions import handle_chat_request
+    CHAT_API_AVAILABLE = True
+except ImportError as e:
+    _chat_api_import_error = str(e)
+    def handle_chat_request(*args, **kwargs):
+        return {"statusCode": 503, "headers": {}, "body": {"success": False, "error": "chat api not available"}}
+
+# Activity Stream SSE API
+ACTIVITY_STREAM_AVAILABLE = False
+_activity_stream_import_error = None
+
+try:
+    from api.activity_stream import ActivityStreamHandler, handle_activity_request
+    ACTIVITY_STREAM_AVAILABLE = True
+except ImportError as e:
+    _activity_stream_import_error = str(e)
+
 # Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
 ORCHESTRATION_AVAILABLE = False
 _orchestration_import_error = None
@@ -5134,7 +5156,7 @@ class HealthHandler(BaseHTTPRequestHandler):
     def send_cors_headers(self):
         """Add CORS headers to allow dashboard access."""
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
     
     def do_OPTIONS(self):
@@ -5209,7 +5231,11 @@ class HealthHandler(BaseHTTPRequestHandler):
                     "/api/dashboard/tasks",
                     "/api/brain/consult",
                     "/api/brain/history",
-                    "/api/brain/clear"
+                    "/api/brain/clear",
+                    "/api/chat/sessions",
+                    "/api/chat/sessions/{id}",
+                    "/api/chat/sessions/{id}/messages",
+                    "/api/activity/stream"
                 ]
             }).encode())
         
@@ -5260,13 +5286,76 @@ class HealthHandler(BaseHTTPRequestHandler):
         elif path.startswith("/api/brain/"):
             endpoint = path.replace("/api/brain/", "")
             result = handle_brain_request("GET", endpoint, params)
-            
+
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
-        
+
+        # Chat Sessions API endpoints (GET)
+        elif path.startswith("/api/chat/"):
+            if not CHAT_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Chat API not available: {_chat_api_import_error}"
+                }).encode())
+                return
+
+            endpoint = path.replace("/api/chat/", "")
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_chat_request("GET", endpoint, params, {}, headers_dict)
+
+            self.send_response(result.get("statusCode", 200))
+            for key, value in result.get("headers", {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
+
+        # Activity Stream SSE endpoint (GET)
+        elif path == "/api/activity/stream":
+            if not ACTIVITY_STREAM_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Activity Stream API not available: {_activity_stream_import_error}"
+                }).encode())
+                return
+
+            # Validate auth
+            is_valid, error = ActivityStreamHandler.validate_request(params)
+            if not is_valid:
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({"success": False, "error": error}).encode())
+                return
+
+            # Send SSE headers
+            self.send_response(200)
+            for key, value in ActivityStreamHandler.get_sse_headers().items():
+                self.send_header(key, value)
+            self.end_headers()
+
+            # Stream events
+            try:
+                stream = ActivityStreamHandler.create_stream(params)
+                for event in stream:
+                    self.wfile.write(event.encode())
+                    self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Client disconnected
+            except Exception as e:
+                pass  # Log error silently, client likely disconnected
+
         else:
             self.send_response(404)
             self.send_header("Content-Type", "application/json")
@@ -5333,13 +5422,46 @@ class HealthHandler(BaseHTTPRequestHandler):
                         params[key] = urllib.parse.unquote(value)
             
             result = handle_brain_request("POST", endpoint, params, body)
-            
+
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
-        
+
+        # Chat Sessions API endpoints (POST)
+        elif path.startswith("/api/chat/"):
+            if not CHAT_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Chat API not available: {_chat_api_import_error}"
+                }).encode())
+                return
+
+            # Parse query params
+            query_string = self.path.split('?')[1] if '?' in self.path else ''
+            params = {}
+            if query_string:
+                import urllib.parse
+                for param in query_string.split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        params[key] = urllib.parse.unquote(value)
+
+            endpoint = path.replace("/api/chat/", "")
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_chat_request("POST", endpoint, params, body, headers_dict)
+
+            self.send_response(result.get("statusCode", 200))
+            for key, value in result.get("headers", {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
+
         else:
             self.send_response(404)
             self.send_header("Content-Type", "application/json")
@@ -5366,13 +5488,90 @@ class HealthHandler(BaseHTTPRequestHandler):
         if path.startswith("/api/brain/"):
             endpoint = path.replace("/api/brain/", "")
             result = handle_brain_request("DELETE", endpoint, params)
-            
+
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_cors_headers()
             self.end_headers()
             self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
-        
+
+        # Chat Sessions API DELETE endpoints
+        elif path.startswith("/api/chat/"):
+            if not CHAT_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Chat API not available: {_chat_api_import_error}"
+                }).encode())
+                return
+
+            endpoint = path.replace("/api/chat/", "")
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_chat_request("DELETE", endpoint, params, {}, headers_dict)
+
+            self.send_response(result.get("statusCode", 200))
+            for key, value in result.get("headers", {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
+
+        else:
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Not found"}).encode())
+
+    def do_PATCH(self):
+        """Handle PATCH requests."""
+        path = self.path.split('?')[0]
+
+        # Parse body
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = {}
+        if content_length > 0:
+            body_bytes = self.rfile.read(content_length)
+            try:
+                body = json.loads(body_bytes.decode('utf-8'))
+            except json.JSONDecodeError:
+                pass
+
+        # Parse query params
+        query_string = self.path.split('?')[1] if '?' in self.path else ''
+        params = {}
+        if query_string:
+            import urllib.parse
+            for param in query_string.split('&'):
+                if '=' in param:
+                    key, value = param.split('=', 1)
+                    params[key] = urllib.parse.unquote(value)
+
+        # Chat Sessions API PATCH endpoints
+        if path.startswith("/api/chat/"):
+            if not CHAT_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Chat API not available: {_chat_api_import_error}"
+                }).encode())
+                return
+
+            endpoint = path.replace("/api/chat/", "")
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_chat_request("PATCH", endpoint, params, body, headers_dict)
+
+            self.send_response(result.get("statusCode", 200))
+            for key, value in result.get("headers", {}).items():
+                self.send_header(key, value)
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
+
         else:
             self.send_response(404)
             self.send_header("Content-Type", "application/json")
