@@ -106,12 +106,24 @@ jobs:
           
           echo "Merging PR #$PR_NUMBER..."
           set +e
-          gh pr merge "$PR_NUMBER" --squash --auto --delete-branch --yes
+          OUT=$(gh pr merge "$PR_NUMBER" --squash --auto --delete-branch 2>&1)
           rc=$?
           set -e
+
+          auto_queued=false
+          echo "$OUT"
+          if echo "$OUT" | grep -Ei "queued|scheduled|will be merged" >/dev/null 2>&1; then
+            auto_queued=true
+          fi
+
           if [ $rc -ne 0 ]; then
             echo "::notice::Auto-merge not available; performing squash merge"
-            gh pr merge "$PR_NUMBER" --squash --delete-branch --yes
+            gh pr merge "$PR_NUMBER" --squash --delete-branch
+            echo "::notice::Successfully merged PR #$PR_NUMBER"
+          else
+            if [ "$auto_queued" = "true" ]; then
+              echo "::notice::Auto-merge queued for PR #$PR_NUMBER"
+            else
+              echo "::notice::Successfully merged PR #$PR_NUMBER"
+            fi
           fi
-          
-          echo "::notice::Successfully merged PR #$PR_NUMBER"
