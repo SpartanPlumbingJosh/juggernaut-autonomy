@@ -271,6 +271,18 @@ try:
 except ImportError as e:
     _activity_stream_import_error = str(e)
 
+# Files Upload API (attachments)
+FILES_API_AVAILABLE = False
+_files_api_import_error = None
+
+try:
+    from api.files_api import handle_files_request
+    FILES_API_AVAILABLE = True
+except ImportError as e:
+    _files_api_import_error = str(e)
+    def handle_files_request(*args, **kwargs):
+        return {"statusCode": 503, "headers": {}, "body": {"success": False, "error": "files api not available"}}
+
 # Phase 6: ORCHESTRATOR Task Delegation (L5-01b)
 ORCHESTRATION_AVAILABLE = False
 _orchestration_import_error = None
@@ -5235,6 +5247,7 @@ class HealthHandler(BaseHTTPRequestHandler):
                     "/api/chat/sessions",
                     "/api/chat/sessions/{id}",
                     "/api/chat/sessions/{id}/messages",
+                    "/api/files/upload",
                     "/api/activity/stream"
                 ]
             }).encode())
@@ -5426,6 +5439,39 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_cors_headers()
+            self.end_headers()
+            self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
+
+        # Files API endpoints (POST)
+        elif path.startswith("/api/files/"):
+            if not FILES_API_AVAILABLE:
+                self.send_response(503)
+                self.send_header("Content-Type", "application/json")
+                self.send_cors_headers()
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    "success": False,
+                    "error": f"Files API not available: {_files_api_import_error}"
+                }).encode())
+                return
+
+            # Parse query params
+            query_string = self.path.split('?')[1] if '?' in self.path else ''
+            params = {}
+            if query_string:
+                import urllib.parse
+                for param in query_string.split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        params[key] = urllib.parse.unquote(value)
+
+            endpoint = path.replace("/api/files/", "")
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_files_request("POST", endpoint, params, body, headers_dict)
+
+            self.send_response(result.get("statusCode", 200))
+            for key, value in result.get("headers", {}).items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(json.dumps(result.get("body", {}), default=str).encode())
 
