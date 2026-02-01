@@ -898,19 +898,6 @@ def log_action(
         The UUID of the created log entry, or None if logging failed
     """
     now = datetime.now(timezone.utc).isoformat()
-
-    # Fetch task type/title for verification policy decisions
-    task_type = None
-    task_title = None
-    try:
-        task_row = execute_sql(
-            f"SELECT task_type, title FROM governance_tasks WHERE id = {escape_value(task_id)} LIMIT 1"
-        )
-        if task_row.get("rows"):
-            task_type = task_row["rows"][0].get("task_type")
-            task_title = task_row["rows"][0].get("title")
-    except Exception:
-        pass
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
@@ -2039,6 +2026,16 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
             task_title = task_row["rows"][0].get("title")
     except Exception:
         pass
+
+    task_type_lower = (task_type or "").strip().lower()
+    code_task_types = {
+        "code",
+        "github",
+        "code_fix",
+        "code_change",
+        "code_implementation",
+    }
+    is_code_task = task_type_lower in code_task_types
     
     # Build completion_evidence from result_data
     evidence_text = None
@@ -2147,7 +2144,21 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                 is_valid = structured_ok
                 evidence_type = str(structured_type) if structured_type else "structured"
             else:
-                is_valid, evidence_type = verifier.verify_evidence(evidence_text)
+                is_valid, evidence_type = verifier.verify_evidence(evidence_text, task_type=task_type)
+
+            if is_code_task and evidence_type in ("pr_created", "pr_created_awaiting_merge"):
+                log_action(
+                    "task.completion_deferred",
+                    f"Code task completion deferred until PR merge: task {task_id}",
+                    level="info",
+                    task_id=task_id,
+                    output_data={
+                        "task_type": task_type,
+                        "evidence_type": evidence_type,
+                        "deferred_status": TaskStatus.AWAITING_PR_MERGE.value,
+                    },
+                )
+                status = TaskStatus.AWAITING_PR_MERGE.value
 
             log_action(
                 "verification.attempt",
@@ -2214,13 +2225,15 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                 task_id=task_id
             )
         except Exception as verify_err:
-            # Log verification error but allow completion (graceful degradation)
             log_action(
                 "task.verification_error",
-                f"Verification error for task {task_id}: {verify_err}. Allowing completion.",
+                f"Verification error for task {task_id}: {verify_err}",
                 level="warn",
                 task_id=task_id
             )
+
+            if is_code_task:
+                status = TaskStatus.AWAITING_PR_MERGE.value
     
     # Build the update columns
     cols = [f"status = {escape_value(status)}"]

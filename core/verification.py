@@ -81,7 +81,11 @@ class CompletionVerifier:
         """Initialize the verifier."""
         self.notifier = SlackNotifier()
     
-    def verify_evidence(self, evidence: Optional[str]) -> Tuple[bool, Optional[str]]:
+    def verify_evidence(
+        self,
+        evidence: Optional[str],
+        task_type: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """
         Check if the provided evidence is valid.
         
@@ -95,6 +99,16 @@ class CompletionVerifier:
             return (False, None)
         
         evidence_lower = evidence.lower()
+
+        task_type_lower = (task_type or "").strip().lower()
+        code_task_types = {
+            "code",
+            "github",
+            "code_fix",
+            "code_change",
+            "code_implementation",
+        }
+        is_code_task = task_type_lower in code_task_types
         
         # PR evidence should never be assumed "merged" purely from a PR URL.
         # If we have a PR reference and a GitHub token, confirm merged via API.
@@ -113,12 +127,12 @@ class CompletionVerifier:
                     status = tracker.get_pr_status(pr_url)
                     if status and getattr(status, "state", None) and status.state.value == "merged":
                         return (True, "pr_merged")
-                    return (True, "pr_created")
+                    return (True, "pr_created_awaiting_merge" if is_code_task else "pr_created")
             except Exception:
                 # If we can't confirm, treat as created (not merged).
-                return (True, "pr_created")
+                return (True, "pr_created_awaiting_merge" if is_code_task else "pr_created")
 
-            return (True, "pr_created")
+            return (True, "pr_created_awaiting_merge" if is_code_task else "pr_created")
 
         # Check each evidence type (non-PR)
         for evidence_type, patterns in EVIDENCE_PATTERNS.items():
@@ -148,8 +162,9 @@ class CompletionVerifier:
         task_id = task.get("id", "unknown")
         task_title = task.get("title", "Untitled")
         evidence = task.get("completion_evidence")
+        task_type = task.get("task_type")
         
-        is_valid, evidence_type = self.verify_evidence(evidence)
+        is_valid, evidence_type = self.verify_evidence(evidence, task_type=task_type)
         
         return VerificationResult(
             task_id=task_id,
@@ -174,7 +189,7 @@ class CompletionVerifier:
         cutoff_str = cutoff_date.isoformat()
         
         query = f"""
-            SELECT id, title, completion_evidence, completed_at, assigned_worker
+            SELECT id, title, task_type, completion_evidence, completed_at, assigned_worker
             FROM governance_tasks
             WHERE status = 'completed'
               AND (completed_at >= '{cutoff_str}' OR completed_at IS NULL)
