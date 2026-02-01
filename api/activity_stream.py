@@ -149,8 +149,8 @@ def get_task_changes(since: str, limit: int = 50) -> list:
     """
     sql = f"""
         SELECT
-            id, status, stage, title, category, priority,
-            worker_id, assigned_to, updated_at
+            id, status, stage, title, task_type, priority,
+            assigned_worker, created_by, updated_at
         FROM governance_tasks
         WHERE updated_at > {_escape_sql(since)}
         ORDER BY updated_at ASC
