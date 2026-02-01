@@ -69,6 +69,11 @@ def _execute_sql(sql: str) -> Dict[str, Any]:
     try:
         with urllib.request.urlopen(req, timeout=30) as response:
             return json.loads(response.read().decode('utf-8'))
+    except urllib.error.HTTPError as exc:
+        # Extract actual error body from Neon
+        error_body = exc.read().decode('utf-8')
+        logger.error("Database HTTP error: %s - %s", exc.code, error_body)
+        return {"error": f"HTTP {exc.code}: {error_body}", "rows": []}
     except Exception as exc:
         logger.error("Database error: %s", str(exc))
         return {"error": str(exc), "rows": []}
