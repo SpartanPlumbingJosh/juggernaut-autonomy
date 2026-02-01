@@ -33,6 +33,39 @@ def _score_high_better(value: float, good: float, bad: float) -> float:
     return _clamp(100.0 * ((value - bad) / (good - bad)))
 
 
+def _coerce_1_to_10(value: Any, default: float) -> float:
+    if value is None:
+        return float(default)
+
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    if isinstance(value, str):
+        text = value.strip().lower()
+        if not text:
+            return float(default)
+        try:
+            return float(text)
+        except ValueError:
+            pass
+
+        mapping = {
+            "very_low": 1.0,
+            "very low": 1.0,
+            "low": 2.0,
+            "medium": 5.0,
+            "med": 5.0,
+            "high": 8.0,
+            "very_high": 10.0,
+            "very high": 10.0,
+        }
+        mapped = mapping.get(text)
+        if mapped is not None:
+            return float(mapped)
+
+    return float(default)
+
+
 class IdeaScorer:
     """Score ideas on capital/time/effort/scalability/risk/capability fit."""
 
@@ -42,9 +75,9 @@ class IdeaScorer:
         capital = float(estimates.get("capital_required", 50) or 50)
         ttf = float(estimates.get("time_to_first_dollar_days", 30) or 30)
         effort = float(estimates.get("effort_hours", 20) or 20)
-        scalability = float(estimates.get("scalability", 5) or 5)
-        risk = float(estimates.get("risk_level", 5) or 5)
-        fit = float(estimates.get("capability_fit", 5) or 5)
+        scalability = _coerce_1_to_10(estimates.get("scalability", 5) or 5, default=5)
+        risk = _coerce_1_to_10(estimates.get("risk_level", 5) or 5, default=5)
+        fit = _coerce_1_to_10(estimates.get("capability_fit", 5) or 5, default=5)
 
         breakdown: Dict[str, float] = {
             "capital_required": _score_low_better(capital, good=0, bad=200),
