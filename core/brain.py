@@ -910,10 +910,10 @@ class BrainService:
             total_input_tokens += estimate_tokens(input_text)
 
             # Stream API call
-            try:
-                tool_calls_received: List[Dict[str, Any]] = []
-                iteration_content = ""
+            tool_calls_received = []
+            iteration_content = ""
 
+            try:
                 for content_chunk, tool_calls in self._stream_api_call(messages, tools):
                     if content_chunk:
                         yield {"type": "token", "content": content_chunk}
@@ -927,10 +927,22 @@ class BrainService:
 
             except APIError as e:
                 logger.error(f"Streaming API call failed on iteration {iterations}: {e}")
-                if iterations == 1:
-                    yield {"type": "error", "message": str(e)}
-                    return
-                break  # Return what we have
+                try:
+                    response_text, tool_calls = self._call_api_with_tools(messages, tools)
+                except APIError as e2:
+                    logger.error(f"Non-streaming fallback failed on iteration {iterations}: {e2}")
+                    if iterations == 1:
+                        yield {"type": "error", "message": str(e2)}
+                        return
+                    break
+
+                if response_text:
+                    yield {"type": "token", "content": response_text}
+                    iteration_content = response_text
+                    accumulated_response += response_text
+                    total_output_tokens += estimate_tokens(iteration_content)
+
+                tool_calls_received = tool_calls or []
 
             # If no tool calls, we're done
             if not tool_calls_received:
