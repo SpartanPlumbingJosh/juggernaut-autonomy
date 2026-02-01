@@ -2006,11 +2006,27 @@ def reschedule_scheduled_task(sched_task: Dict[str, Any], success: bool) -> None
 
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
     """
-    Update task status with completion verification.
-    
+    Update task status with completion verification and PR deferral logic.
+
     For tasks being marked 'completed', verifies that valid completion evidence
     exists before allowing the status change. If evidence is missing or invalid,
     the task is rejected and remains in its current state.
+
+    For code/github task types, completion is deferred until the associated PR
+    is actually merged. Tasks with PR URL evidence but no merge confirmation
+    are transitioned to AWAITING_PR_MERGE status instead of completed.
+
+    Args:
+        task_id: UUID of the task to update.
+        status: Target status (e.g., 'completed', 'in_progress', 'failed').
+        result_data: Optional dict containing execution results, PR URLs,
+            completion_evidence, or verification data from task handlers.
+
+    Returns:
+        None. Updates the task record in the database.
+
+    Raises:
+        Logs errors but does not raise exceptions to callers.
     """
     now = datetime.now(timezone.utc).isoformat()
 

@@ -87,13 +87,23 @@ class CompletionVerifier:
         task_type: Optional[str] = None,
     ) -> Tuple[bool, Optional[str]]:
         """
-        Check if the provided evidence is valid.
-        
+        Check if the provided evidence is valid and classify by type.
+
+        For code/github task types, distinguishes between PR merged vs
+        PR created awaiting merge. This enables the completion gating
+        logic to defer task completion until PRs are actually merged.
+
         Args:
-            evidence: The completion_evidence text from the task
-            
+            evidence: The completion_evidence text from the task.
+            task_type: Optional task type for specialized classification.
+                Code-related types (code, github, code_fix, code_change,
+                code_implementation) receive stricter PR evidence handling.
+
         Returns:
-            Tuple of (is_valid, evidence_type)
+            Tuple of (is_valid, evidence_type) where evidence_type may be
+            "pr_merged", "pr_created_awaiting_merge", "pr_created",
+            "db_row", "file_exists", "screenshot", "explicit_skip",
+            or "unstructured".
         """
         if not evidence or not evidence.strip():
             return (False, None)
@@ -152,12 +162,13 @@ class CompletionVerifier:
     def verify_task(self, task: Dict[str, Any]) -> VerificationResult:
         """
         Verify a single task's completion evidence.
-        
+
         Args:
-            task: Dictionary with task data (id, title, completion_evidence)
-            
+            task: Dictionary with task data including id, title, task_type,
+                and completion_evidence fields.
+
         Returns:
-            VerificationResult
+            VerificationResult with validation status and evidence classification.
         """
         task_id = task.get("id", "unknown")
         task_title = task.get("title", "Untitled")
@@ -178,12 +189,16 @@ class CompletionVerifier:
     def audit_completed_tasks(self, days_back: int = 7) -> List[VerificationResult]:
         """
         Audit all tasks completed in the last N days.
-        
+
+        Queries governance_tasks for completed tasks and verifies each has
+        valid completion evidence. Uses task_type for specialized validation
+        of code/github tasks.
+
         Args:
-            days_back: Number of days to look back
-            
+            days_back: Number of days to look back (default 7).
+
         Returns:
-            List of VerificationResult for each task
+            List of VerificationResult for each audited task.
         """
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
         cutoff_str = cutoff_date.isoformat()
