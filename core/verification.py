@@ -81,20 +81,44 @@ class CompletionVerifier:
         """Initialize the verifier."""
         self.notifier = SlackNotifier()
     
-    def verify_evidence(self, evidence: Optional[str]) -> Tuple[bool, Optional[str]]:
+    def verify_evidence(
+        self,
+        evidence: Optional[str],
+        task_type: Optional[str] = None,
+    ) -> Tuple[bool, Optional[str]]:
         """
-        Check if the provided evidence is valid.
-        
+        Check if the provided evidence is valid and classify by type.
+
+        For code/github task types, distinguishes between PR merged vs
+        PR created awaiting merge. This enables the completion gating
+        logic to defer task completion until PRs are actually merged.
+
         Args:
-            evidence: The completion_evidence text from the task
-            
+            evidence: The completion_evidence text from the task.
+            task_type: Optional task type for specialized classification.
+                Code-related types (code, github, code_fix, code_change,
+                code_implementation) receive stricter PR evidence handling.
+
         Returns:
-            Tuple of (is_valid, evidence_type)
+            Tuple of (is_valid, evidence_type) where evidence_type may be
+            "pr_merged", "pr_created_awaiting_merge", "pr_created",
+            "db_row", "file_exists", "screenshot", "explicit_skip",
+            or "unstructured".
         """
         if not evidence or not evidence.strip():
             return (False, None)
         
         evidence_lower = evidence.lower()
+
+        task_type_lower = (task_type or "").strip().lower()
+        code_task_types = {
+            "code",
+            "github",
+            "code_fix",
+            "code_change",
+            "code_implementation",
+        }
+        is_code_task = task_type_lower in code_task_types
         
         # PR evidence should never be assumed "merged" purely from a PR URL.
         # If we have a PR reference and a GitHub token, confirm merged via API.
@@ -113,12 +137,12 @@ class CompletionVerifier:
                     status = tracker.get_pr_status(pr_url)
                     if status and getattr(status, "state", None) and status.state.value == "merged":
                         return (True, "pr_merged")
-                    return (True, "pr_created")
+                    return (True, "pr_created_awaiting_merge" if is_code_task else "pr_created")
             except Exception:
                 # If we can't confirm, treat as created (not merged).
-                return (True, "pr_created")
+                return (True, "pr_created_awaiting_merge" if is_code_task else "pr_created")
 
-            return (True, "pr_created")
+            return (True, "pr_created_awaiting_merge" if is_code_task else "pr_created")
 
         # Check each evidence type (non-PR)
         for evidence_type, patterns in EVIDENCE_PATTERNS.items():
@@ -138,18 +162,20 @@ class CompletionVerifier:
     def verify_task(self, task: Dict[str, Any]) -> VerificationResult:
         """
         Verify a single task's completion evidence.
-        
+
         Args:
-            task: Dictionary with task data (id, title, completion_evidence)
-            
+            task: Dictionary with task data including id, title, task_type,
+                and completion_evidence fields.
+
         Returns:
-            VerificationResult
+            VerificationResult with validation status and evidence classification.
         """
         task_id = task.get("id", "unknown")
         task_title = task.get("title", "Untitled")
         evidence = task.get("completion_evidence")
+        task_type = task.get("task_type")
         
-        is_valid, evidence_type = self.verify_evidence(evidence)
+        is_valid, evidence_type = self.verify_evidence(evidence, task_type=task_type)
         
         return VerificationResult(
             task_id=task_id,
@@ -163,18 +189,22 @@ class CompletionVerifier:
     def audit_completed_tasks(self, days_back: int = 7) -> List[VerificationResult]:
         """
         Audit all tasks completed in the last N days.
-        
+
+        Queries governance_tasks for completed tasks and verifies each has
+        valid completion evidence. Uses task_type for specialized validation
+        of code/github tasks.
+
         Args:
-            days_back: Number of days to look back
-            
+            days_back: Number of days to look back (default 7).
+
         Returns:
-            List of VerificationResult for each task
+            List of VerificationResult for each audited task.
         """
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days_back)
         cutoff_str = cutoff_date.isoformat()
         
         query = f"""
-            SELECT id, title, completion_evidence, completed_at, assigned_worker
+            SELECT id, title, task_type, completion_evidence, completed_at, assigned_worker
             FROM governance_tasks
             WHERE status = 'completed'
               AND (completed_at >= '{cutoff_str}' OR completed_at IS NULL)

@@ -898,19 +898,6 @@ def log_action(
         The UUID of the created log entry, or None if logging failed
     """
     now = datetime.now(timezone.utc).isoformat()
-
-    # Fetch task type/title for verification policy decisions
-    task_type = None
-    task_title = None
-    try:
-        task_row = execute_sql(
-            f"SELECT task_type, title FROM governance_tasks WHERE id = {escape_value(task_id)} LIMIT 1"
-        )
-        if task_row.get("rows"):
-            task_type = task_row["rows"][0].get("task_type")
-            task_title = task_row["rows"][0].get("title")
-    except Exception:
-        pass
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
@@ -2019,11 +2006,27 @@ def reschedule_scheduled_task(sched_task: Dict[str, Any], success: bool) -> None
 
 def update_task_status(task_id: str, status: str, result_data: Dict = None):
     """
-    Update task status with completion verification.
-    
+    Update task status with completion verification and PR deferral logic.
+
     For tasks being marked 'completed', verifies that valid completion evidence
     exists before allowing the status change. If evidence is missing or invalid,
     the task is rejected and remains in its current state.
+
+    For code/github task types, completion is deferred until the associated PR
+    is actually merged. Tasks with PR URL evidence but no merge confirmation
+    are transitioned to AWAITING_PR_MERGE status instead of completed.
+
+    Args:
+        task_id: UUID of the task to update.
+        status: Target status (e.g., 'completed', 'in_progress', 'failed').
+        result_data: Optional dict containing execution results, PR URLs,
+            completion_evidence, or verification data from task handlers.
+
+    Returns:
+        None. Updates the task record in the database.
+
+    Raises:
+        Logs errors but does not raise exceptions to callers.
     """
     now = datetime.now(timezone.utc).isoformat()
 
@@ -2039,6 +2042,16 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
             task_title = task_row["rows"][0].get("title")
     except Exception:
         pass
+
+    task_type_lower = (task_type or "").strip().lower()
+    code_task_types = {
+        "code",
+        "github",
+        "code_fix",
+        "code_change",
+        "code_implementation",
+    }
+    is_code_task = task_type_lower in code_task_types
     
     # Build completion_evidence from result_data
     evidence_text = None
@@ -2115,6 +2128,33 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     evidence_text = f"Summary: {summary_text[:400]}"
                 else:
                     evidence_text = f"Task executed: {json.dumps(result_data, default=str)[:600]}"
+
+    # Code tasks must not be marked completed based on PR creation alone.
+    if status == "completed" and is_code_task:
+        evidence_json_type = None
+        if isinstance(evidence_json, dict):
+            evidence_json_type = evidence_json.get("type") or evidence_json.get("verification_type")
+        evidence_json_type_lower = str(evidence_json_type or "").strip().lower()
+
+        has_pr_url_evidence = bool(
+            isinstance(evidence_text, str)
+            and "github.com" in evidence_text.lower()
+            and "/pull/" in evidence_text.lower()
+        )
+
+        if has_pr_url_evidence and evidence_json_type_lower != "pr_merged":
+            log_action(
+                "task.completion_deferred",
+                f"Code task completion deferred until PR merge: task {task_id}",
+                level="info",
+                task_id=task_id,
+                output_data={
+                    "task_type": task_type,
+                    "evidence_type": evidence_json_type_lower or "pr_created_awaiting_merge",
+                    "deferred_status": TaskStatus.AWAITING_PR_MERGE.value,
+                },
+            )
+            status = TaskStatus.AWAITING_PR_MERGE.value
     
     # VERIFICATION GATE: Check evidence before marking complete
     if status == "completed" and VERIFICATION_AVAILABLE:
@@ -2147,7 +2187,21 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                 is_valid = structured_ok
                 evidence_type = str(structured_type) if structured_type else "structured"
             else:
-                is_valid, evidence_type = verifier.verify_evidence(evidence_text)
+                is_valid, evidence_type = verifier.verify_evidence(evidence_text, task_type=task_type)
+
+            if is_code_task and evidence_type in ("pr_created", "pr_created_awaiting_merge"):
+                log_action(
+                    "task.completion_deferred",
+                    f"Code task completion deferred until PR merge: task {task_id}",
+                    level="info",
+                    task_id=task_id,
+                    output_data={
+                        "task_type": task_type,
+                        "evidence_type": evidence_type,
+                        "deferred_status": TaskStatus.AWAITING_PR_MERGE.value,
+                    },
+                )
+                status = TaskStatus.AWAITING_PR_MERGE.value
 
             log_action(
                 "verification.attempt",
@@ -2207,20 +2261,23 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     return
             
             # Log successful verification
-            log_action(
-                "task.completion_verified",
-                f"Task {task_id} completion verified. Evidence type: {evidence_type}",
-                level="info",
-                task_id=task_id
-            )
+            if status == "completed":
+                log_action(
+                    "task.completion_verified",
+                    f"Task {task_id} completion verified. Evidence type: {evidence_type}",
+                    level="info",
+                    task_id=task_id
+                )
         except Exception as verify_err:
-            # Log verification error but allow completion (graceful degradation)
             log_action(
                 "task.verification_error",
-                f"Verification error for task {task_id}: {verify_err}. Allowing completion.",
+                f"Verification error for task {task_id}: {verify_err}",
                 level="warn",
                 task_id=task_id
             )
+
+            if is_code_task:
+                status = TaskStatus.AWAITING_PR_MERGE.value
     
     # Build the update columns
     cols = [f"status = {escape_value(status)}"]
