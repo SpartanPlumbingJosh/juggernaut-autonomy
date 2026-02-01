@@ -335,3 +335,43 @@ class TestMCPToolSchemas:
         tool_names = [s["function"]["name"] for s in schemas]
 
         assert "hq_execute" in tool_names
+
+    def test_github_write_tools_exist(self):
+        """GitHub write tools should be defined in schemas."""
+        from core.mcp_tool_schemas import get_tool_schemas
+
+        schemas = get_tool_schemas()
+        tool_names = [s["function"]["name"] for s in schemas]
+
+        # Verify GitHub write tools are available
+        assert "github_put_file" in tool_names
+        assert "github_create_branch" in tool_names
+        assert "github_create_pr" in tool_names
+        assert "github_merge_pr" in tool_names
+
+    def test_github_put_file_schema_has_required_fields(self):
+        """github_put_file schema should have all required fields."""
+        from core.mcp_tool_schemas import get_tool_schemas
+
+        schemas = get_tool_schemas()
+        github_put_file = next(
+            (s for s in schemas if s["function"]["name"] == "github_put_file"), None
+        )
+        
+        assert github_put_file is not None
+        params = github_put_file["function"]["parameters"]
+        
+        # Check required parameters
+        assert "required" in params
+        assert "path" in params["required"]
+        assert "content" in params["required"]
+        assert "message" in params["required"]
+        assert "branch" in params["required"]
+        
+        # Check properties exist
+        properties = params["properties"]
+        assert "path" in properties
+        assert "content" in properties
+        assert "message" in properties
+        assert "branch" in properties
+        assert "sha" in properties  # Optional but should be defined
