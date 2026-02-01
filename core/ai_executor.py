@@ -12,6 +12,8 @@ OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
 DEFAULT_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "4096"))
 DEFAULT_TIMEOUT_SECONDS = int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
+DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
+DEFAULT_MAX_PRICE_COMPLETION = os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", "2")
 
 
 @dataclass
@@ -47,12 +49,30 @@ class AIExecutor:
             "X-Title": self.title,
         }
 
+    def _provider_routing(self) -> Optional[Dict[str, Any]]:
+        try:
+            prompt_price = float((os.getenv("OPENROUTER_MAX_PRICE_PROMPT", DEFAULT_MAX_PRICE_PROMPT) or "").strip() or 0)
+            completion_price = float(
+                (os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", DEFAULT_MAX_PRICE_COMPLETION) or "").strip() or 0
+            )
+        except ValueError:
+            return None
+
+        if prompt_price <= 0 or completion_price <= 0:
+            return None
+
+        return {"max_price": {"prompt": prompt_price, "completion": completion_price}}
+
     def chat(self, messages: List[Dict[str, str]], max_tokens: Optional[int] = None) -> AIResponse:
         payload = {
             "model": self.model,
             "messages": messages,
             "max_tokens": int(max_tokens) if max_tokens is not None else self.max_tokens,
         }
+
+        provider = self._provider_routing()
+        if provider is not None:
+            payload["provider"] = provider
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(

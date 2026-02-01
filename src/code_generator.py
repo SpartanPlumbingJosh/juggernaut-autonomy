@@ -21,6 +21,8 @@ OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 DEFAULT_MODEL = "openrouter/auto"  # Smart router - auto-selects best model
 MAX_TOKENS_DEFAULT = 4096
 TEMPERATURE_DEFAULT = 0.7
+DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
+DEFAULT_MAX_PRICE_COMPLETION = os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", "2")
 
 
 class CodeGenerationError(Exception):
@@ -100,6 +102,18 @@ class CodeGenerator:
             "max_tokens": self.max_tokens,
             "temperature": self.temperature
         }
+
+        try:
+            prompt_price = float((os.getenv("OPENROUTER_MAX_PRICE_PROMPT", DEFAULT_MAX_PRICE_PROMPT) or "").strip() or 0)
+            completion_price = float(
+                (os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", DEFAULT_MAX_PRICE_COMPLETION) or "").strip() or 0
+            )
+        except ValueError:
+            prompt_price = 0
+            completion_price = 0
+
+        if prompt_price > 0 and completion_price > 0:
+            payload["provider"] = {"max_price": {"prompt": prompt_price, "completion": completion_price}}
         
         try:
             req = urllib.request.Request(

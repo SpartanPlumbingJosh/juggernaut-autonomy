@@ -31,6 +31,8 @@ MAX_CONVERSATION_HISTORY = 20
 MAX_MEMORIES_TO_RECALL = 10
 DEFAULT_MAX_TOKENS = 4096
 DEFAULT_SESSION_TITLE = "New Chat"
+DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
+DEFAULT_MAX_PRICE_COMPLETION = os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", "2")
 
 # MCP Tool Execution Configuration
 MCP_SERVER_URL = os.getenv("MCP_SERVER_URL", "https://juggernaut-mcp-production.up.railway.app")
@@ -45,6 +47,21 @@ TOKEN_COSTS = {
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "openai/gpt-4o": {"input": 2.5, "output": 10.0},
 }
+
+
+def _provider_routing() -> Optional[Dict[str, Any]]:
+    try:
+        prompt_price = float((os.getenv("OPENROUTER_MAX_PRICE_PROMPT", DEFAULT_MAX_PRICE_PROMPT) or "").strip() or 0)
+        completion_price = float(
+            (os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", DEFAULT_MAX_PRICE_COMPLETION) or "").strip() or 0
+        )
+    except ValueError:
+        return None
+
+    if prompt_price <= 0 or completion_price <= 0:
+        return None
+
+    return {"max_price": {"prompt": prompt_price, "completion": completion_price}}
 
 # The core system prompt that defines JUGGERNAUT's identity
 JUGGERNAUT_SYSTEM_PROMPT = """# JUGGERNAUT BUILDER AGENT - V1
@@ -1103,6 +1120,10 @@ class BrainService:
             "messages": messages,
             "max_tokens": self.max_tokens
         }
+
+        provider = _provider_routing()
+        if provider is not None:
+            payload["provider"] = provider
         
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -1163,6 +1184,10 @@ class BrainService:
             "messages": messages,
             "max_tokens": self.max_tokens
         }
+
+        provider = _provider_routing()
+        if provider is not None:
+            payload["provider"] = provider
 
         # Add tools if provided
         if tools:
@@ -1239,6 +1264,10 @@ class BrainService:
             "max_tokens": self.max_tokens,
             "stream": True  # Enable streaming
         }
+
+        provider = _provider_routing()
+        if provider is not None:
+            payload["provider"] = provider
 
         if tools:
             payload["tools"] = tools
