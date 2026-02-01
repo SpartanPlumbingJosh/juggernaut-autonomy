@@ -1767,6 +1767,13 @@ class BrainService:
             List of relevant memory records.
         """
         try:
+            def _escape_like_term(value: str) -> str:
+                term = str(value or "")
+                term = term.replace("\\", "\\\\")
+                term = term.replace("%", "\\%")
+                term = term.replace("_", "\\_")
+                return term
+
             # Extract keywords (simple approach - words > 3 chars)
             words = [
                 w.lower().strip(".,!?;:\"'")
@@ -1779,7 +1786,9 @@ class BrainService:
             
             # Build search condition
             conditions = " OR ".join(
-                f"LOWER(content) LIKE {escape_sql_value(f'%{w}%')}"
+                "LOWER(content) LIKE "
+                + escape_sql_value(f"%{_escape_like_term(w)}%")
+                + " ESCAPE '\\\\'"
                 for w in words[:5]  # Limit to first 5 keywords
             )
             
@@ -2252,8 +2261,14 @@ JUGGERNAUT Autonomous Engine
                 if status.mergeable is False:
                     return False
                 
-            except Exception:
-                pass
+            except Exception as e:
+                self.log_action(
+                    "code_task.merge_failed",
+                    f"Merge polling failed for PR #{pr_number}: {type(e).__name__}: {str(e)}",
+                    level="error",
+                    task_id=task_id,
+                )
+                return False
             
             time.sleep(MERGE_CHECK_INTERVAL_SECONDS)
             waited += MERGE_CHECK_INTERVAL_SECONDS
