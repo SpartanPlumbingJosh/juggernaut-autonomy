@@ -121,16 +121,32 @@ def _validate_auth(
 
     # Check Authorization header if no query param token
     if not token and headers:
-        auth_header = headers.get("Authorization", "") or headers.get(
-            "authorization", ""
-        )
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
+
+        def _get_header_value(target_header: str) -> str:
+            for key, val in headers.items():
+                key_str = (
+                    key.decode("utf-8", "ignore")
+                    if isinstance(key, bytes)
+                    else str(key)
+                )
+                if key_str.lower() != target_header:
+                    continue
+                if isinstance(val, bytes):
+                    return val.decode("utf-8", "ignore")
+                return str(val)
+            return ""
+
+        auth_header = _get_header_value("authorization")
+        auth_header_str = (auth_header or "").strip()
+        if auth_header_str.lower().startswith("bearer "):
+            token = auth_header_str[7:].strip()
+
         # Also check x-api-key and x-internal-api-secret headers
         if not token:
-            token = headers.get("x-api-key", "") or headers.get(
-                "x-internal-api-secret", ""
-            )
+            token = (
+                _get_header_value("x-api-key")
+                or _get_header_value("x-internal-api-secret")
+            ).strip()
 
     if not token:
         return False, "Missing authentication token"
