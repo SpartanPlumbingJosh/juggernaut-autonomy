@@ -76,6 +76,39 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "github_put_file",
+            "description": "Create or update a file in the juggernaut-autonomy repository",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Path to the file in the repository (e.g., 'core/brain.py')"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New content for the file"
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Commit message"
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch to commit to"
+                    },
+                    "sha": {
+                        "type": "string",
+                        "description": "SHA of the file to update (required for updating existing files)"
+                    }
+                },
+                "required": ["path", "content", "message", "branch"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "github_get_file",
             "description": "Get the contents of a file from the juggernaut-autonomy repository",
             "parameters": {
@@ -161,6 +194,28 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                     }
                 },
                 "required": ["head", "title"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "github_merge_pr",
+            "description": "Merge a pull request in the juggernaut-autonomy repository",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pr_number": {
+                        "type": "integer",
+                        "description": "Pull request number to merge"
+                    },
+                    "merge_method": {
+                        "type": "string",
+                        "enum": ["merge", "squash", "rebase"],
+                        "description": "Merge method to use (default: squash)"
+                    }
+                },
+                "required": ["pr_number"]
             }
         }
     },
