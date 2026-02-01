@@ -11,10 +11,12 @@ import json
 import logging
 import os
 import re
+import time
 import urllib.request
 import urllib.error
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
 from uuid import uuid4
 
 import requests
@@ -47,6 +49,13 @@ TOKEN_COSTS = {
     "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "openai/gpt-4o": {"input": 2.5, "output": 10.0},
+}
+
+
+# Supported repositories - add new repos here
+SUPPORTED_REPOS = {
+    "juggernaut-autonomy": "SpartanPlumbingJosh/juggernaut-autonomy",
+    "spartan-hq": "SpartanPlumbingJosh/spartan-hq",
 }
 
 
@@ -1919,27 +1928,9 @@ Integrates CodeGenerator and GitHubClient for end-to-end autonomous development.
 Supports multiple repositories via target_repo in task payload.
 """
 
-import logging
-import os
-import re
-import time
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Tuple
-
-# Configure module logger
-logger = logging.getLogger(__name__)
-
-# Constants
 DEFAULT_BRANCH_PREFIX = "feature/auto"
 MAX_MERGE_WAIT_SECONDS = 300
 MERGE_CHECK_INTERVAL_SECONDS = 15
-
-# Supported repositories - add new repos here
-SUPPORTED_REPOS = {
-    "juggernaut-autonomy": "SpartanPlumbingJosh/juggernaut-autonomy",
-    "spartan-hq": "SpartanPlumbingJosh/spartan-hq",
-}
 
 
 @dataclass
@@ -2314,24 +2305,8 @@ AI-powered code generation using OpenRouter smart routing.
 Integrates with GitHub automation for autonomous development workflow.
 """
 
-import json
-import logging
-import os
-import urllib.error
-import urllib.request
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-
-# Configure module logger
-logger = logging.getLogger(__name__)
-
-# OpenRouter configuration
-OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = "openrouter/auto"  # Smart router - auto-selects best model
 MAX_TOKENS_DEFAULT = 4096
 TEMPERATURE_DEFAULT = 0.7
-DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
-DEFAULT_MAX_PRICE_COMPLETION = os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", "2")
 
 
 class CodeGenerationError(Exception):
