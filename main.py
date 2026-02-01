@@ -5466,10 +5466,15 @@ class HealthHandler(BaseHTTPRequestHandler):
                 for event in handle_consult_stream(body, params, headers_dict):
                     self.wfile.write(event.encode())
                     self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass  # Client disconnected - normal for SSE
             except Exception as e:
-                error_event = f'data: {{"type": "error", "message": "{str(e)}"}}\n\n'
-                self.wfile.write(error_event.encode())
-                self.wfile.flush()
+                try:
+                    error_event = f'data: {{"type": "error", "message": "{str(e)}"}}\n\n'
+                    self.wfile.write(error_event.encode())
+                    self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    pass  # Client gone, can't send error
 
         # Brain API endpoints (POST) - non-streaming
         elif path.startswith("/api/brain/"):
