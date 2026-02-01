@@ -911,7 +911,7 @@ class BrainService:
 
                 # Add assistant message with tool call
                 messages.append(
-                    {"role": "assistant", "content": None, "tool_calls": [tool_call]}
+                    {"role": "assistant", "content": "", "tool_calls": [tool_call]}
                 )
 
                 # Add tool result message
@@ -1207,7 +1207,7 @@ class BrainService:
 
                 # Add assistant message with tool call
                 messages.append(
-                    {"role": "assistant", "content": None, "tool_calls": [tool_call]}
+                    {"role": "assistant", "content": "", "tool_calls": [tool_call]}
                 )
 
                 # Add tool result message
