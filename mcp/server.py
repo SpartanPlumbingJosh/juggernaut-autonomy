@@ -632,7 +632,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 priority = params.get("priority", "medium")
                 if priority not in valid_priorities:
                     priority = "medium"  # Default to medium for invalid values
-                result = await execute_sql("INSERT INTO governance_tasks (title, description, priority, task_type, assigned_worker, status) VALUES ($1, $2, $3, $4, $5, 'pending') RETURNING id", [params.get("title"), params.get("description"), priority, params.get("task_type", "code"), params.get("assigned_worker", "claude-chat")])
+                result = await execute_sql("INSERT INTO governance_tasks (title, description, priority, task_type, assigned_worker, status, created_by) VALUES ($1, $2, $3, $4, $5, 'pending', 'neural-chat') RETURNING id", [params.get("title"), params.get("description"), priority, params.get("task_type", "code"), params.get("assigned_worker", "claude-chat")])
             elif action == "task.complete":
                 result = await execute_sql("UPDATE governance_tasks SET status = 'completed', completed_at = NOW(), completion_evidence = $1 WHERE id = $2", [params.get("evidence", ""), params.get("id")])
             else:
