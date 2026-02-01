@@ -9,6 +9,7 @@ When an experiment is in 'running' status, this module:
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
@@ -284,11 +285,13 @@ def create_task_for_experiment(
     tags = ["experiment", f"exp-{exp_id_short}", f"phase-{phase}", "auto-generated"]
     tags_json = json.dumps(tags).replace("'", "''")
 
+    created_by = (os.environ.get("WORKER_ID") or os.environ.get("JUGGERNAUT_WORKER_ID") or "SYSTEM").replace("'", "''")
+
     try:
         execute_sql(f"""
             INSERT INTO governance_tasks (
                 id, title, description, task_type, status, priority,
-                payload, tags, created_at, updated_at
+                payload, tags, created_by, created_at, updated_at
             ) VALUES (
                 '{task_id}',
                 '{title}',
@@ -298,6 +301,7 @@ def create_task_for_experiment(
                 '{priority}'::task_priority,
                 '{payload_json}'::jsonb,
                 '{tags_json}'::jsonb,
+                '{created_by}',
                 '{now}',
                 '{now}'
             )
