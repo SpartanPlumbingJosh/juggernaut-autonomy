@@ -242,12 +242,14 @@ BRAIN_API_AVAILABLE = False
 _brain_api_import_error = None
 
 try:
-    from api.brain_api import handle_brain_request, BRAIN_AVAILABLE
+    from api.brain_api import handle_brain_request, handle_consult_stream, BRAIN_AVAILABLE
     BRAIN_API_AVAILABLE = BRAIN_AVAILABLE
 except ImportError as e:
     _brain_api_import_error = str(e)
-    def handle_brain_request(*args, **kwargs): 
+    def handle_brain_request(*args, **kwargs):
         return {"status": 503, "body": {"success": False, "error": "brain api not available"}}
+    def handle_consult_stream(*args, **kwargs):
+        yield 'data: {"type": "error", "message": "brain api not available"}\n\n'
 
 # Chat Sessions API for spartan-hq frontend
 CHAT_API_AVAILABLE = False
@@ -5436,7 +5438,40 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps(result).encode())
         
-        # Brain API endpoints (POST)
+        # Brain API streaming endpoint (POST) - SSE response
+        elif path.startswith("/api/brain/consult/stream"):
+            # Parse query params for auth
+            query_string = self.path.split('?')[1] if '?' in self.path else ''
+            params = {}
+            if query_string:
+                import urllib.parse
+                for param in query_string.split('&'):
+                    if '=' in param:
+                        key, value = param.split('=', 1)
+                        params[key] = urllib.parse.unquote(value)
+
+            headers_dict = {k: v for k, v in self.headers.items()}
+
+            # Send SSE headers
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("X-Accel-Buffering", "no")
+            self.send_cors_headers()
+            self.end_headers()
+
+            # Stream events from handler
+            try:
+                for event in handle_consult_stream(body, params, headers_dict):
+                    self.wfile.write(event.encode())
+                    self.wfile.flush()
+            except Exception as e:
+                error_event = f'data: {{"type": "error", "message": "{str(e)}"}}\n\n'
+                self.wfile.write(error_event.encode())
+                self.wfile.flush()
+
+        # Brain API endpoints (POST) - non-streaming
         elif path.startswith("/api/brain/"):
             endpoint = path.replace("/api/brain/", "")
 

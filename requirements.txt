@@ -12,9 +12,12 @@
 # External dependencies
 # - httpx: required for core/experiments.py
 # - pypdf: required for /api/files/upload (PDF text extraction)
+# - requests: required for streaming API calls (brain.py SSE streaming)
 httpx==0.27.0
 
 pypdf>=6.6.0
+
+requests>=2.31.0
 
 # Optional (uncomment if needed):
 # psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)

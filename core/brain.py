@@ -13,8 +13,10 @@ import os
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Generator, List, Optional, Tuple
 from uuid import uuid4
+
+import requests
 
 from .database import query_db, escape_sql_value
 from .mcp_tool_schemas import get_tool_schemas
@@ -795,6 +797,231 @@ class BrainService:
             "iterations": iterations
         }
 
+    def consult_with_tools_stream(
+        self,
+        question: str,
+        session_id: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None,
+        include_memories: bool = True,
+        system_prompt: Optional[str] = None,
+        enable_tools: bool = True
+    ) -> Generator[Dict[str, Any], None, None]:
+        """
+        Stream consultation with MCP tool execution capability.
+
+        This implements a streaming agentic loop that yields events as they occur:
+        1. Stream response tokens from OpenRouter in real-time
+        2. When model requests tool calls, yield tool_start events
+        3. Execute tools via MCP server, yield tool_result events
+        4. Resume streaming until model provides final response
+
+        Args:
+            question: The question or prompt to send.
+            session_id: Session ID for conversation continuity.
+            context: Additional context to include.
+            include_memories: Whether to recall relevant memories.
+            system_prompt: Custom system prompt. Uses JUGGERNAUT prompt if None.
+            enable_tools: Whether to enable tool calling (default: True).
+
+        Yields:
+            Event dicts with these types:
+                {"type": "session", "session_id": "...", "is_new_session": bool}
+                {"type": "token", "content": "..."}
+                {"type": "tool_start", "tool": "...", "arguments": {...}}
+                {"type": "tool_result", "tool": "...", "result": {...}, "success": bool}
+                {"type": "done", "input_tokens": N, "output_tokens": N, "cost_cents": N,
+                 "tool_executions": [...], "iterations": N}
+                {"type": "error", "message": "..."}
+        """
+        if not self.api_key:
+            yield {"type": "error", "message": "OPENROUTER_API_KEY not configured"}
+            return
+
+        # Ensure session exists
+        try:
+            session_id, is_new_session = self._ensure_session(session_id)
+        except Exception as e:
+            yield {"type": "error", "message": f"Session error: {e}"}
+            return
+
+        # Yield session info immediately
+        yield {"type": "session", "session_id": session_id, "is_new_session": is_new_session}
+
+        # Load history and memories
+        history = self._load_history(session_id)
+        is_first_exchange = len(history) == 0
+
+        memories_used: List[Dict[str, Any]] = []
+        memory_context = ""
+        if include_memories:
+            memories_used = self._recall_memories(question)
+            if memories_used:
+                memory_context = self._format_memories(memories_used)
+
+        # Build system prompt
+        if system_prompt is None:
+            system_prompt = self._build_system_prompt(context, memory_context)
+        elif memory_context:
+            system_prompt = f"{system_prompt}\n\n{memory_context}"
+
+        # Build initial messages
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": question})
+
+        # Get tool schemas if enabled
+        tools = get_tool_schemas() if enable_tools else None
+
+        # Track metrics
+        tool_executions: List[Dict[str, Any]] = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        iterations = 0
+        accumulated_response = ""
+
+        # Store user message immediately
+        self._store_message(session_id, "user", question)
+
+        # Streaming agentic loop
+        while iterations < MAX_TOOL_ITERATIONS:
+            iterations += 1
+
+            # Estimate input tokens
+            input_text = "".join(
+                str(m.get("content", "")) for m in messages if m.get("content")
+            )
+            total_input_tokens += estimate_tokens(input_text)
+
+            # Stream API call
+            try:
+                tool_calls_received: List[Dict[str, Any]] = []
+                iteration_content = ""
+
+                for content_chunk, tool_calls in self._stream_api_call(messages, tools):
+                    if content_chunk:
+                        yield {"type": "token", "content": content_chunk}
+                        iteration_content += content_chunk
+                        accumulated_response += content_chunk
+
+                    if tool_calls:
+                        tool_calls_received = tool_calls
+
+                total_output_tokens += estimate_tokens(iteration_content)
+
+            except APIError as e:
+                logger.error(f"Streaming API call failed on iteration {iterations}: {e}")
+                if iterations == 1:
+                    yield {"type": "error", "message": str(e)}
+                    return
+                break  # Return what we have
+
+            # If no tool calls, we're done
+            if not tool_calls_received:
+                logger.info(f"Streaming complete after {iterations} iteration(s)")
+                break
+
+            # Process each tool call
+            for tool_call in tool_calls_received:
+                func = tool_call.get("function", {})
+                tool_name = func.get("name", "unknown")
+                arguments_str = func.get("arguments", "{}")
+                tool_call_id = tool_call.get("id", f"call_{uuid4().hex[:8]}")
+
+                try:
+                    arguments = json.loads(arguments_str) if arguments_str else {}
+                except json.JSONDecodeError:
+                    arguments = {}
+                    logger.warning(f"Failed to parse tool arguments: {arguments_str}")
+
+                # Yield tool_start event
+                yield {"type": "tool_start", "tool": tool_name, "arguments": arguments}
+
+                logger.info(f"Executing tool: {tool_name} with args: {arguments}")
+
+                # Execute tool via MCP server
+                tool_result = self._execute_tool(tool_name, arguments)
+                success = "error" not in tool_result
+
+                # Yield tool_result event
+                yield {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result": tool_result,
+                    "success": success
+                }
+
+                # Build execution record
+                execution_record = {
+                    "tool": tool_name,
+                    "arguments": arguments,
+                    "result": tool_result,
+                    "success": success
+                }
+
+                # Create fallback task if tool failed (not for hq_execute to avoid recursion)
+                if not success and tool_name != "hq_execute":
+                    fallback = self._create_fallback_task(
+                        tool_name,
+                        arguments,
+                        tool_result.get("error", "Unknown error"),
+                        question
+                    )
+                    execution_record["fallback_task_created"] = True
+                    if isinstance(fallback.get("result"), dict):
+                        execution_record["fallback_task_id"] = fallback["result"].get("id")
+
+                tool_executions.append(execution_record)
+
+                # Add assistant message with tool call
+                messages.append({
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [tool_call]
+                })
+
+                # Add tool result message
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call_id,
+                    "content": json.dumps(tool_result, default=str)
+                })
+
+        # Calculate cost
+        cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
+
+        # Store assistant response
+        if accumulated_response:
+            self._store_message(session_id, "assistant", accumulated_response)
+
+        # Generate title if first exchange
+        if is_first_exchange and accumulated_response:
+            self._maybe_generate_title(session_id, question, accumulated_response)
+
+        # Yield done event with final stats
+        yield {
+            "type": "done",
+            "session_id": session_id,
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "cost_cents": cost_cents,
+            "tool_executions": tool_executions,
+            "iterations": iterations,
+            "model": self.model
+        }
+
+        logger.info(
+            "Streaming consultation complete",
+            extra={
+                "session_id": session_id,
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "cost_cents": cost_cents,
+                "tool_calls": len(tool_executions),
+                "iterations": iterations
+            }
+        )
+
     def get_history(
         self,
         session_id: str,
@@ -974,6 +1201,123 @@ class BrainService:
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse API response: {e}")
             raise APIError(f"Invalid API response: {e}")
+
+    def _stream_api_call(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]] = None
+    ) -> Generator[Tuple[str, List[Dict[str, Any]]], None, None]:
+        """
+        Stream API call to OpenRouter with tool support using requests library.
+
+        This method enables real-time token streaming from OpenRouter. It yields
+        content chunks as they arrive, and accumulates tool_calls for when the
+        model requests function execution.
+
+        Args:
+            messages: List of message dicts with role and content.
+            tools: Optional list of tool definitions for function calling.
+
+        Yields:
+            Tuples of (content_chunk, tool_calls):
+                - content_chunk: Partial text content (may be empty string)
+                - tool_calls: List of tool calls (only populated on final yield)
+
+        Raises:
+            APIError: If API call fails.
+        """
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+            "HTTP-Referer": "https://juggernaut-autonomy.railway.app",
+            "X-Title": "Juggernaut Brain"
+        }
+
+        payload = {
+            "model": self.model,
+            "messages": messages,
+            "max_tokens": self.max_tokens,
+            "stream": True  # Enable streaming
+        }
+
+        if tools:
+            payload["tools"] = tools
+            payload["tool_choice"] = "auto"
+
+        try:
+            response = requests.post(
+                OPENROUTER_ENDPOINT,
+                headers=headers,
+                json=payload,
+                stream=True,
+                timeout=120
+            )
+            response.raise_for_status()
+        except requests.exceptions.RequestException as e:
+            logger.error(f"OpenRouter streaming request failed: {e}")
+            raise APIError(f"Streaming request failed: {e}")
+
+        # Accumulate tool calls across streaming chunks
+        # OpenRouter sends tool_calls in chunks with index-based assembly
+        accumulated_tool_calls: Dict[int, Dict[str, Any]] = {}
+
+        for line in response.iter_lines():
+            if not line:
+                continue
+
+            line_text = line.decode("utf-8")
+            if not line_text.startswith("data: "):
+                continue
+
+            data_str = line_text[6:]  # Remove "data: " prefix
+            if data_str == "[DONE]":
+                break
+
+            try:
+                chunk = json.loads(data_str)
+                choices = chunk.get("choices", [])
+                if not choices:
+                    continue
+
+                delta = choices[0].get("delta", {})
+
+                # Yield content tokens as they arrive
+                content = delta.get("content")
+                if content:
+                    yield (content, [])
+
+                # Accumulate tool calls (they come in chunks)
+                if delta.get("tool_calls"):
+                    for tc in delta["tool_calls"]:
+                        idx = tc.get("index", 0)
+                        if idx not in accumulated_tool_calls:
+                            accumulated_tool_calls[idx] = {
+                                "id": tc.get("id", ""),
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""}
+                            }
+
+                        # Update ID if present
+                        if tc.get("id"):
+                            accumulated_tool_calls[idx]["id"] = tc["id"]
+
+                        # Accumulate function data
+                        func = tc.get("function", {})
+                        if func.get("name"):
+                            accumulated_tool_calls[idx]["function"]["name"] = func["name"]
+                        if func.get("arguments"):
+                            accumulated_tool_calls[idx]["function"]["arguments"] += func["arguments"]
+
+            except json.JSONDecodeError:
+                continue
+
+        # After streaming complete, yield any accumulated tool calls
+        if accumulated_tool_calls:
+            tool_calls_list = [
+                accumulated_tool_calls[idx]
+                for idx in sorted(accumulated_tool_calls.keys())
+            ]
+            yield ("", tool_calls_list)
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """
