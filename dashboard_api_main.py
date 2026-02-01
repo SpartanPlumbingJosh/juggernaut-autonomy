@@ -5,7 +5,7 @@ Runs on Railway as a persistent service instead of Vercel serverless.
 
 from fastapi import Body, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 import uvicorn
 import os
 import logging
@@ -36,6 +36,18 @@ from api.approvals_api import router as approvals_api_router
 
 # Chat sessions API (authenticated)
 from api.chat_sessions import handle_chat_request as handle_chat_sessions
+
+# Brain API (Neural Chat consultation)
+try:
+    from api.brain_api import handle_brain_request as handle_brain_request, handle_consult_stream, BRAIN_AVAILABLE
+    BRAIN_API_AVAILABLE = BRAIN_AVAILABLE
+except ImportError as e:
+    logger.warning("Brain API not available: %s", e)
+    BRAIN_API_AVAILABLE = False
+    def handle_brain_request(*args, **kwargs):
+        return {"status": 503, "body": {"success": False, "error": "brain api not available"}}
+    def handle_consult_stream(*args, **kwargs):
+        yield 'data: {"type": "error", "message": "brain api not available"}\n\n'
 
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
@@ -193,6 +205,50 @@ async def chat_sessions_route(request: Request, path: str = ""):
         content=result.get("body", {}),
         headers=result.get("headers", {})
     )
+
+
+@app.post("/api/brain/consult/stream")
+@app.post("/api/brain/unified/consult/stream")
+async def brain_consult_stream_route(request: Request):
+    if not BRAIN_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Brain API not available")
+
+    headers = dict(request.headers)
+    query_params = dict(request.query_params)
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+
+    stream = handle_consult_stream(body, query_params, headers)
+    return StreamingResponse(
+        stream,
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.api_route("/api/brain/{endpoint:path}", methods=["GET", "POST", "DELETE", "OPTIONS"])
+async def brain_route(request: Request, endpoint: str):
+    if not BRAIN_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Brain API not available")
+
+    method = request.method
+    headers = dict(request.headers)
+    query_params = dict(request.query_params)
+    body = None
+    if method == "POST":
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            body = {}
+
+    result = handle_brain_request(method, endpoint, query_params, body, headers)
+    return JSONResponse(status_code=result.get("status", 200), content=result.get("body", {}))
 
 
 @app.get("/health")
