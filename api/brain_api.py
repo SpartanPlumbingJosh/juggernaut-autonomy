@@ -89,12 +89,16 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message, "success": False})
 
 
-def _validate_auth(query_params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+def _validate_auth(
+    query_params: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None
+) -> Tuple[bool, Optional[str]]:
     """
-    Validate authentication token.
+    Validate authentication token from query params or Authorization header.
 
     Args:
         query_params: Query parameters from request.
+        headers: Request headers (optional).
 
     Returns:
         Tuple of (is_valid, error_message).
@@ -103,9 +107,19 @@ def _validate_auth(query_params: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         logger.warning("MCP_AUTH_TOKEN not configured - auth disabled")
         return True, None
 
+    # Check query param first
     token = query_params.get("token", [""])[0] if isinstance(
         query_params.get("token"), list
     ) else query_params.get("token", "")
+
+    # Check Authorization header if no query param token
+    if not token and headers:
+        auth_header = headers.get("Authorization", "") or headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        # Also check x-api-key and x-internal-api-secret headers
+        if not token:
+            token = headers.get("x-api-key", "") or headers.get("x-internal-api-secret", "")
 
     if not token:
         return False, "Missing authentication token"
@@ -129,7 +143,11 @@ def _get_brain_service():
     return BrainService()
 
 
-def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[str, Any]:
+def handle_consult(
+    body: Dict[str, Any],
+    query_params: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """
     Handle POST /api/brain/consult request with optional MCP tool execution.
 
@@ -159,12 +177,13 @@ def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[s
     Args:
         body: Request body.
         query_params: Query parameters.
+        headers: Request headers (optional).
 
     Returns:
         API response dictionary.
     """
     # Validate auth
-    is_valid, error = _validate_auth(query_params)
+    is_valid, error = _validate_auth(query_params, headers)
     if not is_valid:
         return _error_response(401, error)
 
@@ -221,7 +240,10 @@ def handle_consult(body: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[s
         return _error_response(500, f"Internal error: {str(e)}")
 
 
-def handle_history(query_params: Dict[str, Any]) -> Dict[str, Any]:
+def handle_history(
+    query_params: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """
     Handle GET /api/brain/history request.
 
@@ -241,12 +263,13 @@ def handle_history(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         query_params: Query parameters.
+        headers: Request headers (optional).
 
     Returns:
         API response dictionary.
     """
     # Validate auth
-    is_valid, error = _validate_auth(query_params)
+    is_valid, error = _validate_auth(query_params, headers)
     if not is_valid:
         return _error_response(401, error)
 
@@ -279,7 +302,10 @@ def handle_history(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Internal error: {str(e)}")
 
 
-def handle_clear(query_params: Dict[str, Any]) -> Dict[str, Any]:
+def handle_clear(
+    query_params: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
     """
     Handle DELETE /api/brain/clear request.
 
@@ -295,12 +321,13 @@ def handle_clear(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         query_params: Query parameters.
+        headers: Request headers (optional).
 
     Returns:
         API response dictionary.
     """
     # Validate auth
-    is_valid, error = _validate_auth(query_params)
+    is_valid, error = _validate_auth(query_params, headers)
     if not is_valid:
         return _error_response(401, error)
 
@@ -397,7 +424,8 @@ def route_request(
     method: str,
     path: str,
     body: Optional[Dict[str, Any]] = None,
-    query_params: Optional[Dict[str, Any]] = None
+    query_params: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Route incoming request to appropriate handler.
@@ -407,12 +435,14 @@ def route_request(
         path: Request path (e.g., /api/brain/consult).
         body: Request body for POST requests.
         query_params: Query parameters.
+        headers: Request headers.
 
     Returns:
         API response dictionary.
     """
     body = body or {}
     query_params = query_params or {}
+    headers = headers or {}
 
     # Handle OPTIONS for all paths (CORS preflight)
     if method == "OPTIONS":
@@ -424,17 +454,17 @@ def route_request(
     # Route to handlers
     if path == "/api/brain/consult":
         if method == "POST":
-            return handle_consult(body, query_params)
+            return handle_consult(body, query_params, headers)
         return _error_response(405, f"Method {method} not allowed for {path}")
 
     elif path == "/api/brain/history":
         if method == "GET":
-            return handle_history(query_params)
+            return handle_history(query_params, headers)
         return _error_response(405, f"Method {method} not allowed for {path}")
 
     elif path == "/api/brain/clear":
         if method == "DELETE":
-            return handle_clear(query_params)
+            return handle_clear(query_params, headers)
         return _error_response(405, f"Method {method} not allowed for {path}")
 
     return _error_response(404, f"Endpoint not found: {path}")
@@ -461,7 +491,8 @@ def create_flask_routes(app):
         else:
             body = request.get_json(force=True, silent=True) or {}
             query_params = {k: v for k, v in request.args.items()}
-            resp = handle_consult(body, query_params)
+            headers = {k: v for k, v in request.headers.items()}
+            resp = handle_consult(body, query_params, headers)
 
         response = jsonify(json.loads(resp["body"]))
         response.status_code = resp["statusCode"]
@@ -475,7 +506,8 @@ def create_flask_routes(app):
             resp = handle_options()
         else:
             query_params = {k: v for k, v in request.args.items()}
-            resp = handle_history(query_params)
+            headers = {k: v for k, v in request.headers.items()}
+            resp = handle_history(query_params, headers)
 
         response = jsonify(json.loads(resp["body"]))
         response.status_code = resp["statusCode"]
@@ -489,7 +521,8 @@ def create_flask_routes(app):
             resp = handle_options()
         else:
             query_params = {k: v for k, v in request.args.items()}
-            resp = handle_clear(query_params)
+            headers = {k: v for k, v in request.headers.items()}
+            resp = handle_clear(query_params, headers)
 
         response = jsonify(json.loads(resp["body"]))
         response.status_code = resp["statusCode"]
