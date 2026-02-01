@@ -1021,6 +1021,7 @@ class BrainService:
                     if content_chunk:
                         iteration_content += content_chunk
                         accumulated_response += content_chunk
+                        yield {"type": "token", "content": content_chunk}
 
                     if tool_calls:
                         tool_calls_received = tool_calls
@@ -1042,6 +1043,7 @@ class BrainService:
                     iteration_content = response_text
                     accumulated_response += response_text
                     total_output_tokens += estimate_tokens(iteration_content)
+                    yield {"type": "token", "content": response_text}
 
                 tool_calls_received = tool_calls or []
 
@@ -1120,9 +1122,6 @@ class BrainService:
         if enable_tools and self._requires_evidence(accumulated_response) and not self._response_has_valid_evidence(accumulated_response, tool_executions):
             yield {"type": "error", "message": "Evidence required: no valid tool evidence for response"}
             return
-
-        if accumulated_response:
-            yield {"type": "token", "content": accumulated_response}
 
         # Calculate cost
         cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
