@@ -20,6 +20,7 @@ def generate_revenue_ideas(
     ideas = gen.generate_ideas(context)[: int(limit)]
 
     created = 0
+    failures: List[Dict[str, Any]] = []
     for idea in ideas:
         title = str(idea.get("title") or "")
         if not title:
@@ -226,13 +227,22 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
-        create_res = create_experiment_from_idea(execute_sql=execute_sql, log_action=log_action, idea=idea, budget=budget)
+        create_res = create_experiment_from_idea(
+            execute_sql=execute_sql,
+            log_action=log_action,
+            idea=idea,
+            budget=budget,
+        )
         if not create_res.get("success"):
+            failures.append({"idea_id": idea_id, "error": str(create_res.get("error") or "unknown")[:200]})
             continue
 
         exp_id = create_res.get("experiment_id")
-        if exp_id:
-            link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
+        if not exp_id:
+            failures.append({"idea_id": idea_id, "error": "missing experiment_id"})
+            continue
+
+        link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
 
         try:
             execute_sql(
@@ -258,7 +268,11 @@ def start_experiments_from_top_ideas(
     except Exception:
         pass
 
-    return {"success": True, "new_experiments": created, "candidates": len(ideas)}
+    out = {"success": True, "new_experiments": created, "candidates": len(ideas)}
+    if failures:
+        out["failures"] = failures[:10]
+        out["failed"] = len(failures)
+    return out
 
 
 def review_experiments_stub(
