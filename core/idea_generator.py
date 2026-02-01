@@ -141,23 +141,30 @@ class IdeaGenerator:
         constraints = context.get("constraints") or {}
 
         max_budget = float(constraints.get("max_budget", 50) or 50)
-        expertise = str(assets.get("expertise") or assets.get("primary_business") or "trades")
-        business = str(assets.get("primary_business", "Spartan Plumbing") or "Spartan Plumbing")
+        automation_stack = str(assets.get("automation_stack") or assets.get("capabilities") or "AI + web research + scripting")
 
         indie_style = bool(constraints.get("indie_style", True))
-        email_only = bool(constraints.get("email_only", True))
-        no_employees = bool(constraints.get("no_employees", True))
-        forbid_calls = bool(constraints.get("forbid_calls", True))
+        email_only = True
+        no_employees = True
+        forbid_calls = True
         prefer_digital_products = bool(constraints.get("prefer_digital_products", True))
 
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        now_utc = datetime.now(timezone.utc)
+        today = now_utc.strftime("%Y-%m-%d")
+        year = now_utc.strftime("%Y")
+        month_year = now_utc.strftime("%B %Y")
 
         search_queries = [
-            f"profitable digital products ideas {today}",
-            "etsy digital product niches 2026",
-            "email marketing side hustle ideas 2026",
-            "printable templates that sell this week",
-            f"indie business ideas for {expertise} that can be sold via email",
+            f"what digital products are selling on Etsy right now {year}",
+            "trending Gumroad products this week",
+            f"domain flipping opportunities {month_year}",
+            "AI automation business ideas no employees",
+            "passive income ideas that work via email only",
+            f"micro-SaaS one-person businesses {year}",
+            "affiliate marketing niches trending now",
+            "print on demand niches selling this month",
+            "info products people are buying right now",
+            f"newsletter monetization strategies {year}",
         ]
 
         logger.info(f"Starting idea generation with Perplexity configured: {bool(self.perplexity_api_key)}")
@@ -174,15 +181,17 @@ class IdeaGenerator:
             logger.warning("No research results - using fallback ideas")
             ideas: List[RevenueIdea] = [
                 RevenueIdea(
-                    title="Etsy digital template bundle for service businesses",
-                    description="Create a digital template bundle (invoice, estimate, follow-up email templates) and sell via Etsy and email list.",
-                    hypothesis="Can make first sale within 14 days via Etsy listing + email outreach",
+                    title="Email-only digital template pack (Etsy/Gumroad)",
+                    description="Ship a focused template pack (SOPs, prompts, spreadsheets, checklists) for a currently-trending buyer segment on Etsy/Gumroad, with fulfillment and support handled asynchronously via email.",
+                    hypothesis="Can validate demand and earn the first $20 within 14 days using listings + email-only support and follow-up automation.",
                     estimates={
                         "capital_required": 0,
                         "time_to_first_dollar_days": 14,
                         "effort_hours": 8,
-                        "asset": business,
-                        "channel": "email",
+                        "monthly_potential": 300,
+                        "scalability": 7,
+                        "risk_level": 4,
+                        "capability_fit": 8,
                     },
                 )
             ]
@@ -235,8 +244,10 @@ class IdeaGenerator:
                             "capital_required": 0,
                             "time_to_first_dollar_days": 14,
                             "effort_hours": 10,
-                            "asset": business,
-                            "channel": "email",
+                            "monthly_potential": 200,
+                            "scalability": 6,
+                            "risk_level": 5,
+                            "capability_fit": 7,
                         },
                         "researched_at": today,
                     }
@@ -245,19 +256,22 @@ class IdeaGenerator:
 
         prompt = (
             "Return ONLY valid JSON (no markdown, no code fences).\n\n"
-            "You are generating revenue ideas for the next 14 days.\n"
+            "You are an autonomous AI scanning the internet for revenue opportunities.\n"
             f"Today (UTC) is {today}.\n\n"
             "Research results (from web search):\n"
             f"{json.dumps(research_results)[:12000]}\n\n"
-            "Available assets:\n"
-            f"- Owner runs {business} (trade expertise)\n"
-            "- Has automation tools (AI, outreach, scheduling, web research)\n"
+            "Operational capabilities:\n"
+            f"- Automation stack: {automation_stack}\n"
             f"- Budget cap: ${max_budget}\n\n"
-            "Indie constraints (MUST FOLLOW):\n"
-            "- No calls. No phone sales. No meetings.\n"
-            "- Email-only customer acquisition and support.\n"
-            "- No employees / contractors required to operate.\n"
-            "- Prefer digital products / Etsy-style / self-serve offers.\n\n"
+            "Constraints (MUST FOLLOW):\n"
+            "- Email-only customer acquisition and support (no calls, meetings, or phone support).\n"
+            "- Must be buildable/operable by AI with minimal human involvement.\n"
+            "- Owner only provides initial setup and approval, then hands-off.\n"
+            "- No employees or contractors required.\n"
+            "- Prefer: digital products, automation, arbitrage, templates, info products.\n\n"
+            "Search the web results for ANYTHING that fits these constraints.\n"
+            "Do NOT anchor to any specific industry or expertise.\n"
+            "Find what's WORKING RIGHT NOW and can be automated.\n\n"
             "Generate 3-5 SPECIFIC, TIMELY revenue ideas that comply with the constraints. Each must include:\n"
             "- title\n"
             "- description (include why now / timeliness)\n"
@@ -265,7 +279,7 @@ class IdeaGenerator:
             "- research_sources (array of URLs or source names)\n"
             "- timeliness (one sentence)\n"
             "- constraints: {indie_style, email_only, no_employees, forbid_calls, prefer_digital_products}\n"
-            "- estimates: {capital_required, time_to_first_dollar_days, effort_hours, monthly_potential}\n"
+            "- estimates: {capital_required, time_to_first_dollar_days, effort_hours, monthly_potential, scalability, risk_level, capability_fit}\n"
             "- researched_at (YYYY-MM-DD)\n\n"
             "Return a JSON array."
         )
