@@ -1175,13 +1175,20 @@ class BrainService:
             List of message dicts with id, role, content, created_at.
         """
         try:
+            try:
+                requested_limit = int(limit)
+            except (TypeError, ValueError):
+                requested_limit = MAX_CONVERSATION_HISTORY
+
+            clamped_limit = max(1, min(MAX_CONVERSATION_HISTORY, requested_limit))
+
             result = query_db(
                 f"""
                 SELECT id, role, content, created_at
                 FROM chat_messages
                 WHERE session_id = {escape_sql_value(session_id)}::uuid
                 ORDER BY created_at DESC
-                LIMIT {limit}
+                LIMIT {clamped_limit}
                 """
             )
             rows = result.get("rows", [])
@@ -1485,9 +1492,10 @@ class BrainService:
         if not MCP_AUTH_TOKEN:
             raise APIError("MCP_AUTH_TOKEN not configured for tool execution")
 
-        url = f"{MCP_SERVER_URL}/tools/execute?token={MCP_AUTH_TOKEN}"
+        url = f"{MCP_SERVER_URL}/tools/execute"
         headers = {
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {MCP_AUTH_TOKEN}",
         }
 
         payload = {
