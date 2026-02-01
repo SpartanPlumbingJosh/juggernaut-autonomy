@@ -24,6 +24,7 @@ from .base import BaseHandler, HandlerResult
 from .ai_handler import AIHandler
 from .analysis_handler import AnalysisHandler
 from .database_handler import DatabaseHandler
+from .idea_scoring_handler import IdeaScoringHandler
 from .research_handler import ResearchHandler
 from .scan_handler import ScanHandler
 from .test_handler import TestHandler
@@ -38,6 +39,7 @@ _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
     "audit": AnalysisHandler,
     "reporting": AnalysisHandler,
     "database": DatabaseHandler,
+    "idea_scoring": IdeaScoringHandler,
     "research": ResearchHandler,
     "scan": ScanHandler,
     "test": TestHandler,
