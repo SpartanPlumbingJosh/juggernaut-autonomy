@@ -41,17 +41,17 @@ _brain_import_error = None
 
 try:
     from core.unified_brain import BrainService
+
     BRAIN_AVAILABLE = True
 except ImportError as e:
     _brain_import_error = str(e)
     logger.warning("BrainService not available: %s", e)
 
 
-
 def _make_response(
     status_code: int,
     body: Dict[str, Any],
-    extra_headers: Optional[Dict[str, str]] = None
+    extra_headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Create a standardized API response.
@@ -90,8 +90,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 def _validate_auth(
-    query_params: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None
+    query_params: Dict[str, Any], headers: Optional[Dict[str, str]] = None
 ) -> Tuple[bool, Optional[str]]:
     """
     Validate authentication token from query params or Authorization header.
@@ -103,28 +102,40 @@ def _validate_auth(
     Returns:
         Tuple of (is_valid, error_message).
     """
-    if not MCP_AUTH_TOKEN:
-        logger.warning("MCP_AUTH_TOKEN not configured - auth disabled")
+    valid_tokens = [
+        os.getenv("MCP_AUTH_TOKEN", ""),
+        os.getenv("INTERNAL_API_SECRET", ""),
+    ]
+    valid_tokens = [t for t in valid_tokens if t]
+
+    if not valid_tokens:
+        logger.warning("No auth token configured - auth disabled")
         return True, None
 
     # Check query param first
-    token = query_params.get("token", [""])[0] if isinstance(
-        query_params.get("token"), list
-    ) else query_params.get("token", "")
+    token_value = query_params.get("token", "")
+    if isinstance(token_value, list):
+        token = token_value[0] if token_value else ""
+    else:
+        token = token_value
 
     # Check Authorization header if no query param token
     if not token and headers:
-        auth_header = headers.get("Authorization", "") or headers.get("authorization", "")
+        auth_header = headers.get("Authorization", "") or headers.get(
+            "authorization", ""
+        )
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
         # Also check x-api-key and x-internal-api-secret headers
         if not token:
-            token = headers.get("x-api-key", "") or headers.get("x-internal-api-secret", "")
+            token = headers.get("x-api-key", "") or headers.get(
+                "x-internal-api-secret", ""
+            )
 
     if not token:
         return False, "Missing authentication token"
 
-    if token != MCP_AUTH_TOKEN:
+    if token not in valid_tokens:
         return False, "Invalid authentication token"
 
     return True, None
@@ -146,7 +157,7 @@ def _get_brain_service():
 def handle_consult(
     body: Dict[str, Any],
     query_params: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Handle POST /api/brain/consult request with optional MCP tool execution.
@@ -213,7 +224,7 @@ def handle_consult(
                 include_memories=include_memories,
                 system_prompt=system_prompt,
                 enable_tools=True,
-                auto_execute=auto_execute
+                auto_execute=auto_execute,
             )
         else:
             # Fall back to non-tool consultation
@@ -222,21 +233,24 @@ def handle_consult(
                 session_id=session_id,
                 context=context,
                 include_memories=include_memories,
-                system_prompt=system_prompt
+                system_prompt=system_prompt,
             )
 
-        return _make_response(200, {
-            "success": True,
-            "response": result.get("response", ""),
-            "session_id": result.get("session_id", ""),
-            "memories_used": result.get("memories_used", []),
-            "tool_executions": result.get("tool_executions", []),
-            "cost_cents": result.get("cost_cents", 0),
-            "input_tokens": result.get("input_tokens", 0),
-            "output_tokens": result.get("output_tokens", 0),
-            "iterations": result.get("iterations", 1),
-            "model": result.get("model", "")
-        })
+        return _make_response(
+            200,
+            {
+                "success": True,
+                "response": result.get("response", ""),
+                "session_id": result.get("session_id", ""),
+                "memories_used": result.get("memories_used", []),
+                "tool_executions": result.get("tool_executions", []),
+                "cost_cents": result.get("cost_cents", 0),
+                "input_tokens": result.get("input_tokens", 0),
+                "output_tokens": result.get("output_tokens", 0),
+                "iterations": result.get("iterations", 1),
+                "model": result.get("model", ""),
+            },
+        )
 
     except ImportError:
         return _error_response(503, "Brain service not available")
@@ -246,8 +260,7 @@ def handle_consult(
 
 
 def handle_history(
-    query_params: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None
+    query_params: Dict[str, Any], headers: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Handle GET /api/brain/history request.
@@ -279,9 +292,11 @@ def handle_history(
         return _error_response(401, error)
 
     # Get session_id from query params
-    session_id = query_params.get("session_id", [""])[0] if isinstance(
-        query_params.get("session_id"), list
-    ) else query_params.get("session_id", "")
+    session_id = (
+        query_params.get("session_id", [""])[0]
+        if isinstance(query_params.get("session_id"), list)
+        else query_params.get("session_id", "")
+    )
 
     if not session_id:
         return _error_response(400, "Missing required parameter: session_id")
@@ -290,15 +305,18 @@ def handle_history(
         brain = _get_brain_service()
         if brain is None:
             return _error_response(503, "Brain service not available")
-        
+
         history = brain.get_history(session_id)
 
-        return _make_response(200, {
-            "success": True,
-            "session_id": session_id,
-            "history": history,
-            "message_count": len(history)
-        })
+        return _make_response(
+            200,
+            {
+                "success": True,
+                "session_id": session_id,
+                "history": history,
+                "message_count": len(history),
+            },
+        )
 
     except ImportError:
         return _error_response(503, "Brain service not available")
@@ -308,8 +326,7 @@ def handle_history(
 
 
 def handle_clear(
-    query_params: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None
+    query_params: Dict[str, Any], headers: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Handle DELETE /api/brain/clear request.
@@ -337,9 +354,11 @@ def handle_clear(
         return _error_response(401, error)
 
     # Get session_id from query params
-    session_id = query_params.get("session_id", [""])[0] if isinstance(
-        query_params.get("session_id"), list
-    ) else query_params.get("session_id", "")
+    session_id = (
+        query_params.get("session_id", [""])[0]
+        if isinstance(query_params.get("session_id"), list)
+        else query_params.get("session_id", "")
+    )
 
     if not session_id:
         return _error_response(400, "Missing required parameter: session_id")
@@ -348,14 +367,17 @@ def handle_clear(
         brain = _get_brain_service()
         if brain is None:
             return _error_response(503, "Brain service not available")
-        
+
         result = brain.clear_history(session_id)
 
-        return _make_response(200, {
-            "success": True,
-            "session_id": result.get("session_id", session_id),
-            "messages_deleted": result.get("deleted", 0)
-        })
+        return _make_response(
+            200,
+            {
+                "success": True,
+                "session_id": result.get("session_id", session_id),
+                "messages_deleted": result.get("deleted", 0),
+            },
+        )
 
     except ImportError:
         return _error_response(503, "Brain service not available")
@@ -367,7 +389,7 @@ def handle_clear(
 def handle_consult_stream(
     body: Optional[Dict[str, Any]],
     params: Dict[str, Any],
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None,
 ) -> Generator[str, None, None]:
     """
     Handle POST /api/brain/consult/stream request - streaming SSE response.
@@ -422,7 +444,7 @@ def handle_consult_stream(
         brain = _get_brain_service()
         if brain is None:
             return _error_response(503, "Brain service not available")
-        
+
         if enable_tools and auto_execute:
             result = brain.consult_with_tools(
                 question=question,
@@ -431,7 +453,7 @@ def handle_consult_stream(
                 include_memories=include_memories,
                 system_prompt=system_prompt,
                 enable_tools=enable_tools,
-                auto_execute=auto_execute
+                auto_execute=auto_execute,
             )
         elif enable_tools:
             result = brain.consult_with_tools(
@@ -440,7 +462,7 @@ def handle_consult_stream(
                 context=context,
                 include_memories=include_memories,
                 system_prompt=system_prompt,
-                enable_tools=enable_tools
+                enable_tools=enable_tools,
             )
             yield f"data: {json.dumps({'type': 'error', 'message': 'Brain service not available'})}\n\n"
             return
@@ -453,7 +475,7 @@ def handle_consult_stream(
             include_memories=include_memories,
             system_prompt=system_prompt,
             enable_tools=enable_tools,
-            auto_execute=auto_execute
+            auto_execute=auto_execute,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
@@ -480,7 +502,7 @@ def handle_brain_request(
     endpoint: str,
     params: Optional[Dict[str, Any]] = None,
     body: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Handle brain API requests from main.py.
@@ -508,7 +530,7 @@ def handle_brain_request(
         return {"status": resp["statusCode"], "body": json.loads(resp["body"])}
 
     if endpoint.startswith("unified/"):
-        endpoint = endpoint[len("unified/"):]
+        endpoint = endpoint[len("unified/") :]
 
     # Route to appropriate handler based on endpoint
     if endpoint == "consult":
@@ -537,7 +559,7 @@ def route_request(
     path: str,
     body: Optional[Dict[str, Any]] = None,
     query_params: Optional[Dict[str, Any]] = None,
-    headers: Optional[Dict[str, str]] = None
+    headers: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
     Route incoming request to appropriate handler.
@@ -667,6 +689,7 @@ def create_http_handler():
     Returns:
         Handler function for HTTP server.
     """
+
     def handler(environ, start_response):
         """WSGI handler for brain API."""
         method = environ.get("REQUEST_METHOD", "GET")
