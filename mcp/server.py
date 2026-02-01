@@ -86,6 +86,8 @@ MSGRAPH_USER_EMAIL = os.environ.get('MSGRAPH_USER_EMAIL', '')
 
 # OpenRouter (AI + Image Gen)
 OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+OPENROUTER_MAX_PRICE_PROMPT = os.environ.get('OPENROUTER_MAX_PRICE_PROMPT', '1')
+OPENROUTER_MAX_PRICE_COMPLETION = os.environ.get('OPENROUTER_MAX_PRICE_COMPLETION', '2')
 
 # Pinecone (Vector DB)
 PINECONE_API_KEY = os.environ.get('PINECONE_API_KEY', '')
@@ -882,16 +884,54 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "ai_chat":
             if not OPENROUTER_API_KEY:
                 return [TextContent(type="text", text=json.dumps({"error": "OpenRouter not configured"}))]
+            provider = None
+            try:
+                prompt_price = float((OPENROUTER_MAX_PRICE_PROMPT or "").strip() or 0)
+                completion_price = float((OPENROUTER_MAX_PRICE_COMPLETION or "").strip() or 0)
+                if prompt_price > 0 and completion_price > 0:
+                    provider = {"max_price": {"prompt": prompt_price, "completion": completion_price}}
+            except ValueError:
+                provider = None
             async with aiohttp.ClientSession() as session:
-                async with session.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}, json={"model": arguments.get("model", "anthropic/claude-3.5-sonnet"), "messages": arguments.get("messages"), "max_tokens": arguments.get("max_tokens", 4096)}) as resp:
+                payload = {
+                    "model": arguments.get("model") or "openrouter/auto",
+                    "messages": arguments.get("messages"),
+                    "max_tokens": arguments.get("max_tokens", 4096),
+                }
+                if provider is not None:
+                    payload["provider"] = provider
+                async with session.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                    json=payload,
+                ) as resp:
                     result = await resp.json()
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
         elif name == "ai_complete":
             if not OPENROUTER_API_KEY:
                 return [TextContent(type="text", text=json.dumps({"error": "OpenRouter not configured"}))]
+            provider = None
+            try:
+                prompt_price = float((OPENROUTER_MAX_PRICE_PROMPT or "").strip() or 0)
+                completion_price = float((OPENROUTER_MAX_PRICE_COMPLETION or "").strip() or 0)
+                if prompt_price > 0 and completion_price > 0:
+                    provider = {"max_price": {"prompt": prompt_price, "completion": completion_price}}
+            except ValueError:
+                provider = None
             async with aiohttp.ClientSession() as session:
-                async with session.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}, json={"model": arguments.get("model", "anthropic/claude-3.5-sonnet"), "messages": [{"role": "user", "content": arguments.get("prompt")}], "max_tokens": arguments.get("max_tokens", 4096)}) as resp:
+                payload = {
+                    "model": arguments.get("model") or "openrouter/auto",
+                    "messages": [{"role": "user", "content": arguments.get("prompt")}],
+                    "max_tokens": arguments.get("max_tokens", 4096),
+                }
+                if provider is not None:
+                    payload["provider"] = provider
+                async with session.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
+                    json=payload,
+                ) as resp:
                     result = await resp.json()
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
