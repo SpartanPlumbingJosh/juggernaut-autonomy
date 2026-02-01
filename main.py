@@ -36,7 +36,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from enum import Enum
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from uuid import uuid4
 
 # Slack notifications for #war-room
@@ -5686,7 +5686,7 @@ class HealthHandler(BaseHTTPRequestHandler):
 
 def run_health_server():
     """Run the health check HTTP server."""
-    server = HTTPServer(("0.0.0.0", PORT), HealthHandler)
+    server = ThreadingHTTPServer(("0.0.0.0", PORT), HealthHandler)
     print(f"Health server running on port {PORT}")
     server.serve_forever()
 
