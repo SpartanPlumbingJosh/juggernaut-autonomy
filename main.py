@@ -520,7 +520,7 @@ CODE_TASK_AVAILABLE = False
 _code_task_import_error = None
 
 try:
-    from src.task_executor_code import execute_code_task
+    from core.unified_brain import execute_code_task
     CODE_TASK_AVAILABLE = True
 except ImportError as e:
     _code_task_import_error = str(e)

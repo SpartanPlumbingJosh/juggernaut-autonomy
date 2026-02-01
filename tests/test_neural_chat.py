@@ -35,7 +35,7 @@ def mock_env():
 @pytest.fixture
 def brain_service(mock_env):
     """Create BrainService instance for testing."""
-    from core.brain import BrainService
+    from core.unified_brain import BrainService
     return BrainService()
 
 
@@ -86,7 +86,7 @@ class TestBrainServiceBasics:
     def test_brain_service_requires_api_key(self):
         """BrainService should raise error without API key."""
         with patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}):
-            from core.brain import BrainService
+            from core.unified_brain import BrainService
             brain = BrainService()
             with pytest.raises(Exception):
                 brain.consult_with_tools("test question")
@@ -254,7 +254,7 @@ class TestMaxIterations:
 
     def test_max_iterations_constant_exists(self, brain_service):
         """MAX_TOOL_ITERATIONS constant should be defined."""
-        from core.brain import MAX_TOOL_ITERATIONS
+        from core.unified_brain import MAX_TOOL_ITERATIONS
         assert MAX_TOOL_ITERATIONS > 0
         assert MAX_TOOL_ITERATIONS <= 20  # Sanity check
 
