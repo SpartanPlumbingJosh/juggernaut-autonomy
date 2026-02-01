@@ -14,6 +14,7 @@ import re
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
@@ -1488,43 +1489,65 @@ class BrainService:
         Raises:
             APIError: If tool execution fails.
         """
-        if not MCP_AUTH_TOKEN:
-            raise APIError("MCP_AUTH_TOKEN not configured for tool execution")
+        candidate_tokens = [
+            MCP_AUTH_TOKEN,
+            os.getenv("INTERNAL_API_SECRET", ""),
+            os.getenv("API_SECRET", ""),
+        ]
+        tokens: List[str] = []
+        for t in candidate_tokens:
+            t = (t or "").strip()
+            if t and t not in tokens:
+                tokens.append(t)
 
-        url = f"{MCP_SERVER_URL}/tools/execute"
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {MCP_AUTH_TOKEN}",
-        }
+        if not tokens:
+            raise APIError("No auth token configured for MCP tool execution")
+
+        base_url = f"{MCP_SERVER_URL}/tools/execute"
 
         payload = {
             "tool": tool_name,
             "arguments": arguments
         }
 
-        data = json.dumps(payload).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+        last_error: Optional[Dict[str, Any]] = None
 
-        try:
-            with urllib.request.urlopen(req, timeout=60) as response:
-                result_text = response.read().decode("utf-8")
-                logger.info(f"Tool {tool_name} executed successfully")
-                try:
-                    return json.loads(result_text)
-                except json.JSONDecodeError:
-                    # Tool returned non-JSON text
-                    return {"result": result_text}
+        for token in tokens:
+            url = f"{base_url}?token={urllib.parse.quote(token)}"
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+                "x-api-key": token,
+                "x-internal-api-secret": token,
+            }
 
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            logger.error(f"Tool execution error: HTTP {e.code} - {error_body}")
-            return {"error": f"Tool error {e.code}: {error_body}"}
-        except urllib.error.URLError as e:
-            logger.error(f"Tool execution connection error: {e}")
-            return {"error": f"Connection error: {e}"}
-        except Exception as e:
-            logger.error(f"Tool execution failed: {e}")
-            return {"error": str(e)}
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(url, data=data, headers=headers, method="POST")
+
+            try:
+                with urllib.request.urlopen(req, timeout=60) as response:
+                    result_text = response.read().decode("utf-8")
+                    logger.info(f"Tool {tool_name} executed successfully")
+                    try:
+                        return json.loads(result_text)
+                    except json.JSONDecodeError:
+                        return {"result": result_text}
+
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode("utf-8")
+                logger.error(f"Tool execution error: HTTP {e.code} - {error_body}")
+                last_error = {"error": f"Tool error {e.code}: {error_body}"}
+                if e.code in (401, 403):
+                    continue
+                return last_error
+            except urllib.error.URLError as e:
+                logger.error(f"Tool execution connection error: {e}")
+                return {"error": f"Connection error: {e}"}
+            except Exception as e:
+                logger.error(f"Tool execution failed: {e}")
+                return {"error": str(e)}
+
+        return last_error or {"error": "Tool execution failed"}
 
     def _create_fallback_task(
         self,
