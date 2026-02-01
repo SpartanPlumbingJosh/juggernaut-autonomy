@@ -211,7 +211,8 @@ def handle_consult(
                 context=context,
                 include_memories=include_memories,
                 system_prompt=system_prompt,
-                enable_tools=True
+                enable_tools=True,
+                auto_execute=auto_execute
             )
         else:
             # Fall back to non-tool consultation
@@ -403,23 +404,43 @@ def handle_consult_stream(
     # Check if brain service is available
     if not BRAIN_AVAILABLE:
         yield f"data: {json.dumps({'type': 'error', 'message': f'Brain service not available: {_brain_import_error}'})}\n\n"
-        return
 
     # Extract parameters from body
     question = body.get("question", "")
     if not question:
-        yield f"data: {json.dumps({'type': 'error', 'message': 'Missing required parameter: question'})}\n\n"
-        return
+        return _error_response(400, "Missing required parameter: question")
 
     session_id = body.get("session_id")
     context = body.get("context")
     include_memories = body.get("include_memories", True)
     enable_tools = body.get("enable_tools", True)
+    auto_execute = body.get("auto_execute", False)
     system_prompt = body.get("system_prompt")
 
     try:
         brain = _get_brain_service()
         if brain is None:
+            return _error_response(503, "Brain service not available")
+        
+        if enable_tools and auto_execute:
+            result = brain.consult_with_tools(
+                question=question,
+                session_id=session_id,
+                context=context,
+                include_memories=include_memories,
+                system_prompt=system_prompt,
+                enable_tools=enable_tools,
+                auto_execute=auto_execute
+            )
+        elif enable_tools:
+            result = brain.consult_with_tools(
+                question=question,
+                session_id=session_id,
+                context=context,
+                include_memories=include_memories,
+                system_prompt=system_prompt,
+                enable_tools=enable_tools
+            )
             yield f"data: {json.dumps({'type': 'error', 'message': 'Brain service not available'})}\n\n"
             return
 
@@ -430,7 +451,8 @@ def handle_consult_stream(
             context=context,
             include_memories=include_memories,
             system_prompt=system_prompt,
-            enable_tools=enable_tools
+            enable_tools=enable_tools,
+            auto_execute=auto_execute
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
