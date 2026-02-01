@@ -40,7 +40,7 @@ BRAIN_AVAILABLE = False
 _brain_import_error = None
 
 try:
-    from core.brain import BrainService
+    from core.unified_brain import BrainService
     BRAIN_AVAILABLE = True
 except ImportError as e:
     _brain_import_error = str(e)
@@ -507,6 +507,9 @@ def handle_brain_request(
         resp = handle_options()
         return {"status": resp["statusCode"], "body": json.loads(resp["body"])}
 
+    if endpoint.startswith("unified/"):
+        endpoint = endpoint[len("unified/"):]
+
     # Route to appropriate handler based on endpoint
     if endpoint == "consult":
         if method == "POST":
@@ -572,6 +575,21 @@ def route_request(
         return _error_response(405, f"Method {method} not allowed for {path}")
 
     elif path == "/api/brain/clear":
+        if method == "DELETE":
+            return handle_clear(query_params, headers)
+        return _error_response(405, f"Method {method} not allowed for {path}")
+
+    elif path == "/api/brain/unified/consult":
+        if method == "POST":
+            return handle_consult(body, query_params, headers)
+        return _error_response(405, f"Method {method} not allowed for {path}")
+
+    elif path == "/api/brain/unified/history":
+        if method == "GET":
+            return handle_history(query_params, headers)
+        return _error_response(405, f"Method {method} not allowed for {path}")
+
+    elif path == "/api/brain/unified/clear":
         if method == "DELETE":
             return handle_clear(query_params, headers)
         return _error_response(405, f"Method {method} not allowed for {path}")

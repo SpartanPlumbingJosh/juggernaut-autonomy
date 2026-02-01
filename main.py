@@ -5301,8 +5301,13 @@ class HealthHandler(BaseHTTPRequestHandler):
                     "/api/dashboard/experiments",
                     "/api/dashboard/tasks",
                     "/api/brain/consult",
+                    "/api/brain/consult/stream",
                     "/api/brain/history",
                     "/api/brain/clear",
+                    "/api/brain/unified/consult",
+                    "/api/brain/unified/consult/stream",
+                    "/api/brain/unified/history",
+                    "/api/brain/unified/clear",
                     "/api/chat/sessions",
                     "/api/chat/sessions/{id}",
                     "/api/chat/sessions/{id}/messages",
@@ -5496,7 +5501,7 @@ class HealthHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(result).encode())
         
         # Brain API streaming endpoint (POST) - SSE response
-        elif path.startswith("/api/brain/consult/stream"):
+        elif path.startswith("/api/brain/consult/stream") or path.startswith("/api/brain/unified/consult/stream"):
             # Parse query params for auth
             query_string = self.path.split('?')[1] if '?' in self.path else ''
             params = {}
