@@ -2112,6 +2112,33 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     evidence_text = f"Summary: {summary_text[:400]}"
                 else:
                     evidence_text = f"Task executed: {json.dumps(result_data, default=str)[:600]}"
+
+    # Code tasks must not be marked completed based on PR creation alone.
+    if status == "completed" and is_code_task:
+        evidence_json_type = None
+        if isinstance(evidence_json, dict):
+            evidence_json_type = evidence_json.get("type") or evidence_json.get("verification_type")
+        evidence_json_type_lower = str(evidence_json_type or "").strip().lower()
+
+        has_pr_url_evidence = bool(
+            isinstance(evidence_text, str)
+            and "github.com" in evidence_text.lower()
+            and "/pull/" in evidence_text.lower()
+        )
+
+        if has_pr_url_evidence and evidence_json_type_lower != "pr_merged":
+            log_action(
+                "task.completion_deferred",
+                f"Code task completion deferred until PR merge: task {task_id}",
+                level="info",
+                task_id=task_id,
+                output_data={
+                    "task_type": task_type,
+                    "evidence_type": evidence_json_type_lower or "pr_created_awaiting_merge",
+                    "deferred_status": TaskStatus.AWAITING_PR_MERGE.value,
+                },
+            )
+            status = TaskStatus.AWAITING_PR_MERGE.value
     
     # VERIFICATION GATE: Check evidence before marking complete
     if status == "completed" and VERIFICATION_AVAILABLE:
