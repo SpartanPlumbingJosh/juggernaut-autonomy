@@ -34,6 +34,9 @@ from api.public_dashboard import router as public_dashboard_router
 # Approvals API (authenticated via INTERNAL_API_SECRET)
 from api.approvals_api import router as approvals_api_router
 
+# Chat sessions API (authenticated)
+from api.chat_sessions import handle_chat_request as handle_chat_sessions
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -153,6 +156,45 @@ async def chat(
         "model": executor.model,
     }
 
+
+@app.api_route("/api/chat/sessions/{path:path}", methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"])
+@app.api_route("/api/chat/sessions", methods=["GET", "POST", "OPTIONS"])
+async def chat_sessions_route(request: Request, path: str = ""):
+    """
+    Route chat session requests to the chat_sessions handler.
+    Handles:
+    - GET/POST /api/chat/sessions
+    - GET/PATCH/DELETE /api/chat/sessions/{id}
+    - POST /api/chat/sessions/{id}/messages
+    """
+    method = request.method
+    headers = dict(request.headers)
+    query_params = dict(request.query_params)
+    
+    # Get body for POST/PATCH requests
+    body = None
+    if method in ["POST", "PATCH"]:
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, ValueError):
+            body = {}
+    
+    # Call the chat sessions handler
+    result = handle_chat_sessions(
+        method=method,
+        path=f"sessions/{path}" if path else "sessions",
+        params=query_params,
+        body=body,
+        headers=headers
+    )
+    
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=result.get("body", {}),
+        headers=result.get("headers", {})
+    )
+
+
 @app.get("/health")
 async def health():
     """Detailed health check"""
@@ -180,10 +222,13 @@ async def health():
             "/public/dashboard/dlq",
             "/public/dashboard/cost",
             "/public/dashboard/revenue/summary",
-            "/public/dashboard/alerts"
-            ,
+            "/public/dashboard/alerts",
             # Approvals API (authenticated)
-            "/api/approvals"
+            "/api/approvals",
+            # Chat sessions API (authenticated)
+            "/api/chat/sessions",
+            "/api/chat/sessions/{id}",
+            "/api/chat/sessions/{id}/messages"
         ]
     }
 
