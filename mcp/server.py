@@ -497,6 +497,7 @@ async def list_tools() -> list[Tool]:
     return [
         # DATABASE
         Tool(name="sql_query", description="Execute SQL query", inputSchema={"type": "object", "properties": {"sql": {"type": "string"}}, "required": ["sql"]}),
+        Tool(name="code_generate", description="Generate code using AI", inputSchema={"type": "object", "properties": {"description": {"type": "string"}, "module_name": {"type": "string"}, "requirements": {"type": "array", "items": {"type": "string"}}, "existing_code": {"type": "string"}}, "required": ["description", "module_name"]}),
         Tool(name="hq_query", description="Query governance DB", inputSchema={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}),
         Tool(name="hq_execute", description="Execute governance action", inputSchema={"type": "object", "properties": {"action": {"type": "string"}, "params": {"type": "object"}}, "required": ["action"]}),
         
@@ -750,6 +751,57 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
         # PERPLEXITY (Web Search)
+        elif name == "code_generate":
+            try:
+                # Import code generator
+                from src.code_generator import CodeGenerator
+                
+                # Create generator instance
+                generator = CodeGenerator()
+                
+                # Extract parameters
+                description = arguments.get("description", "")
+                module_name = arguments.get("module_name", "")
+                requirements = arguments.get("requirements", [])
+                existing_code = arguments.get("existing_code")
+                
+                # Generate code
+                generated = generator.generate_module(
+                    task_description=description,
+                    module_name=module_name,
+                    requirements=requirements,
+                    existing_code=existing_code
+                )
+                
+                # Optionally generate tests
+                tests = None
+                try:
+                    tests = generator.generate_tests(generated.content, module_name)
+                    test_data = {
+                        "filename": tests.filename,
+                        "content": tests.content,
+                        "tokens_used": tests.tokens_used
+                    }
+                except Exception as test_error:
+                    test_data = {"error": str(test_error)}
+                
+                # Return results
+                result = {
+                    "success": True,
+                    "module": {
+                        "filename": generated.filename,
+                        "content": generated.content,
+                        "tokens_used": generated.tokens_used,
+                        "model_used": generated.model_used
+                    },
+                    "tests": test_data if tests else None
+                }
+                
+                return [TextContent(type="text", text=json.dumps(result, default=str))]
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                return [TextContent(type="text", text=json.dumps({"error": error_msg}, default=str))]
+                
         elif name == "web_search":
             query = arguments.get("query")
             model = "sonar-pro" if arguments.get("detailed") else "sonar"

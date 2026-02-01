@@ -11,6 +11,42 @@ from typing import Any, Dict, List
 # These map to the tools available in mcp/server.py
 BRAIN_TOOLS: List[Dict[str, Any]] = [
     # ============================================================
+    # CODE GENERATION TOOLS
+    # ============================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "code_generate",
+            "description": "Generate code using the same AI pipeline as the autonomous executor",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "description": {
+                        "type": "string",
+                        "description": "Detailed description of the code to generate"
+                    },
+                    "module_name": {
+                        "type": "string",
+                        "description": "Name of the module to generate (e.g., 'user_auth', 'data_processor')"
+                    },
+                    "requirements": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        },
+                        "description": "List of requirements or dependencies for the code"
+                    },
+                    "existing_code": {
+                        "type": "string",
+                        "description": "Existing code context to consider when generating"
+                    }
+                },
+                "required": ["description", "module_name"]
+            }
+        }
+    },
+    
+    # ============================================================
     # DATABASE TOOLS
     # ============================================================
     {
