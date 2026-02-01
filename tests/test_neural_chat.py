@@ -336,6 +336,39 @@ class TestMCPToolSchemas:
 
         assert "hq_execute" in tool_names
 
+    def test_code_generate_tool_exists(self):
+        """code_generate tool should be defined in schemas."""
+        from core.mcp_tool_schemas import get_tool_schemas
+
+        schemas = get_tool_schemas()
+        tool_names = [s["function"]["name"] for s in schemas]
+
+        assert "code_generate" in tool_names
+
+    def test_code_generate_schema_has_required_fields(self):
+        """code_generate schema should have all required fields."""
+        from core.mcp_tool_schemas import get_tool_schemas
+
+        schemas = get_tool_schemas()
+        code_generate = next(
+            (s for s in schemas if s["function"]["name"] == "code_generate"), None
+        )
+        
+        assert code_generate is not None
+        params = code_generate["function"]["parameters"]
+        
+        # Check required parameters
+        assert "required" in params
+        assert "description" in params["required"]
+        assert "module_name" in params["required"]
+        
+        # Check properties exist
+        properties = params["properties"]
+        assert "description" in properties
+        assert "module_name" in properties
+        assert "requirements" in properties
+        assert "existing_code" in properties
+
     def test_github_write_tools_exist(self):
         """GitHub write tools should be defined in schemas."""
         from core.mcp_tool_schemas import get_tool_schemas
