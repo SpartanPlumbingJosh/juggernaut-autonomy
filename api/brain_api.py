@@ -18,7 +18,7 @@ CORS:
 import json
 import logging
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Generator, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 # Configure module logger
@@ -357,6 +357,84 @@ def handle_clear(
     except Exception as e:
         logger.exception("Error clearing history: %s", str(e))
         return _error_response(500, f"Internal error: {str(e)}")
+
+
+def handle_consult_stream(
+    body: Optional[Dict[str, Any]],
+    params: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None
+) -> Generator[str, None, None]:
+    """
+    Handle POST /api/brain/consult/stream request - streaming SSE response.
+
+    This endpoint returns a Server-Sent Events (SSE) stream for real-time
+    token streaming from the Brain API. Events are formatted as:
+        data: {"type": "...", ...}\n\n
+
+    Event types:
+        - session: Session info {session_id, is_new_session}
+        - token: Content token {content}
+        - tool_start: Tool execution starting {tool, arguments}
+        - tool_result: Tool execution complete {tool, result, success}
+        - done: Stream complete {input_tokens, output_tokens, cost_cents, ...}
+        - error: Error occurred {message}
+
+    Args:
+        body: Request body with question, session_id, enable_tools, etc.
+        params: Query parameters for auth.
+        headers: Request headers for auth.
+
+    Yields:
+        SSE formatted strings: "data: {...}\n\n"
+    """
+    body = body or {}
+    params = params or {}
+    headers = headers or {}
+
+    # Validate auth
+    is_valid, error = _validate_auth(params, headers)
+    if not is_valid:
+        yield f"data: {json.dumps({'type': 'error', 'message': error})}\n\n"
+        return
+
+    # Check if brain service is available
+    if not BRAIN_AVAILABLE:
+        yield f"data: {json.dumps({'type': 'error', 'message': f'Brain service not available: {_brain_import_error}'})}\n\n"
+        return
+
+    # Extract parameters from body
+    question = body.get("question", "")
+    if not question:
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Missing required parameter: question'})}\n\n"
+        return
+
+    session_id = body.get("session_id")
+    context = body.get("context")
+    include_memories = body.get("include_memories", True)
+    enable_tools = body.get("enable_tools", True)
+
+    try:
+        brain = _get_brain_service()
+        if brain is None:
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Brain service not available'})}\n\n"
+            return
+
+        # Stream consultation with tools
+        for event in brain.consult_with_tools_stream(
+            question=question,
+            session_id=session_id,
+            context=context,
+            include_memories=include_memories,
+            enable_tools=enable_tools
+        ):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    except ImportError as e:
+        logger.error("Brain service import error: %s", str(e))
+        yield f"data: {json.dumps({'type': 'error', 'message': 'Brain service not available'})}\n\n"
+    except Exception as e:
+        logger.exception("Error in streaming brain consult: %s", str(e))
+        yield f"data: {json.dumps({'type': 'error', 'message': f'Internal error: {str(e)}'})}\n\n"
 
 
 def handle_options() -> Dict[str, Any]:
