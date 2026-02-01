@@ -204,6 +204,7 @@ def start_experiments_from_top_ideas(
         return {"success": False, "error": str(e)}
 
     created = 0
+    failures: List[Dict[str, Any]] = []
 
     for idea in ideas:
         if created >= max_new:
