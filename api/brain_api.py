@@ -196,6 +196,7 @@ def handle_consult(
     context = body.get("context")
     enable_tools = body.get("enable_tools", True)  # Tools enabled by default
     include_memories = body.get("include_memories", True)
+    auto_execute = body.get("auto_execute", False)
     system_prompt = body.get("system_prompt")
 
     try:
