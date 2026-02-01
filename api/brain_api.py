@@ -373,7 +373,8 @@ def handle_brain_request(
     method: str,
     endpoint: str,
     params: Optional[Dict[str, Any]] = None,
-    body: Optional[Dict[str, Any]] = None
+    body: Optional[Dict[str, Any]] = None,
+    headers: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
     Handle brain API requests from main.py.
@@ -386,12 +387,14 @@ def handle_brain_request(
         endpoint: Endpoint name (consult, history, clear).
         params: Query parameters.
         body: Request body for POST requests.
+        headers: Request headers for auth.
 
     Returns:
         Dict with 'status' (int) and 'body' (dict) keys.
     """
     params = params or {}
     body = body or {}
+    headers = headers or {}
 
     # Handle OPTIONS for CORS preflight
     if method == "OPTIONS":
@@ -401,17 +404,17 @@ def handle_brain_request(
     # Route to appropriate handler based on endpoint
     if endpoint == "consult":
         if method == "POST":
-            resp = handle_consult(body, params)
+            resp = handle_consult(body, params, headers)
         else:
             resp = _error_response(405, f"Method {method} not allowed")
     elif endpoint == "history":
         if method == "GET":
-            resp = handle_history(params)
+            resp = handle_history(params, headers)
         else:
             resp = _error_response(405, f"Method {method} not allowed")
     elif endpoint == "clear":
         if method == "DELETE":
-            resp = handle_clear(params)
+            resp = handle_clear(params, headers)
         else:
             resp = _error_response(405, f"Method {method} not allowed")
     else:

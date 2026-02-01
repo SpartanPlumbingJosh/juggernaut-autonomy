@@ -5298,7 +5298,8 @@ class HealthHandler(BaseHTTPRequestHandler):
         # Brain API endpoints (GET)
         elif path.startswith("/api/brain/"):
             endpoint = path.replace("/api/brain/", "")
-            result = handle_brain_request("GET", endpoint, params)
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_brain_request("GET", endpoint, params, None, headers_dict)
 
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
@@ -5438,7 +5439,7 @@ class HealthHandler(BaseHTTPRequestHandler):
         # Brain API endpoints (POST)
         elif path.startswith("/api/brain/"):
             endpoint = path.replace("/api/brain/", "")
-            
+
             # Parse query params
             query_string = self.path.split('?')[1] if '?' in self.path else ''
             params = {}
@@ -5448,8 +5449,9 @@ class HealthHandler(BaseHTTPRequestHandler):
                     if '=' in param:
                         key, value = param.split('=', 1)
                         params[key] = urllib.parse.unquote(value)
-            
-            result = handle_brain_request("POST", endpoint, params, body)
+
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_brain_request("POST", endpoint, params, body, headers_dict)
 
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
@@ -5548,7 +5550,8 @@ class HealthHandler(BaseHTTPRequestHandler):
         # Brain API DELETE endpoints
         if path.startswith("/api/brain/"):
             endpoint = path.replace("/api/brain/", "")
-            result = handle_brain_request("DELETE", endpoint, params)
+            headers_dict = {k: v for k, v in self.headers.items()}
+            result = handle_brain_request("DELETE", endpoint, params, None, headers_dict)
 
             self.send_response(result.get("status", 200))
             self.send_header("Content-Type", "application/json")
