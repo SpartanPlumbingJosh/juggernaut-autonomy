@@ -196,6 +196,7 @@ def handle_consult(
     context = body.get("context")
     enable_tools = body.get("enable_tools", True)  # Tools enabled by default
     include_memories = body.get("include_memories", True)
+    system_prompt = body.get("system_prompt")
 
     try:
         brain = _get_brain_service()
@@ -209,6 +210,7 @@ def handle_consult(
                 session_id=session_id,
                 context=context,
                 include_memories=include_memories,
+                system_prompt=system_prompt,
                 enable_tools=True
             )
         else:
@@ -217,7 +219,8 @@ def handle_consult(
                 question=question,
                 session_id=session_id,
                 context=context,
-                include_memories=include_memories
+                include_memories=include_memories,
+                system_prompt=system_prompt
             )
 
         return _make_response(200, {
@@ -412,6 +415,7 @@ def handle_consult_stream(
     context = body.get("context")
     include_memories = body.get("include_memories", True)
     enable_tools = body.get("enable_tools", True)
+    system_prompt = body.get("system_prompt")
 
     try:
         brain = _get_brain_service()
@@ -425,6 +429,7 @@ def handle_consult_stream(
             session_id=session_id,
             context=context,
             include_memories=include_memories,
+            system_prompt=system_prompt,
             enable_tools=enable_tools
         ):
             yield f"data: {json.dumps(event)}\n\n"

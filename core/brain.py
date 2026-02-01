@@ -10,6 +10,7 @@ Uses the chat_sessions and chat_messages tables for persistence (PR #259).
 import json
 import logging
 import os
+import re
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -516,6 +517,51 @@ class BrainService:
         
         if not self.api_key:
             logger.warning("No OPENROUTER_API_KEY found - API calls will fail")
+
+    _EVIDENCE_ONLY_DIRECTIVE = (
+        "EVIDENCE-ONLY MODE:\n"
+        "- You MUST NOT fabricate any SQL results or tool outputs.\n"
+        "- For every claim about database contents, you MUST use sql_query and cite returned rows.\n"
+        "- If a tool is blocked or fails, say exactly: 'I cannot verify this without data.'\n"
+        "- Do not summarize expected outputs. Only summarize actual tool outputs."
+    )
+
+    _EVIDENCE_REFUSAL_MESSAGE = "I cannot verify this without data."
+
+    def _apply_evidence_directive(self, system_prompt: str, enable_tools: bool) -> str:
+        if not enable_tools:
+            return system_prompt
+        if "EVIDENCE-ONLY MODE" in (system_prompt or ""):
+            return system_prompt
+        return f"{system_prompt}\n\n{self._EVIDENCE_ONLY_DIRECTIVE}".strip()
+
+    def _extract_evidence_tokens(self, text: str) -> List[str]:
+        content = str(text or "")
+        tokens: List[str] = []
+        tokens.extend(re.findall(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", content, flags=re.IGNORECASE))
+        tokens.extend(re.findall(r"\b\d{4}-\d{2}-\d{2}\b", content))
+        out: List[str] = []
+        seen = set()
+        for t in tokens:
+            if t not in seen:
+                seen.add(t)
+                out.append(t)
+        return out
+
+    def _tool_evidence_text(self, tool_executions: List[Dict[str, Any]]) -> str:
+        try:
+            return json.dumps(tool_executions, default=str, separators=(",", ":"))
+        except Exception:
+            return str(tool_executions)
+
+    def _response_has_valid_evidence(self, response_text: str, tool_executions: List[Dict[str, Any]]) -> bool:
+        if not tool_executions:
+            return False
+        evidence = self._tool_evidence_text(tool_executions)
+        for token in self._extract_evidence_tokens(response_text):
+            if token not in evidence:
+                return False
+        return True
     
     def consult(
         self,
@@ -678,6 +724,8 @@ class BrainService:
         elif memory_context:
             system_prompt = f"{system_prompt}\n\n{memory_context}"
 
+        system_prompt = self._apply_evidence_directive(system_prompt, enable_tools)
+
         # Build initial messages
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         messages.extend(history)
@@ -780,6 +828,9 @@ class BrainService:
         # Calculate cost
         cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
 
+        if enable_tools and not self._response_has_valid_evidence(response_text, tool_executions):
+            response_text = self._EVIDENCE_REFUSAL_MESSAGE
+
         # Store conversation (just the user question and final response)
         self._store_message(session_id, "user", question)
         if response_text:
@@ -881,6 +932,8 @@ class BrainService:
         elif memory_context:
             system_prompt = f"{system_prompt}\n\n{memory_context}"
 
+        system_prompt = self._apply_evidence_directive(system_prompt, enable_tools)
+
         # Build initial messages
         messages: List[Dict[str, Any]] = [{"role": "system", "content": system_prompt}]
         messages.extend(history)
@@ -916,7 +969,6 @@ class BrainService:
             try:
                 for content_chunk, tool_calls in self._stream_api_call(messages, tools):
                     if content_chunk:
-                        yield {"type": "token", "content": content_chunk}
                         iteration_content += content_chunk
                         accumulated_response += content_chunk
 
@@ -937,7 +989,6 @@ class BrainService:
                     break
 
                 if response_text:
-                    yield {"type": "token", "content": response_text}
                     iteration_content = response_text
                     accumulated_response += response_text
                     total_output_tokens += estimate_tokens(iteration_content)
@@ -1015,6 +1066,13 @@ class BrainService:
                     "tool_call_id": tool_call_id,
                     "content": json.dumps(tool_result, default=str)
                 })
+
+        if enable_tools and not self._response_has_valid_evidence(accumulated_response, tool_executions):
+            yield {"type": "error", "message": "Evidence required: no valid tool evidence for response"}
+            return
+
+        if accumulated_response:
+            yield {"type": "token", "content": accumulated_response}
 
         # Calculate cost
         cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
