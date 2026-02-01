@@ -691,7 +691,8 @@ class BrainService:
         context: Optional[Dict[str, Any]] = None,
         include_memories: bool = True,
         system_prompt: Optional[str] = None,
-        enable_tools: bool = True
+        enable_tools: bool = True,
+        auto_execute: bool = False
     ) -> Dict[str, Any]:
         """
         Consult the brain with MCP tool execution capability.
@@ -785,6 +786,26 @@ class BrainService:
             if not tool_calls:
                 logger.info(f"Consultation complete after {iterations} iteration(s)")
                 break
+                
+            # If auto_execute is False, return early with the tool calls
+            # This allows the client to decide whether to execute the tools
+            if not auto_execute and tool_calls:
+                logger.info(f"Returning after {iterations} iteration(s) with pending tool calls")
+                # Include partial response and pending tool calls in the result
+                return {
+                    "response": response_text,
+                    "session_id": session_id,
+                    "is_new_session": is_new_session,
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "cost_cents": calculate_cost(self.model, total_input_tokens, total_output_tokens),
+                    "memories_used": memories_used,
+                    "model": self.model,
+                    "tool_executions": tool_executions,
+                    "pending_tool_calls": tool_calls,
+                    "iterations": iterations,
+                    "auto_execute": auto_execute
+                }
 
             # Process each tool call
             for tool_call in tool_calls:
@@ -891,7 +912,8 @@ class BrainService:
         context: Optional[Dict[str, Any]] = None,
         include_memories: bool = True,
         system_prompt: Optional[str] = None,
-        enable_tools: bool = True
+        enable_tools: bool = True,
+        auto_execute: bool = False
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Stream consultation with MCP tool execution capability.
