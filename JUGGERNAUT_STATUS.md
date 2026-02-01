@@ -1,6 +1,6 @@
 # JUGGERNAUT - Master Reference Document
 
-> **Last Updated:** 2026-01-31
+> **Last Updated:** 2026-02-01
 > **Purpose:** Single source of truth for all Claude sessions working on JUGGERNAUT
 > **Update Instructions:** Any Claude session that makes significant progress should update this file and push to the repo
 
@@ -186,6 +186,8 @@ User → spartan-hq frontend → Brain API → OpenRouter (function calling)
 | 2026-01-26 | **Worker status mapping (spartan-hq)** - Treat `status: active` as ONLINE; heartbeat optional | Fix merged locally; requires deploy to verify |
 | 2026-01-26 | **Pixi cleanup hardening (spartan-hq)** - stop ticker, clear stage, defensive destroy | Fix merged locally; reduces unmount crash risk |
 | 2026-01-26 | **Scheduler + proactive work generation** - Fixed scheduled execution/rescheduling, proactive_diverse handler wiring, dedupe (completed tasks no longer block), and added detailed diagnostics logging | Verified: Proactive generation working hourly; EXECUTOR claiming/completing; queue caught up |
+| 2026-01-31 | **Brain API Auth Headers (PR #276)** - Added support for `Authorization: Bearer` header, `x-api-key`, and `x-internal-api-secret` headers in addition to query parameter auth | ✅ Deployed and verified - Neural Chat now accepts auth via headers from frontend proxy |
+| 2026-02-01 | **System State Query Bugs (PR #277)** - Fixed `_get_system_state()` type casting errors: task counts returned as strings, heartbeat EXTRACT(EPOCH) parsing, and revenue query column mismatch | ✅ Deployed v1.3.2 - No more warnings in logs, system state endpoint working correctly |
 
 ---
 
@@ -220,11 +222,11 @@ User → spartan-hq frontend → Brain API → OpenRouter (function calling)
 ## 7. KEY METRICS
 | Metric | Current Value | Target |
 |--------|---------------|--------|
-| Tasks Completed | 298 | — |
-| Tasks Failed | 8 | <5% failure rate |
+| Tasks Completed | 665 | — |
+| Tasks Failed | 11 | <5% failure rate |
 | Revenue | $0 | $100M |
 | Workers Active | 5/5 | 100% uptime |
-| Error Rate | 10.58% | <5% |
+| Error Rate | 1.65% | <5% ✅ |
 
 ---
 
@@ -308,3 +310,4 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 | 2026-01-25 | AnalysisHandler fix verified | Claude (Ops) |
 | 2026-01-26 | Added Factory Floor dashboard progress + spartan-hq fixes (queue, worker status, Pixi cleanup) | Windsurf |
 | 2026-01-26 | Added scheduler/proactive generation fixes status (ON CONFLICT fixes, rescheduling, proactive_diverse wiring, dedupe + diagnostics logging) + current state snapshot | Windsurf |
+| 2026-02-01 | Added PR #276 (Brain API auth headers) and PR #277 (system state query fixes) + updated metrics (665 completed, 1.65% error rate) | Claude (Ops) |
