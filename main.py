@@ -2218,12 +2218,13 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                     return
             
             # Log successful verification
-            log_action(
-                "task.completion_verified",
-                f"Task {task_id} completion verified. Evidence type: {evidence_type}",
-                level="info",
-                task_id=task_id
-            )
+            if status == "completed":
+                log_action(
+                    "task.completion_verified",
+                    f"Task {task_id} completion verified. Evidence type: {evidence_type}",
+                    level="info",
+                    task_id=task_id
+                )
         except Exception as verify_err:
             log_action(
                 "task.verification_error",
