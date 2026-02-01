@@ -2129,32 +2129,90 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                 else:
                     evidence_text = f"Task executed: {json.dumps(result_data, default=str)[:600]}"
 
-    # Code tasks must not be marked completed based on PR creation alone.
+    # STRICT COMPLETION: code/github tasks can only be marked completed when PR is merged.
     if status == "completed" and is_code_task:
         evidence_json_type = None
         if isinstance(evidence_json, dict):
             evidence_json_type = evidence_json.get("type") or evidence_json.get("verification_type")
         evidence_json_type_lower = str(evidence_json_type or "").strip().lower()
 
-        has_pr_url_evidence = bool(
-            isinstance(evidence_text, str)
-            and "github.com" in evidence_text.lower()
-            and "/pull/" in evidence_text.lower()
-        )
-
-        if has_pr_url_evidence and evidence_json_type_lower != "pr_merged":
-            log_action(
-                "task.completion_deferred",
-                f"Code task completion deferred until PR merge: task {task_id}",
-                level="info",
-                task_id=task_id,
-                output_data={
-                    "task_type": task_type,
-                    "evidence_type": evidence_json_type_lower or "pr_created_awaiting_merge",
-                    "deferred_status": TaskStatus.AWAITING_PR_MERGE.value,
-                },
+        if evidence_json_type_lower != "pr_merged":
+            pr_ref_present = bool(
+                (
+                    isinstance(evidence_text, str)
+                    and (
+                        (
+                            "github.com" in evidence_text.lower()
+                            and "/pull/" in evidence_text.lower()
+                        )
+                        or "pr #" in evidence_text.lower()
+                    )
+                )
+                or (
+                    isinstance(evidence_json, dict)
+                    and bool(evidence_json.get("pr_url") or evidence_json.get("pr_number"))
+                )
+                or evidence_json_type_lower in ("pr_created", "pr_created_awaiting_merge")
             )
-            status = TaskStatus.AWAITING_PR_MERGE.value
+
+            evidence_type = None
+            if VERIFICATION_AVAILABLE:
+                try:
+                    verifier = CompletionVerifier()
+                    _, evidence_type = verifier.verify_evidence(
+                        evidence_text,
+                        task_type=task_type,
+                    )
+                except Exception:
+                    evidence_type = None
+
+            evidence_type_lower = str(evidence_type or "").strip().lower()
+            if evidence_type_lower == "pr_merged":
+                pass
+            elif pr_ref_present or evidence_type_lower in (
+                "pr_created",
+                "pr_created_awaiting_merge",
+            ):
+                log_action(
+                    "task.completion_deferred",
+                    f"Code task completion deferred until PR merge: task {task_id}",
+                    level="info",
+                    task_id=task_id,
+                    output_data={
+                        "task_type": task_type,
+                        "evidence_type": evidence_type_lower
+                        or evidence_json_type_lower
+                        or "pr_created_awaiting_merge",
+                        "deferred_status": TaskStatus.AWAITING_PR_MERGE.value,
+                    },
+                )
+                status = TaskStatus.AWAITING_PR_MERGE.value
+            else:
+                log_action(
+                    "task.completion_rejected",
+                    f"Code task {task_id} cannot be marked completed without merged PR evidence",
+                    level="warn",
+                    task_id=task_id,
+                    output_data={
+                        "task_type": task_type,
+                        "required_evidence": "pr_merged",
+                        "completion_evidence": evidence_json or evidence_text,
+                    },
+                )
+                try:
+                    execute_sql(
+                        f"""
+                        UPDATE governance_tasks
+                        SET error_message = CONCAT(
+                            COALESCE(error_message, ''),
+                            '[VERIFICATION] Code tasks require a merged PR to complete. '
+                        )
+                        WHERE id = {escape_value(task_id)}
+                        """
+                    )
+                except Exception:
+                    pass
+                return
     
     # VERIFICATION GATE: Check evidence before marking complete
     if status == "completed" and VERIFICATION_AVAILABLE:
