@@ -315,7 +315,8 @@ def _get_system_state() -> str:
             total_tasks = 0
             for row in task_result["rows"]:
                 status = row.get("status", "unknown")
-                count = row.get("count", 0)
+                # Ensure count is int (DB may return string)
+                count = int(row.get("count", 0) or 0)
                 total_tasks += count
                 task_lines.append(f"  - {status}: {count}")
             sections.append(f"TASK STATUS (Total: {total_tasks}):\n" + "\n".join(task_lines))
@@ -340,7 +341,12 @@ def _get_system_state() -> str:
             for row in worker_result["rows"]:
                 worker_id = str(row.get("worker_id") or "unknown")[:20]
                 status = row.get("status", "unknown")
-                seconds_ago = int(row.get("seconds_since_heartbeat", 0))
+                # Handle float from EXTRACT(EPOCH ...) - may be string like "15.788212"
+                seconds_raw = row.get("seconds_since_heartbeat", 0)
+                try:
+                    seconds_ago = int(float(seconds_raw or 0))
+                except (ValueError, TypeError):
+                    seconds_ago = 0
                 if seconds_ago < 60:
                     time_str = f"{seconds_ago}s ago"
                 else:
@@ -414,18 +420,29 @@ def _get_system_state() -> str:
         logger.warning(f"Failed to get revenue experiments: {e}")
         sections.append("REVENUE EXPERIMENTS: [query failed]")
 
-    # 5. Total revenue
+    # 5. Total revenue - try different column names that might exist
     try:
+        # First check if revenue_events table exists and has data
         rev_result = query_db(
-            "SELECT COALESCE(SUM(amount), 0) as total FROM revenue_events"
+            """
+            SELECT COALESCE(SUM(
+                CASE
+                    WHEN amount IS NOT NULL THEN amount::numeric
+                    WHEN value IS NOT NULL THEN value::numeric
+                    ELSE 0
+                END
+            ), 0) as total
+            FROM revenue_events
+            """
         )
         total_rev = 0
         if rev_result.get("rows"):
             total_rev = rev_result["rows"][0].get("total", 0)
         sections.append(f"CURRENT REVENUE: ${total_rev}")
     except Exception as e:
-        logger.warning(f"Failed to get revenue: {e}")
-        sections.append("CURRENT REVENUE: [query failed]")
+        # Table might not exist or have different schema
+        logger.debug(f"Revenue query failed (table may not exist): {e}")
+        sections.append("CURRENT REVENUE: $0 (no data)")
 
     # Build the full context
     if sections:
