@@ -15,9 +15,9 @@ import time
 import urllib.request
 import urllib.error
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 from uuid import uuid4
 from dataclasses import dataclass, field
 
@@ -26,6 +26,7 @@ import requests
 from .database import query_db, escape_sql_value
 from .mcp_tool_schemas import get_tool_schemas
 from .retry import exponential_backoff, RateLimitError, APIConnectionError
+from .circuit_breaker import CircuitOpenError, get_circuit_breaker
 
 
 @dataclass
@@ -1524,9 +1525,9 @@ class BrainService:
             raise DatabaseError(f"Failed to clear history: {e}")
 
     @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
-    def _call_api(self, messages: List[Dict[str, str]]) -> str:
+    async def _call_api(self, messages: List[Dict[str, str]]) -> str:
         """
-        Call the OpenRouter API with exponential backoff retry.
+        Call the OpenRouter API with exponential backoff retry and circuit breaker.
 
         Args:
             messages: List of message dicts with role and content.
@@ -1538,6 +1539,25 @@ class BrainService:
             APIError: If API call fails after all retries.
             RateLimitError: If rate limited by the API.
             APIConnectionError: If connection fails.
+            CircuitOpenError: If circuit breaker is open.
+        """
+        # Get the circuit breaker for OpenRouter
+        circuit = get_circuit_breaker('openrouter')
+        if circuit is None:
+            logger.warning("OpenRouter circuit breaker not found, proceeding without circuit protection")
+            return await self._call_api_internal(messages)
+            
+        # Call with circuit breaker protection
+        try:
+            return await circuit.call(self._call_api_internal, messages)
+        except CircuitOpenError as e:
+            logger.error(f"OpenRouter circuit breaker open: {e}")
+            raise
+            
+    @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
+    async def _call_api_internal(self, messages: List[Dict[str, str]]) -> str:
+        """
+        Internal implementation of OpenRouter API call with retry.
         """
         headers = {
             "Content-Type": "application/json",

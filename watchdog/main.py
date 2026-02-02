@@ -40,18 +40,27 @@ def start_health_server(port: int) -> None:
 
 def _send_heartbeat() -> None:
     try:
-        query_db(
-            """
-            INSERT INTO worker_registry (worker_id, worker_type, status, last_heartbeat)
-            VALUES ($1, 'watchdog', 'active', NOW())
-            ON CONFLICT (worker_id) DO UPDATE SET
-                last_heartbeat = NOW(),
-                status = 'active'
-            """,
-            [WORKER_ID],
-        )
-    except Exception:
-        pass
+        from core.heartbeat import send_heartbeat as redis_heartbeat
+        success = redis_heartbeat(WORKER_ID)
+        if not success:
+            print(f"WATCHDOG heartbeat failed", flush=True)
+    except Exception as e:
+        print(f"WATCHDOG heartbeat error: {e}", flush=True)
+        # Fallback to direct database update if heartbeat module fails
+        try:
+            query_db(
+                """
+                INSERT INTO worker_registry (worker_id, worker_type, status, last_heartbeat)
+                VALUES ($1, 'watchdog', 'active', NOW())
+                ON CONFLICT (worker_id) DO UPDATE SET
+                    last_heartbeat = NOW(),
+                    status = 'active'
+                """,
+                [WORKER_ID],
+            )
+            print(f"WATCHDOG heartbeat fallback succeeded", flush=True)
+        except Exception as db_err:
+            print(f"WATCHDOG heartbeat fallback failed: {db_err}", flush=True)
 
 
 def _issue_to_task(issue: Dict[str, Any]) -> Dict[str, Any]:
