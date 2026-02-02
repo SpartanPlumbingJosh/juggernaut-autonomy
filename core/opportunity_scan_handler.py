@@ -303,13 +303,32 @@ def _create_diverse_tasks(execute_sql, log_action, config):
 
 def _gen_opps(source_id, source_type):
     """Generate opportunities for a given source.
-
-    Note: Previously this function produced placeholder / synthetic opportunities
-    which created repetitive evaluation tasks. That behavior was removed.
-    If you later add real API integrations, this is where they should live.
+    
+    IMPORTANT: This is currently a placeholder function that returns an empty list.
+    No actual opportunity generation happens here yet - this is reserved for
+    future API integrations with external opportunity sources.
+    
+    When implementing real opportunity sources:
+    1. Add source-specific API clients and logic here
+    2. Return a list of opportunity dicts with the following structure:
+       {
+           "type": "domain|saas|digital_product|api_service",
+           "cat": "category within type",
+           "desc": "opportunity description",
+           "val": estimated_value_float,
+           "confidence": confidence_score_float,
+           "meta": {"additional": "metadata"}
+       }
+    
+    Args:
+        source_id: UUID of the opportunity source from opportunity_sources table
+        source_type: Type of source (e.g., "scanner", "api", "manual")
+        
+    Returns:
+        List of opportunity dictionaries (currently empty)
     """
-    _ = (source_id, source_type)
-    return []
+    _ = (source_id, source_type)  # Unused parameters
+    return []  # No opportunities generated yet
 
 
 def _coerce_config(config, log_action):
