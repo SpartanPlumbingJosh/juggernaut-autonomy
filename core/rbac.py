@@ -211,10 +211,11 @@ class PermissionResult:
 
     allowed: bool
     reason: str
+    action: str
+    worker_id: Optional[str] = None
     scope: Optional[str] = None
     requires_approval: bool = False
     daily_calls_remaining: Optional[int] = None
-    action: str
     resource: Optional[str] = None
     role_name: Optional[str] = None
     checked_at: Optional[str] = None
