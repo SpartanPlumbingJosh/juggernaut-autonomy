@@ -211,7 +211,9 @@ class PermissionResult:
 
     allowed: bool
     reason: str
-    worker_id: str
+    scope: Optional[str] = None
+    requires_approval: bool = False
+    daily_calls_remaining: Optional[int] = None
     action: str
     resource: Optional[str] = None
     role_name: Optional[str] = None
@@ -367,6 +369,152 @@ def get_role_permissions(role_name: str) -> Optional[Dict[str, Any]]:
         rows = result.get("rows", [])
         return rows[0] if rows else None
     except RBACError:
+        return None
+
+
+def check_tool_permission(
+    worker_id: str,
+    tool_name: str,
+    estimated_cost: Optional[float] = None
+) -> PermissionResult:
+    """
+    Check if a worker has permission to use a specific tool.
+    
+    This function uses the new tool-level permissions schema to check if
+    a worker is allowed to use a specific tool, considering:
+    - Tool risk level
+    - Worker permissions
+    - Rate limits
+    - Budget constraints
+    
+    Args:
+        worker_id: ID of the worker requesting permission
+        tool_name: Name of the tool to use
+        estimated_cost: Optional estimated cost of the tool execution
+        
+    Returns:
+        PermissionResult with allowed status, reason, and additional metadata
+    """
+    checked_at = datetime.now(timezone.utc).isoformat()
+    
+    # First try using the new schema
+    try:
+        sql = f"""
+        SELECT * FROM check_tool_permission({_escape_value(worker_id)}, {_escape_value(tool_name)})
+        """
+        result = _execute_query(sql)
+        rows = result.get("rows", [])
+        
+        if rows:
+            permission_data = rows[0]
+            allowed = permission_data.get("allowed", False)
+            reason = permission_data.get("reason", "")
+            requires_approval = permission_data.get("requires_approval", False)
+            permission_level = permission_data.get("permission_level")
+            daily_calls_remaining = permission_data.get("daily_calls_remaining", 0)
+            
+            # Log the access attempt
+            log_access_attempt(
+                worker_id=worker_id,
+                action=f"tool.{tool_name}",
+                resource=None,
+                role_name=None,  # We don't have this from the function
+                permission_checked=f"tool.{tool_name}",
+                decision="allowed" if allowed else "denied",
+                reason=reason,
+                context={"estimated_cost": estimated_cost, "requires_approval": requires_approval}
+            )
+            
+            return PermissionResult(
+                allowed=allowed,
+                reason=reason,
+                worker_id=worker_id,
+                action=f"tool.{tool_name}",
+                resource=None,
+                role_name=None,
+                checked_at=checked_at,
+                requires_approval=requires_approval,
+                daily_calls_remaining=daily_calls_remaining
+            )
+    except Exception as e:
+        logger.warning(f"Tool permission check using new schema failed: {e}")
+        # Fall back to traditional permission check
+    
+    # Fall back to traditional permission check
+    return check_permission(worker_id, f"tool.{tool_name}")
+
+
+def log_tool_execution(
+    worker_id: str,
+    tool_name: str,
+    parameters: Dict[str, Any],
+    result: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+    cost_usd: Optional[float] = None,
+    duration_ms: Optional[int] = None,
+    task_id: Optional[str] = None
+) -> Optional[str]:
+    """
+    Log a tool execution to the tool_execution_logs table.
+    
+    Args:
+        worker_id: ID of the worker executing the tool
+        tool_name: Name of the tool being executed
+        parameters: Parameters passed to the tool
+        result: Optional result of the tool execution
+        error_message: Optional error message if the tool failed
+        cost_usd: Optional cost of the tool execution in USD
+        duration_ms: Optional duration of the tool execution in milliseconds
+        task_id: Optional ID of the task that triggered this tool execution
+        
+    Returns:
+        ID of the created log entry or None if logging failed
+    """
+    log_id = str(uuid4())
+    status = "success" if error_message is None else "failed"
+    
+    try:
+        sql = f"""
+        INSERT INTO tool_execution_logs (
+            id, worker_id, tool_name, status, parameters,
+            result, error_message, cost_usd, duration_ms,
+            started_at, completed_at, task_id
+        ) VALUES (
+            {_escape_value(log_id)},
+            {_escape_value(worker_id)},
+            {_escape_value(tool_name)},
+            {_escape_value(status)},
+            {_escape_value(parameters)},
+            {_escape_value(result)},
+            {_escape_value(error_message)},
+            {_escape_value(cost_usd)},
+            {_escape_value(duration_ms)},
+            NOW(),
+            {"NOW()" if status == "success" else "NULL"},
+            {_escape_value(task_id)}
+        )
+        """
+        _execute_query(sql)
+        
+        # If we have a cost, update the worker's budget usage
+        if cost_usd is not None and cost_usd > 0:
+            try:
+                update_sql = f"""
+                UPDATE worker_budgets
+                SET 
+                    current_daily_usage = current_daily_usage + {cost_usd},
+                    current_weekly_usage = current_weekly_usage + {cost_usd},
+                    current_monthly_usage = current_monthly_usage + {cost_usd},
+                    updated_at = NOW()
+                WHERE worker_id = {_escape_value(worker_id)}
+                """
+                _execute_query(update_sql)
+            except Exception as budget_err:
+                logger.warning(f"Failed to update budget usage: {budget_err}")
+        
+        return log_id
+    except Exception as e:
+        logger.error(f"Failed to log tool execution: {e}")
         return None
 
 

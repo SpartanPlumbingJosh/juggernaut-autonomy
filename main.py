@@ -2052,7 +2052,7 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
         "code_implementation",
     }
     is_code_task = task_type_lower in code_task_types
-    
+
     # Build completion_evidence from result_data
     evidence_text = None
     evidence_json = None
@@ -2774,8 +2774,8 @@ def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
     """
     Send failed task to dead letter queue.
     
-    Uses error_recovery module's move_to_dead_letter for full task snapshots
-    when available, falls back to simple insert otherwise.
+    Uses the new core.dlq module for robust DLQ handling with task snapshots,
+    falls back to error_recovery or simple insert if unavailable.
     
     Args:
         task_id: The task ID to move to DLQ
@@ -2785,18 +2785,15 @@ def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
     Returns:
         DLQ entry ID if successful, None otherwise
     """
-    # Use sophisticated error_recovery if available
-    if ERROR_RECOVERY_AVAILABLE:
-        dlq_id = move_to_dead_letter(
+    # Try to use the new DLQ module first
+    try:
+        from core.dlq import move_to_dlq as new_move_to_dlq
+        
+        dlq_id = new_move_to_dlq(
             task_id=task_id,
-            reason="max_retries_exceeded",
-            final_error=error,
-            metadata={
-                "attempts": attempts,
-                "worker_id": WORKER_ID,
-                "timestamp": datetime.now(timezone.utc).isoformat()
-            }
+            failure_reason=f"Failed after {attempts} attempts: {error}"
         )
+        
         if dlq_id:
             log_action(
                 "dlq.added", 
@@ -2815,15 +2812,51 @@ def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
                 metadata={"attempts": attempts, "dlq_id": dlq_id}
             )
             return dlq_id
+    except ImportError:
+        log_action(
+            "dlq.module_unavailable",
+            "New DLQ module not available, falling back to error_recovery",
+            level="warn",
+            task_id=task_id
+        )
+    except Exception as e:
         log_action(
             "dlq.failed",
-            f"Failed to add task {task_id} to DLQ via error_recovery",
+            f"Failed to add task {task_id} to DLQ via new module: {e}",
             level="error",
             task_id=task_id
         )
-        return None
     
-    # Fallback to simple insert if error_recovery unavailable
+    # Fall back to error_recovery if available
+    if ERROR_RECOVERY_AVAILABLE:
+        try:
+            dlq_id = move_to_dead_letter(
+                task_id=task_id,
+                reason="max_retries_exceeded",
+                final_error=error,
+                metadata={
+                    "attempts": attempts,
+                    "worker_id": WORKER_ID,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            )
+            if dlq_id:
+                log_action(
+                    "dlq.added", 
+                    f"Task {task_id} sent to DLQ after {attempts} attempts (via error_recovery)",
+                    task_id=task_id, 
+                    error_data={"error": error, "attempts": attempts, "dlq_id": dlq_id}
+                )
+                return dlq_id
+        except Exception as e:
+            log_action(
+                "dlq.error_recovery_failed",
+                f"Failed to add task {task_id} to DLQ via error_recovery: {e}",
+                level="error",
+                task_id=task_id
+            )
+    
+    # Final fallback to simple insert
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         INSERT INTO dead_letter_queue (
@@ -2837,7 +2870,7 @@ def send_to_dlq(task_id: str, error: str, attempts: int) -> Optional[str]:
         execute_sql(sql)
         log_action(
             "dlq.added", 
-            f"Task {task_id} sent to DLQ after {attempts} attempts (fallback)", 
+            f"Task {task_id} sent to DLQ after {attempts} attempts (fallback insert)", 
             task_id=task_id, 
             error_data={"error": error, "attempts": attempts}
         )
@@ -5283,6 +5316,87 @@ class HealthHandler(BaseHTTPRequestHandler):
     """HTTP handler for health checks and dashboard API."""
     
     def log_message(self, format, *args):
+        """Override to reduce log noise."""
+        if args and args[0].startswith('GET /health'):
+            # Don't log health checks
+            return
+        logger.info("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
+    
+    def do_GET(self):
+        """Handle GET requests."""
+        if self.path == '/health':
+            self._handle_health_check()
+            return
+        
+        # Handle other GET requests...
+        self.send_error(404, "Not Found")
+    
+    def _handle_health_check(self):
+        """Handle health check requests."""
+        try:
+            # Import health check module
+            from core.health import check_database_connection, check_worker_registry, check_memory_usage
+            
+            # Run health checks
+            db_status, db_message, db_details = check_database_connection()
+            workers_status, workers_message, workers_details = check_worker_registry()
+            memory_status, memory_message, memory_details = check_memory_usage()
+            
+            # Determine overall status
+            overall_status = "healthy"
+            if not db_status:
+                overall_status = "unhealthy"
+            elif not workers_status:
+                overall_status = "degraded"
+            
+            # Build response
+            uptime_seconds = (datetime.now(timezone.utc) - START_TIME).total_seconds()
+            response = {
+                "status": overall_status,
+                "service": "juggernaut-main",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "uptime_seconds": uptime_seconds,
+                "checks": {
+                    "database": {
+                        "status": "healthy" if db_status else "unhealthy",
+                        "message": db_message,
+                        "details": db_details
+                    },
+                    "workers": {
+                        "status": "healthy" if workers_status else "unhealthy",
+                        "message": workers_message,
+                        "details": workers_details
+                    },
+                    "memory": {
+                        "status": "healthy" if memory_status else "unhealthy",
+                        "message": memory_message,
+                        "details": memory_details
+                    }
+                },
+                "modules": {
+                    "brain": BRAIN_API_AVAILABLE,
+                    "experiments": EXPERIMENTS_AVAILABLE,
+                    "orchestration": ORCHESTRATION_AVAILABLE,
+                    "proactive": PROACTIVE_AVAILABLE,
+                    "error_recovery": ERROR_RECOVERY_AVAILABLE,
+                    "rbac": RBAC_AVAILABLE
+                }
+            }
+            
+            # Send response
+            self.send_response(200 if overall_status == "healthy" else 503)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode('utf-8'))
+        except Exception as e:
+            logger.error(f"Health check failed: {e}")
+            self.send_response(500)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps({
+                "status": "error",
+                "message": f"Health check failed: {str(e)}"
+            }).encode('utf-8'))
         pass  # Suppress default logging
     
     def send_cors_headers(self):
