@@ -626,7 +626,7 @@ class BrainService:
         if not enable_tools:
             return prompt
 
-        return f"{prompt}\n\n{self._EVIDENCE_DIRECTIVE}"
+        return f"{prompt}\n\n{self._EVIDENCE_ONLY_DIRECTIVE}"
 
     def _determine_max_iterations(self, question: str, context: Optional[Dict[str, Any]] = None) -> int:
         """Dynamically determine max iterations based on task complexity.
