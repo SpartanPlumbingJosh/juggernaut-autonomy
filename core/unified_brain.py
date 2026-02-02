@@ -1599,7 +1599,20 @@ class BrainService:
                 task_payload = arguments.get("task_payload")
                 if not isinstance(task_payload, dict):
                     task_payload = {}
-                auto_merge = bool(arguments.get("auto_merge", False))
+                auto_merge_raw = arguments.get("auto_merge", False)
+                if isinstance(auto_merge_raw, bool):
+                    auto_merge = auto_merge_raw
+                elif isinstance(auto_merge_raw, str):
+                    auto_merge = auto_merge_raw.strip().lower() in (
+                        "true",
+                        "1",
+                        "yes",
+                        "y",
+                    )
+                elif isinstance(auto_merge_raw, (int, float)):
+                    auto_merge = bool(auto_merge_raw)
+                else:
+                    auto_merge = False
 
                 if not task_title or not task_description:
                     return {
