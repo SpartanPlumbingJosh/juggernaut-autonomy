@@ -17,13 +17,70 @@ import urllib.error
 import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
 from uuid import uuid4
+from dataclasses import dataclass, field
 
 import requests
 
 from .database import query_db, escape_sql_value
 from .mcp_tool_schemas import get_tool_schemas
+
+
+@dataclass
+class ReasoningState:
+    """Tracks state for multi-step reasoning processes.
+    
+    This class maintains the context and progress of complex reasoning chains,
+    allowing the Brain to effectively perform multi-step problem-solving tasks
+    like diagnosis → analysis → solution → verification.
+    """
+    # Current reasoning stage
+    stage: str = "initial"  # initial, diagnosing, analyzing, solving, verifying, concluded
+    
+    # Reasoning plan steps
+    plan: List[str] = field(default_factory=list)
+    
+    # Accumulated findings from tools
+    findings: Dict[str, Any] = field(default_factory=dict)
+    
+    # Current step in the plan
+    current_step: int = 0
+    
+    # Steps that have been completed
+    completed_steps: Set[int] = field(default_factory=set)
+    
+    # Original question that initiated the reasoning
+    original_question: str = ""
+    
+    # Whether this is a multi-step reasoning task
+    is_multi_step: bool = False
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert reasoning state to a dictionary for serialization."""
+        return {
+            "stage": self.stage,
+            "plan": self.plan,
+            "findings": self.findings,
+            "current_step": self.current_step,
+            "completed_steps": list(self.completed_steps),
+            "is_multi_step": self.is_multi_step,
+        }
+    
+    def get_next_step(self) -> Optional[str]:
+        """Get the next step in the plan, if any."""
+        if self.current_step < len(self.plan):
+            return self.plan[self.current_step]
+        return None
+    
+    def complete_current_step(self):
+        """Mark the current step as completed and advance to the next step."""
+        self.completed_steps.add(self.current_step)
+        self.current_step += 1
+    
+    def is_complete(self) -> bool:
+        """Check if all steps in the plan have been completed."""
+        return self.current_step >= len(self.plan) or self.stage == "concluded"
 
 # Configure module logger
 logger = logging.getLogger(__name__)
@@ -562,14 +619,102 @@ class BrainService:
 
     _EVIDENCE_REFUSAL_MESSAGE = "I cannot verify this without data."
 
-    def _apply_evidence_directive(self, system_prompt: str, enable_tools: bool) -> str:
+    def _apply_evidence_directive(self, prompt: str, enable_tools: bool) -> str:
+        """Apply evidence directive to system prompt if tools are enabled."""
         if not enable_tools:
-            return system_prompt
-        if "EVIDENCE-ONLY MODE" in (system_prompt or "") or "EVIDENCE MODE" in (
-            system_prompt or ""
-        ):
-            return system_prompt
-        return f"{system_prompt}\n\n{self._EVIDENCE_ONLY_DIRECTIVE}".strip()
+            return prompt
+
+        return f"{prompt}\n\n{self._EVIDENCE_DIRECTIVE}"
+
+    def _determine_max_iterations(self, question: str, context: Optional[Dict[str, Any]] = None) -> int:
+        """Dynamically determine max iterations based on task complexity.
+
+        Analyzes the question and context to determine the appropriate number of
+        tool call iterations allowed for this consultation. Complex reasoning tasks
+        like diagnosis, debugging, or multi-step processes are allocated more iterations.
+
+        Args:
+            question: The user's question or prompt
+            context: Optional additional context
+
+        Returns:
+            int: Maximum number of tool call iterations to allow
+        """
+        # Base iterations for simple tasks
+        base_iterations = 10
+
+        # Check for explicit multi-step reasoning patterns
+        multi_step_patterns = [
+            "diagnose", "debug", "troubleshoot", "investigate", "analyze", "root cause",
+            "step by step", "multi-step", "sequence", "workflow", "process",
+            "first.*then", "after that", "finally", "lastly",
+            "find.*fix", "identify.*resolve", "determine.*solve"
+        ]
+
+        question_lower = question.lower()
+
+        # Check for complex reasoning patterns
+        for pattern in multi_step_patterns:
+            if re.search(pattern, question_lower):
+                return base_iterations * 3  # Triple iterations for complex reasoning
+
+        # Check for explicit tool chains
+        tool_chain_patterns = [
+            "use.*then", "query.*analyze", "search.*summarize",
+            "find.*compare", "collect.*evaluate", "execute.*verify"
+        ]
+
+        for pattern in tool_chain_patterns:
+            if re.search(pattern, question_lower):
+                return base_iterations * 2  # Double iterations for tool chains
+
+        # Check context for complexity indicators
+        if context and context.get("complex_task"):
+            return base_iterations * 2
+
+        return base_iterations
+
+    def _update_reasoning_state(self, state: ReasoningState, tool_name: str, arguments: Dict[str, Any], result: Dict[str, Any], success: bool) -> None:
+        """Update reasoning state based on tool execution results.
+
+        Tracks findings and progresses through reasoning stages based on accumulated evidence.
+
+        Args:
+            state: The current reasoning state
+            tool_name: Name of the tool that was executed
+            arguments: Arguments passed to the tool
+            result: Result returned from the tool
+            success: Whether the tool execution was successful
+        """
+        if not state.is_multi_step:
+            return
+
+        # Store findings in reasoning state
+        finding_key = f"{tool_name}_{len(state.findings)}"
+        state.findings[finding_key] = {
+            "tool": tool_name,
+            "arguments": arguments,
+            "result": result,
+            "success": success
+        }
+
+        # Progress through reasoning stages based on findings and current stage
+        if state.stage == "diagnosing" and len(state.findings) >= 2:
+            # After gathering enough diagnostic data, move to analysis
+            if state.current_step < 2:
+                state.complete_current_step()
+
+        elif state.stage == "analyzing" and len(state.findings) >= 3:
+            # After sufficient analysis, move to solution phase
+            if state.current_step < 3:
+                state.complete_current_step()
+                state.stage = "solving"
+
+        elif state.stage == "solving" and len(state.findings) >= 5:
+            # After implementing solution, move to verification
+            if state.current_step < 4:
+                state.complete_current_step()
+                state.stage = "verifying"
 
     def _extract_evidence_tokens(self, text: str) -> List[str]:
         content = str(text or "")
@@ -1090,12 +1235,46 @@ class BrainService:
         total_output_tokens = 0
         iterations = 0
         accumulated_response = ""
+        
+        # Initialize reasoning state for multi-step reasoning
+        reasoning_state = ReasoningState(original_question=question)
+        
+        # Detect if this is a multi-step reasoning task
+        multi_step_patterns = [
+            "diagnose", "debug", "troubleshoot", "investigate", "analyze", "root cause",
+            "step by step", "multi-step", "sequence", "workflow", "process",
+            "find.*fix", "identify.*resolve", "determine.*solve"
+        ]
+        
+        question_lower = question.lower()
+        for pattern in multi_step_patterns:
+            if re.search(pattern, question_lower):
+                reasoning_state.is_multi_step = True
+                if re.search("diagnose|debug|troubleshoot|investigate", question_lower):
+                    reasoning_state.stage = "diagnosing"
+                    reasoning_state.plan = ["identify_problem", "gather_data", "analyze_cause", "propose_solution", "verify_solution"]
+                elif re.search("analyze|root cause", question_lower):
+                    reasoning_state.stage = "analyzing"
+                    reasoning_state.plan = ["gather_data", "analyze_patterns", "identify_factors", "draw_conclusions", "recommend_actions"]
+                break
 
         # Store user message immediately
         self._store_message(session_id, "user", question)
+        
+        # Determine maximum iterations based on task complexity
+        max_iterations = self._determine_max_iterations(question, context)
+        
+        # Add reasoning context to system prompt if this is a multi-step task
+        if reasoning_state.is_multi_step:
+            reasoning_context = f"\n\n## Reasoning Context\nThis appears to be a multi-step reasoning task requiring {reasoning_state.stage}. Follow these steps:\n"
+            reasoning_context += "\n".join([f"{i+1}. {step.replace('_', ' ').title()}" for i, step in enumerate(reasoning_state.plan)])
+            system_prompt += reasoning_context
+            
+            # Rebuild messages with updated system prompt
+            messages[0]["content"] = system_prompt
 
         # Streaming agentic loop
-        while iterations < MAX_TOOL_ITERATIONS:
+        while iterations < max_iterations:
             iterations += 1
 
             # Estimate input tokens
@@ -1180,6 +1359,21 @@ class BrainService:
                     "result": tool_result,
                     "success": success,
                 }
+                
+                # Update reasoning state based on tool execution
+                if reasoning_state.is_multi_step:
+                    self._update_reasoning_state(reasoning_state, tool_name, arguments, tool_result, success)
+                    
+                    # Add reasoning progress as a system message
+                    next_step = reasoning_state.get_next_step()
+                    if next_step:
+                        next_step_formatted = next_step.replace('_', ' ').title()
+                        
+                        # Add reasoning progress as a system message
+                        messages.append({
+                            "role": "system",
+                            "content": f"## Reasoning Progress\nCurrent stage: {reasoning_state.stage}\nNext step: {next_step_formatted}\n\nYou have collected {len(reasoning_state.findings)} findings so far. Continue with the next step in your reasoning process."
+                        })
 
                 # Build execution record
                 execution_record = {
@@ -2156,15 +2350,7 @@ class BrainService:
             return []
 
     def _format_memories(self, memories: List[Dict[str, Any]]) -> str:
-        """
-        Format memories for inclusion in system prompt.
-
-        Args:
-            memories: List of memory records.
-
-        Returns:
-            Formatted memory context string.
-        """
+        """Format memories for inclusion in system prompt."""
         if not memories:
             return ""
 
