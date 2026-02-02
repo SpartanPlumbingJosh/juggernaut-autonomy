@@ -1936,7 +1936,7 @@ class BrainService:
             conditions = " OR ".join(
                 "LOWER(content) LIKE "
                 + escape_sql_value(f"%{_escape_like_term(w)}%")
-                + " ESCAPE '\\\\'"
+                + " ESCAPE '\\'"
                 for w in words[:5]  # Limit to first 5 keywords
             )
 
