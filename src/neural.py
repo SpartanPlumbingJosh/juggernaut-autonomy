@@ -83,33 +83,39 @@ class NeuralChatOrchestrator:
                 logger.error(f"Brain API reported failure: {error_message}")
                 return {"status": "failed", "error": error_message}
 
-            # The Brain API is expected to return a plan that includes initial tool calls
-            # or a direct execution result if no further planning is needed.
-            # For this example, we assume the Brain API handles the full orchestration
-            # and returns the final result. In a more granular system, we might process
-            # a list of planned steps here and execute them sequentially.
-            #
-            # Example of a more granular orchestration loop (if Brain API returned a plan):
-            #
-            # current_state = {} # To hold context between tool calls
-            # for step in brain_response.get("plan", []):
-            #     tool_name = step.get("tool_name")
-            #     tool_input = step.get("tool_input", {})
-            #     logger.info(f"Executing step: Tool='{tool_name}', Input={tool_input}")
-            #
-            #     tool_result = self._execute_single_tool(tool_name, tool_input, current_state)
-            #
-            #     if not tool_result.success:
-            #         logger.error(f"Task sequence failed at tool '{tool_name}': {tool_result.error}")
-            #         return {"status": "failed", "error": f"Tool '{tool_name}' failed: {tool_result.error}"}
-            #
-            #     # Update state with the output of the successful tool call
-            #     current_state.update(tool_result.output)
-            #     logger.info(f"Step successful. Output: {tool_result.output}")
-            #
-            # return {"status": "completed", "final_output": current_state}
-
-            # Assuming Brain API handles the full execution and returns the final outcome
+            # Check if the response contains a plan to execute
+            if "plan" in brain_response:
+                logger.info("Executing multi-step workflow plan")
+                
+                # Initialize state to hold context between tool calls
+                current_state = {} 
+                
+                # Execute each step in the plan sequentially
+                for step in brain_response.get("plan", []):
+                    tool_name = step.get("tool_name")
+                    tool_input = step.get("tool_input", {})
+                    logger.debug(f"Executing step: Tool='{tool_name}', Input={tool_input}")
+                    logger.info(f"Executing step: Tool='{tool_name}'")
+                    
+                    # Execute the tool with current state context
+                    tool_result = self._execute_single_tool(tool_name, tool_input, current_state)
+                    
+                    # Handle tool execution failure
+                    if not tool_result.success:
+                        logger.error(f"Task sequence failed at tool '{tool_name}': {tool_result.error}")
+                        return {"status": "failed", "error": f"Tool '{tool_name}' failed: {tool_result.error}"}
+                    
+                    # Update state with the output of the successful tool call
+                    current_state.update(tool_result.output)
+                    logger.debug(f"Step successful. Output: {tool_result.output}")
+                    logger.info(f"Step '{tool_name}' completed successfully")
+                
+                # All steps completed successfully
+                logger.info("Multi-step workflow plan completed successfully")
+                return {"status": "completed", "final_output": current_state}
+            
+            # No plan found, assume Brain API handled the execution directly
+            logger.info("No multi-step plan found, using direct result from Brain API")
             return brain_response.get("result", {"status": "completed", "message": "Task sequence executed by Brain API."})
 
         except requests.exceptions.RequestException as e:
