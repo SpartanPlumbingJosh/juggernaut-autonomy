@@ -1632,6 +1632,156 @@ class BrainService:
             except Exception as e:
                 return {"error": f"code_executor failed: {type(e).__name__}: {e}"}
 
+        if tool_name == "learning_query":
+            try:
+                category = arguments.get("category")
+                category = str(category).strip() if category is not None else ""
+
+                days_back_raw = arguments.get("days_back", 7)
+                try:
+                    days_back = int(days_back_raw)
+                except (ValueError, TypeError):
+                    days_back = 7
+                days_back = max(1, min(days_back, 365))
+
+                limit_raw = arguments.get("limit", 20)
+                try:
+                    limit = int(limit_raw)
+                except (ValueError, TypeError):
+                    limit = 20
+                limit = max(1, min(limit, 200))
+
+                if category:
+                    result = query_db(
+                        f"""
+                        SELECT id, category, summary, confidence, applied_count, is_validated, created_at
+                        FROM learnings
+                        WHERE created_at > NOW() - INTERVAL '{days_back} days'
+                          AND category = $1
+                        ORDER BY created_at DESC
+                        LIMIT {limit}
+                        """,
+                        [category],
+                    )
+                else:
+                    result = query_db(
+                        f"""
+                        SELECT id, category, summary, confidence, applied_count, is_validated, created_at
+                        FROM learnings
+                        WHERE created_at > NOW() - INTERVAL '{days_back} days'
+                        ORDER BY created_at DESC
+                        LIMIT {limit}
+                        """
+                    )
+                rows = result.get("rows", []) or []
+                return {"rows": rows, "count": len(rows)}
+            except Exception as e:
+                return {"error": f"learning_query failed: {type(e).__name__}: {e}"}
+
+        if tool_name == "learning_apply":
+            try:
+                from core.learning_applier import apply_recent_learnings
+
+                def _log_action(action: str, message: str, level: str = "info", *args, **kwargs) -> None:
+                    level_norm = str(level or "info").lower().strip()
+                    fn = getattr(logger, level_norm, logger.info)
+                    fn("%s: %s", action, message)
+
+                result = apply_recent_learnings(execute_sql=query_db, log_action=_log_action)
+                return result if isinstance(result, dict) else {"result": result}
+            except Exception as e:
+                return {"error": f"learning_apply failed: {type(e).__name__}: {e}"}
+
+        if tool_name == "experiment_list":
+            try:
+                status = arguments.get("status")
+                status = str(status).strip() if status is not None else ""
+
+                if status:
+                    result = query_db(
+                        """
+                        SELECT id, name, status, hypothesis, current_iteration, budget_spent, budget_limit, created_at
+                        FROM experiments
+                        WHERE status = $1
+                        ORDER BY created_at DESC
+                        LIMIT 100
+                        """,
+                        [status],
+                    )
+                else:
+                    result = query_db(
+                        """
+                        SELECT id, name, status, hypothesis, current_iteration, budget_spent, budget_limit, created_at
+                        FROM experiments
+                        ORDER BY created_at DESC
+                        LIMIT 100
+                        """
+                    )
+
+                rows = result.get("rows", []) or []
+                return {"rows": rows, "count": len(rows)}
+            except Exception as e:
+                return {"error": f"experiment_list failed: {type(e).__name__}: {e}"}
+
+        if tool_name == "experiment_progress":
+            try:
+                from core.experiment_executor import progress_experiments
+
+                def _log_action(action: str, message: str, level: str = "info", *args, **kwargs) -> None:
+                    level_norm = str(level or "info").lower().strip()
+                    fn = getattr(logger, level_norm, logger.info)
+                    fn("%s: %s", action, message)
+
+                result = progress_experiments(execute_sql=query_db, log_action=_log_action)
+                return result if isinstance(result, dict) else {"result": result}
+            except Exception as e:
+                return {"error": f"experiment_progress failed: {type(e).__name__}: {e}"}
+
+        if tool_name == "opportunity_scan_run":
+            try:
+                from core.opportunity_scan_handler import handle_opportunity_scan
+
+                config = arguments.get("config")
+                if not isinstance(config, dict):
+                    config = {}
+
+                def _log_action(action: str, message: str, level: str = "info", *args, **kwargs) -> None:
+                    level_norm = str(level or "info").lower().strip()
+                    fn = getattr(logger, level_norm, logger.info)
+                    fn("%s: %s", action, message)
+
+                result = handle_opportunity_scan(
+                    {"config": config},
+                    execute_sql=query_db,
+                    log_action=_log_action,
+                )
+                return result if isinstance(result, dict) else {"result": result}
+            except Exception as e:
+                return {"error": f"opportunity_scan_run failed: {type(e).__name__}: {e}"}
+
+        if tool_name == "puppeteer_healthcheck":
+            try:
+                puppeteer_url = (os.getenv("PUPPETEER_URL", "") or "").strip()
+                if not puppeteer_url:
+                    return {"configured": False, "error": "PUPPETEER_URL not set"}
+
+                token = (os.getenv("PUPPETEER_AUTH_TOKEN", "") or "").strip()
+                url = f"{puppeteer_url.rstrip('/')}/health"
+                headers = {}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+
+                req = urllib.request.Request(url, headers=headers, method="GET")
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    body = resp.read().decode("utf-8")
+                try:
+                    parsed = json.loads(body)
+                except json.JSONDecodeError:
+                    parsed = {"raw": body}
+                return {"configured": True, "url": url, "response": parsed}
+            except Exception as e:
+                return {"error": f"puppeteer_healthcheck failed: {type(e).__name__}: {e}"}
+
         candidate_tokens = [
             MCP_AUTH_TOKEN,
             os.getenv("INTERNAL_API_SECRET", ""),
