@@ -131,6 +131,35 @@ class CircuitBreaker:
             self._on_failure()
             logger.warning(f"Circuit '{self.name}' recorded failure: {type(e).__name__}: {e}")
             raise
+
+    def call_sync(self, func: Callable, *args, **kwargs) -> Any:
+        """Call a synchronous function with circuit breaker protection."""
+        self._check_state_transition()
+
+        if self.state == CircuitState.OPEN:
+            logger.warning(f"Circuit '{self.name}' is OPEN - rejecting call")
+            raise CircuitOpenError(f"Circuit '{self.name}' is OPEN")
+
+        if self.state == CircuitState.HALF_OPEN:
+            if self.half_open_calls >= self.half_open_max_calls:
+                logger.warning(f"Circuit '{self.name}' is HALF_OPEN with max calls reached")
+                raise CircuitOpenError(f"Circuit '{self.name}' is HALF_OPEN, max calls reached")
+            self.half_open_calls += 1
+            logger.info(
+                f"Circuit '{self.name}' is HALF_OPEN - allowing test call {self.half_open_calls}"
+            )
+
+        try:
+            if asyncio.iscoroutinefunction(func):
+                raise TypeError("call_sync cannot be used with coroutine functions")
+
+            result = func(*args, **kwargs)
+            self._on_success()
+            return result
+        except Exception as e:
+            self._on_failure()
+            logger.warning(f"Circuit '{self.name}' recorded failure: {type(e).__name__}: {e}")
+            raise
     
     def _check_state_transition(self) -> None:
         """Check if circuit state should transition based on time elapsed."""
