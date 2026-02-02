@@ -17,8 +17,15 @@ import uvicorn
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# Environment configuration with Railway compatibility
 PORT = int(os.environ.get('PORT', 8080))
-AUTH_TOKEN = os.environ.get('AUTH_TOKEN', '')
+
+# Auth token with fallback for backward compatibility
+AUTH_TOKEN = os.environ.get('PUPPETEER_AUTH_TOKEN', '') or os.environ.get('AUTH_TOKEN', '')
+
+# Log configuration details
+logger.info(f"Puppeteer service configured with PORT={PORT}")
+logger.info(f"Authentication {'enabled' if AUTH_TOKEN else 'disabled'}")
 
 # Global browser instance
 browser: Optional[Browser] = None
@@ -150,12 +157,22 @@ async def send_response(send, status: int, body: bytes, content_type: bytes = b"
 
 
 def check_auth(scope) -> bool:
-    """Check authentication."""
+    """Check authentication with support for multiple token formats."""
     if not AUTH_TOKEN:
         return True
+        
+    # Extract authorization header
     headers = dict(scope.get("headers", []))
     auth = headers.get(b"authorization", b"").decode()
-    return auth == f"Bearer {AUTH_TOKEN}"
+    
+    # Support both "Bearer TOKEN" and raw "TOKEN" formats
+    if auth.startswith("Bearer "):
+        token = auth[7:].strip()
+    else:
+        token = auth.strip()
+        
+    # Check against configured token
+    return token == AUTH_TOKEN
 
 
 async def app(scope, receive, send):
@@ -213,4 +230,6 @@ async def app(scope, receive, send):
 
 if __name__ == "__main__":
     logger.info(f"Starting Puppeteer service on port {PORT}")
+    logger.info(f"Service URL: http://0.0.0.0:{PORT}/")
+    logger.info(f"Health endpoint: http://0.0.0.0:{PORT}/health")
     uvicorn.run(app, host="0.0.0.0", port=PORT)

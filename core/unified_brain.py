@@ -1761,26 +1761,60 @@ class BrainService:
 
         if tool_name == "puppeteer_healthcheck":
             try:
+                # Get Puppeteer URL with proper normalization
                 puppeteer_url = (os.getenv("PUPPETEER_URL", "") or "").strip()
                 if not puppeteer_url:
-                    return {"configured": False, "error": "PUPPETEER_URL not set"}
-
+                    return {
+                        "configured": False, 
+                        "error": "PUPPETEER_URL not set",
+                        "railway_configured": bool(os.getenv("RAILWAY_PROJECT_ID", ""))
+                    }
+                
+                # Ensure URL has proper scheme
+                if not (puppeteer_url.startswith("http://") or puppeteer_url.startswith("https://")):
+                    puppeteer_url = f"https://{puppeteer_url}"
+                
+                # Get auth token
                 token = (os.getenv("PUPPETEER_AUTH_TOKEN", "") or "").strip()
+                
+                # Prepare health check request
                 url = f"{puppeteer_url.rstrip('/')}/health"
                 headers = {}
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
-
-                req = urllib.request.Request(url, headers=headers, method="GET")
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    body = resp.read().decode("utf-8")
-                try:
-                    parsed = json.loads(body)
-                except json.JSONDecodeError:
-                    parsed = {"raw": body}
-                return {"configured": True, "url": url, "response": parsed}
+                
+                # Execute health check
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as response:
+                    data = json.loads(response.read().decode())
+                    return {
+                        "configured": True,
+                        "status": data.get("status", "unknown"),
+                        "version": data.get("version", "unknown"),
+                        "url": puppeteer_url,
+                        "auth_configured": bool(token)
+                    }
+            except urllib.error.URLError as e:
+                return {
+                    "configured": True, 
+                    "status": "error",
+                    "error": f"Connection failed: {e.reason}",
+                    "url": puppeteer_url
+                }
+            except json.JSONDecodeError:
+                return {
+                    "configured": True, 
+                    "status": "error",
+                    "error": "Invalid response from server",
+                    "url": puppeteer_url
+                }
             except Exception as e:
-                return {"error": f"puppeteer_healthcheck failed: {type(e).__name__}: {e}"}
+                return {
+                    "configured": True, 
+                    "status": "error",
+                    "error": f"Unexpected error: {type(e).__name__}: {str(e)}",
+                    "url": puppeteer_url
+                }
 
         candidate_tokens = [
             MCP_AUTH_TOKEN,
