@@ -1525,7 +1525,7 @@ class BrainService:
             raise DatabaseError(f"Failed to clear history: {e}")
 
     @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
-    async def _call_api(self, messages: List[Dict[str, str]]) -> str:
+    def _call_api(self, messages: List[Dict[str, str]]) -> str:
         """
         Call the OpenRouter API with exponential backoff retry and circuit breaker.
 
@@ -1545,17 +1545,17 @@ class BrainService:
         circuit = get_circuit_breaker('openrouter')
         if circuit is None:
             logger.warning("OpenRouter circuit breaker not found, proceeding without circuit protection")
-            return await self._call_api_internal(messages)
-            
+            return self._call_api_internal(messages)
+
         # Call with circuit breaker protection
         try:
-            return await circuit.call(self._call_api_internal, messages)
+            return circuit.call_sync(self._call_api_internal, messages)
         except CircuitOpenError as e:
             logger.error(f"OpenRouter circuit breaker open: {e}")
             raise
             
     @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
-    async def _call_api_internal(self, messages: List[Dict[str, str]]) -> str:
+    def _call_api_internal(self, messages: List[Dict[str, str]]) -> str:
         """
         Internal implementation of OpenRouter API call with retry.
         """
