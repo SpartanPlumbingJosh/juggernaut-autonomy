@@ -2,13 +2,14 @@ import pytest
 import requests
 from unittest.mock import patch, MagicMock
 
-from your_module import (  # Assuming your code is in a file named 'your_module.py'
+from src.neural import (
     NeuralChatOrchestrator,
     ToolExecutionError,
     GITHUB_PUT_FILE_TOOL,
     GITHUB_MERGE_PR_TOOL,
     CODE_GENERATE_TOOL,
     BRAIN_API_URL,
+    ToolResult
 )
 
 # --- Fixtures ---
@@ -38,7 +39,7 @@ def test_tool_execution_error_with_cause():
     original_exception = ValueError("Underlying issue")
     error_message = "Failure due to underlying issue"
     try:
-        raise ToolExecutionError(error_message, cause=original_exception)
+        raise ToolExecutionError(error_message) from original_exception
     except ToolExecutionError as e:
         assert str(e) == error_message
         assert e.__cause__ is original_exception

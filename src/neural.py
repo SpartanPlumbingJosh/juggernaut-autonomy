@@ -3,8 +3,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-# Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Constants for tool names and API endpoints
@@ -30,7 +28,7 @@ class ToolResult:
         self.error = error
 
     def __repr__(self) -> str:
-        return f"ToolResult(success={self.success}, output={self.output}, error={self.error})"
+        return f"ToolResult(success={self.success!r}, output={self.output!r}, error={self.error!r})"
 
 
 class NeuralChatOrchestrator:
@@ -65,7 +63,8 @@ class NeuralChatOrchestrator:
             A dictionary containing the final outcome of the task sequence.
             This could include success status, final output, or error details.
         """
-        logger.info(f"Starting autonomous task sequence for prompt: '{initial_prompt}'")
+        logger.debug(f"Starting autonomous task sequence for prompt: '{initial_prompt}'")
+        logger.info("Starting autonomous task sequence")
 
         try:
             response = requests.post(
@@ -76,7 +75,8 @@ class NeuralChatOrchestrator:
             response.raise_for_status()  # Raise an exception for bad status codes (4xx or 5xx)
 
             brain_response: Dict[str, Any] = response.json()
-            logger.info(f"Brain API response received: {brain_response}")
+            logger.debug(f"Brain API response received: {brain_response}")
+            logger.info("Brain API response received")
 
             if not brain_response.get("success", False):
                 error_message = brain_response.get("error", "Unknown error from Brain API.")
@@ -136,7 +136,8 @@ class NeuralChatOrchestrator:
         Returns:
             A ToolResult object indicating the success or failure of the tool call.
         """
-        logger.info(f"Attempting to execute tool: '{tool_name}' with input: {tool_input}")
+        logger.debug(f"Attempting to execute tool: '{tool_name}' with input: {tool_input}")
+        logger.info(f"Attempting to execute tool: '{tool_name}'")
         logger.debug(f"Current state for tool execution: {current_state}")
 
         try:
@@ -145,7 +146,8 @@ class NeuralChatOrchestrator:
                 # In a real scenario, this would call the actual tool function.
                 # Example: return ActualToolExecutor.execute(GITHUB_PUT_FILE_TOOL, tool_input)
                 if "repo" in tool_input and "file_path" in tool_input and "content" in tool_input:
-                    logger.info(f"Simulating {GITHUB_PUT_FILE_TOOL}: Creating/updating file '{tool_input['file_path']}' in repo '{tool_input['repo']}'.")
+                    logger.debug(f"Simulating {GITHUB_PUT_FILE_TOOL}: Creating/updating file '{tool_input['file_path']}' in repo '{tool_input['repo']}'.") 
+                    logger.info(f"Simulating {GITHUB_PUT_FILE_TOOL}: Creating/updating file")
                     # Simulate successful file creation/update
                     output = {"file_path": tool_input["file_path"], "status": "uploaded"}
                     return ToolResult(success=True, output=output)
@@ -157,7 +159,8 @@ class NeuralChatOrchestrator:
             elif tool_name == GITHUB_MERGE_PR_TOOL:
                 # Simulate github_merge_pr tool execution
                 if "repo" in tool_input and "pr_number" in tool_input:
-                    logger.info(f"Simulating {GITHUB_MERGE_PR_TOOL}: Merging PR #{tool_input['pr_number']} in repo '{tool_input['repo']}'.")
+                    logger.debug(f"Simulating {GITHUB_MERGE_PR_TOOL}: Merging PR #{tool_input['pr_number']} in repo '{tool_input['repo']}'.") 
+                    logger.info(f"Simulating {GITHUB_MERGE_PR_TOOL}: Merging PR")
                     # Simulate successful PR merge
                     output = {"pr_number": tool_input["pr_number"], "status": "merged"}
                     return ToolResult(success=True, output=output)
@@ -170,7 +173,8 @@ class NeuralChatOrchestrator:
                 # Simulate code_generate tool execution
                 # This tool would likely take a description/requirements and return code.
                 if "description" in tool_input:
-                    logger.info(f"Simulating {CODE_GENERATE_TOOL}: Generating code for '{tool_input['description']}'.")
+                    logger.debug(f"Simulating {CODE_GENERATE_TOOL}: Generating code for '{tool_input['description']}'.") 
+                    logger.info(f"Simulating {CODE_GENERATE_TOOL}: Generating code")
                     # Simulate code generation
                     generated_code = f"// Code generated for: {tool_input['description']}\nconsole.log('Hello!');"
                     output = {"code": generated_code, "language": "javascript"}
@@ -214,7 +218,8 @@ if __name__ == "__main__":
             request_body = json.loads(post_data)
             prompt = request_body.get("prompt", "")
 
-            logger.info(f"MockBrainAPIHandler received prompt: '{prompt}'")
+            logger.debug(f"MockBrainAPIHandler received prompt: '{prompt}'")
+            logger.info("MockBrainAPIHandler received prompt")
 
             response_data: Dict[str, Any] = {}
 
