@@ -85,6 +85,86 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "learning_query",
+            "description": "Query recent learnings (without writing raw SQL).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "category": {
+                        "type": "string",
+                        "description": "Optional learning category filter (e.g., failure_pattern, optimization_opportunity).",
+                    },
+                    "days_back": {
+                        "type": "integer",
+                        "description": "How many days back to search (default: 7).",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum rows to return (default: 20).",
+                    },
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "learning_apply",
+            "description": "Apply recent learnings by converting them into actionable governance tasks.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "experiment_list",
+            "description": "List experiments (without writing raw SQL).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Optional status filter (e.g., running, paused, completed, failed).",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "experiment_progress",
+            "description": "Progress running experiments by creating any needed phase tasks.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "opportunity_scan_run",
+            "description": "Run the opportunity scan pipeline and (optionally) create evaluation tasks for high-scoring opportunities.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "config": {
+                        "type": "object",
+                        "description": "Optional scan config object (min_confidence_score, create_tasks_for_high_scoring, dedupe_hours, etc.).",
+                    }
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "puppeteer_healthcheck",
+            "description": "Check whether the puppeteer service is configured and healthy.",
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
     # ============================================================
     # GITHUB TOOLS
     # ============================================================

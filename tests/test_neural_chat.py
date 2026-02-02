@@ -375,3 +375,17 @@ class TestMCPToolSchemas:
         assert "message" in properties
         assert "branch" in properties
         assert "sha" in properties  # Optional but should be defined
+
+    def test_l4_l5_tool_schemas_exist(self):
+        """L4/L5 wiring tools should be defined in schemas."""
+        from core.mcp_tool_schemas import get_tool_schemas
+
+        schemas = get_tool_schemas()
+        tool_names = [s["function"]["name"] for s in schemas]
+
+        assert "learning_query" in tool_names
+        assert "learning_apply" in tool_names
+        assert "experiment_list" in tool_names
+        assert "experiment_progress" in tool_names
+        assert "opportunity_scan_run" in tool_names
+        assert "puppeteer_healthcheck" in tool_names
