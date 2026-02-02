@@ -23,9 +23,27 @@ import httpx
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+# Database configuration from environment variables
+import os
+
+# Get database configuration from environment variables with fallbacks
+NEON_ENDPOINT = os.environ.get(
+    "NEON_ENDPOINT",
+    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+)
+
+# Use DATABASE_URL as primary source, then NEON_CONNECTION_STRING as fallback
+NEON_CONNECTION_STRING = os.environ.get("DATABASE_URL", "") or os.environ.get(
+    "NEON_CONNECTION_STRING",
+    "" # No default connection string - will cause error if not configured
+)
+
+# Log warning if no connection string is provided
+if not NEON_CONNECTION_STRING:
+    logger.warning(
+        "No database connection string provided. Set DATABASE_URL or "
+        "NEON_CONNECTION_STRING environment variable."
+    )
 
 
 _SCHEMA_ENSURED = False
