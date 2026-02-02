@@ -1591,6 +1591,34 @@ class BrainService:
         Raises:
             APIError: If tool execution fails.
         """
+        if tool_name == "code_executor":
+            try:
+                task_id = str(arguments.get("task_id") or uuid4())
+                task_title = str(arguments.get("task_title") or "").strip()
+                task_description = str(arguments.get("task_description") or "").strip()
+                task_payload = arguments.get("task_payload")
+                if not isinstance(task_payload, dict):
+                    task_payload = {}
+                auto_merge = bool(arguments.get("auto_merge", False))
+
+                if not task_title or not task_description:
+                    return {
+                        "error": "code_executor requires task_title and task_description"
+                    }
+
+                result = execute_code_task(
+                    task_id=task_id,
+                    task_title=task_title,
+                    task_description=task_description,
+                    task_payload=task_payload,
+                    auto_merge=auto_merge,
+                )
+                if isinstance(result, dict) and result.get("error") is None:
+                    result.pop("error", None)
+                return result
+            except Exception as e:
+                return {"error": f"code_executor failed: {type(e).__name__}: {e}"}
+
         candidate_tokens = [
             MCP_AUTH_TOKEN,
             os.getenv("INTERNAL_API_SECRET", ""),
