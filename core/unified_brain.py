@@ -15,9 +15,9 @@ import time
 import urllib.request
 import urllib.error
 import urllib.parse
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 from uuid import uuid4
 from dataclasses import dataclass, field
 
@@ -26,7 +26,7 @@ import requests
 from .database import query_db, escape_sql_value
 from .mcp_tool_schemas import get_tool_schemas
 from .retry import exponential_backoff, RateLimitError, APIConnectionError
-from .circuit_breaker import CircuitBreaker, CircuitOpenError, get_circuit_breaker
+from .circuit_breaker import CircuitOpenError, get_circuit_breaker
 
 
 @dataclass
@@ -1559,7 +1559,6 @@ class BrainService:
         """
         Internal implementation of OpenRouter API call with retry.
         """
-        # This is the actual implementation that will be called by the circuit breaker
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -1609,12 +1608,11 @@ class BrainService:
             raise APIError(f"Invalid API response: {e}")
 
     @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
-    async def _call_api_with_tools(
+    def _call_api_with_tools(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """
-        Call the OpenRouter API with optional tool/function calling support, exponential backoff retry,
-        and circuit breaker protection.
+        Call the OpenRouter API with optional tool/function calling support and exponential backoff retry.
 
         Args:
             messages: List of message dicts with role and content.
@@ -1627,29 +1625,7 @@ class BrainService:
             APIError: If API call fails after all retries.
             RateLimitError: If rate limited by the API.
             APIConnectionError: If connection fails.
-            CircuitOpenError: If circuit breaker is open.
         """
-        # Get the circuit breaker for OpenRouter
-        circuit = get_circuit_breaker('openrouter')
-        if circuit is None:
-            logger.warning("OpenRouter circuit breaker not found, proceeding without circuit protection")
-            return await self._call_api_with_tools_internal(messages, tools)
-            
-        # Call with circuit breaker protection
-        try:
-            return await circuit.call(self._call_api_with_tools_internal, messages, tools)
-        except CircuitOpenError as e:
-            logger.error(f"OpenRouter circuit breaker open: {e}")
-            raise
-            
-    @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
-    async def _call_api_with_tools_internal(
-        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None
-    ) -> Tuple[str, List[Dict[str, Any]]]:
-        """
-        Internal implementation of OpenRouter API call with tools and retry.
-        """
-        # This is the actual implementation that will be called by the circuit breaker
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
@@ -1707,12 +1683,11 @@ class BrainService:
             logger.error(f"Failed to parse API response: {e}")
             raise APIError(f"Invalid API response: {e}")
 
-    async def _stream_api_call(
+    def _stream_api_call(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None
     ) -> Generator[Tuple[str, List[Dict[str, Any]]], None, None]:
         """
-        Stream API call to OpenRouter with tool support using requests library,
-        with circuit breaker protection.
+        Stream API call to OpenRouter with tool support using requests library.
 
         This method enables real-time token streaming from OpenRouter. It yields
         content chunks as they arrive, and accumulates tool_calls for when the
@@ -1729,28 +1704,7 @@ class BrainService:
 
         Raises:
             APIError: If API call fails.
-            CircuitOpenError: If circuit breaker is open.
         """
-        # Get the circuit breaker for OpenRouter
-        circuit = get_circuit_breaker('openrouter')
-        if circuit is None:
-            logger.warning("OpenRouter circuit breaker not found, proceeding without circuit protection")
-            return self._stream_api_call_internal(messages, tools)
-            
-        # Call with circuit breaker protection
-        try:
-            return await circuit.call(self._stream_api_call_internal, messages, tools)
-        except CircuitOpenError as e:
-            logger.error(f"OpenRouter circuit breaker open: {e}")
-            raise
-            
-    def _stream_api_call_internal(
-        self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None
-    ) -> Generator[Tuple[str, List[Dict[str, Any]]], None, None]:
-        """
-        Internal implementation of streaming API call.
-        """
-        # This is the actual implementation that will be called by the circuit breaker
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {self.api_key}",
