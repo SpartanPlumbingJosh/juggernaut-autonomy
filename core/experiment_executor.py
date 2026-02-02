@@ -19,22 +19,26 @@ logger = logging.getLogger(__name__)
 def _normalize_task_priority(value: Any) -> str:
     """Normalize legacy integer priorities to DB enum values."""
 
-    allowed = {"low", "medium", "high", "critical"}
+    # Valid DB enum values for governance_tasks.priority
+    allowed = {"critical", "high", "normal", "low", "deferred"}
 
     if value is None:
-        return "medium"
+        return "normal"
 
     if isinstance(value, str):
         v = value.strip().lower()
         if v in allowed:
             return v
+        # Legacy value mapping
+        if v == "medium":
+            return "normal"
         if v.isdigit():
             try:
                 value = int(v)
             except Exception:
-                return "medium"
+                return "normal"
         else:
-            return "medium"
+            return "normal"
 
     if isinstance(value, (int, float)):
         n = int(value)
@@ -42,15 +46,15 @@ def _normalize_task_priority(value: Any) -> str:
         if n <= 1:
             return "high"
         if n == 2:
-            return "medium"
+            return "normal"
         if n == 3:
-            return "medium"
+            return "normal"
         if n == 4:
             return "low"
         if n >= 5:
-            return "low"
+            return "deferred"
 
-    return "medium"
+    return "normal"
 
 
 # Task templates for each experiment type
@@ -198,12 +202,40 @@ def classify_experiment(experiment: Dict[str, Any]) -> Optional[str]:
     name = (experiment.get("name") or "").lower()
     desc = (experiment.get("description") or "").lower()
     combined = f"{name} {desc}"
-
+    
+    # Check for explicit experiment_type field first (preferred method)
+    exp_type = experiment.get("experiment_type")
+    if exp_type and isinstance(exp_type, str):
+        return exp_type.lower()
+    
+    # Pattern matching on experiment name/description
+    # Order matters here - more specific patterns first
+    
+    # Match domain flip experiments (highest priority)
+    if "domain flip" in combined or "domain-flip" in combined or "domain_flip" in combined:
+        return "domain_flip"
+    
+    # Match specific experiment prefixes
+    if "revenue-exp" in combined and "domain flip" in combined:
+        return "domain_flip"
+        
     if "review" in combined and ("response" in combined or "service" in combined):
         return "review_response_service"
-
-    # Future experiment types can be added here
-    return None
+        
+    # Match rollback capability tests
+    if "rollback" in combined and "test" in combined:
+        return "rollback_test"
+        
+    # Match wire-up tests
+    if "wire" in combined and "test" in combined:
+        return "test"
+        
+    # Match revenue experiments
+    if "revenue" in combined and "exp" in combined:
+        return "revenue"
+    
+    # Default to "revenue" for unknown experiments
+    return "revenue"
 
 
 def get_existing_tasks(
@@ -295,7 +327,7 @@ def create_task_for_experiment(
                 '{description}',
                 '{task_type}',
                 'pending',
-                '{priority}'::task_priority,
+                '{priority}'::priority_level,
                 '{payload_json}'::jsonb,
                 '{tags_json}'::jsonb,
                 '{now}',
