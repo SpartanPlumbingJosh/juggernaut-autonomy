@@ -95,7 +95,8 @@ curl -H "Authorization: Bearer <your-api-key>" \
 
 ## API Endpoints
 
-All endpoints remain the same:
+### Dashboard API Endpoints
+All dashboard endpoints remain the same:
 - `GET /health` - Health check
 - `GET /v1/overview` - Dashboard overview
 - `GET /v1/revenue_summary` - Revenue summary
@@ -107,6 +108,25 @@ All endpoints remain the same:
 - `GET /v1/profit_loss` - Profit/loss analysis
 - `GET /v1/pending_approvals` - Pending approvals
 - `GET /v1/system_alerts` - System alerts
+
+### Unified Brain API Endpoints
+The Unified Brain API is available at:
+- `POST /api/brain/unified/consult` - Main consultation endpoint with tool execution
+- `POST /api/brain/unified/stream` - Streaming version of consult endpoint
+- `GET /api/brain/sessions` - List all brain sessions
+- `GET /api/brain/sessions/{id}` - Get specific session
+- `POST /api/brain/sessions` - Create new session
+
+### Authentication
+
+#### Dashboard API
+API keys use format: `jug_{user_id}_{timestamp}_{signature}`
+
+#### Unified Brain API
+Supports multiple authentication methods:
+1. Query parameter: `?token=YOUR_TOKEN`
+2. Authorization header: `Authorization: Bearer YOUR_TOKEN`
+3. API key header: `x-api-key: YOUR_TOKEN`
 
 ## Cost Comparison
 
