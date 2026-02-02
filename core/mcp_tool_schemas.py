@@ -23,12 +23,12 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "sql": {
                         "type": "string",
-                        "description": "The SQL SELECT query to execute. Examples: 'SELECT status, COUNT(*) FROM governance_tasks GROUP BY status', 'SELECT * FROM worker_registry WHERE status = \\'active\\''"
+                        "description": "The SQL SELECT query to execute. Examples: 'SELECT status, COUNT(*) FROM governance_tasks GROUP BY status', 'SELECT * FROM worker_registry WHERE status = \\'active\\''",
                     }
                 },
-                "required": ["sql"]
-            }
-        }
+                "required": ["sql"],
+            },
+        },
     },
     {
         "type": "function",
@@ -41,18 +41,50 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                     "action": {
                         "type": "string",
                         "enum": ["task.create", "task.complete"],
-                        "description": "The action to execute"
+                        "description": "The action to execute",
                     },
                     "params": {
                         "type": "object",
-                        "description": "Action parameters. For task.create: {title, description, priority, task_type}. For task.complete: {id, evidence}"
-                    }
+                        "description": "Action parameters. For task.create: {title, description, priority, task_type}. For task.complete: {id, evidence}",
+                    },
                 },
-                "required": ["action", "params"]
-            }
-        }
+                "required": ["action", "params"],
+            },
+        },
     },
-
+    {
+        "type": "function",
+        "function": {
+            "name": "code_executor",
+            "description": "Execute the built-in autonomous code executor pipeline (generate code, commit, open PR). Use this for code changes instead of low-level github_put_file choreography.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_id": {
+                        "type": "string",
+                        "description": "Optional task id for tracking. If omitted, one will be generated.",
+                    },
+                    "task_title": {
+                        "type": "string",
+                        "description": "Short title for the work item (used for PR title and branch naming).",
+                    },
+                    "task_description": {
+                        "type": "string",
+                        "description": "Full description of what to build/change.",
+                    },
+                    "task_payload": {
+                        "type": "object",
+                        "description": "Optional executor payload. Supported fields include target_repo/repo, module_name, target_path, requirements, existing_code.",
+                    },
+                    "auto_merge": {
+                        "type": "boolean",
+                        "description": "Whether to attempt auto-merge after PR creation (default: false).",
+                    },
+                },
+                "required": ["task_title", "task_description"],
+            },
+        },
+    },
     # ============================================================
     # GITHUB TOOLS
     # ============================================================
@@ -67,11 +99,11 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                     "state": {
                         "type": "string",
                         "enum": ["open", "closed", "all"],
-                        "description": "Filter PRs by state (default: open)"
+                        "description": "Filter PRs by state (default: open)",
                     }
-                }
-            }
-        }
+                },
+            },
+        },
     },
     {
         "type": "function",
@@ -83,28 +115,22 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file in the repository (e.g., 'core/brain.py')"
+                        "description": "Path to the file in the repository (e.g., 'core/brain.py')",
                     },
                     "content": {
                         "type": "string",
-                        "description": "New content for the file"
+                        "description": "New content for the file",
                     },
-                    "message": {
-                        "type": "string",
-                        "description": "Commit message"
-                    },
-                    "branch": {
-                        "type": "string",
-                        "description": "Branch to commit to"
-                    },
+                    "message": {"type": "string", "description": "Commit message"},
+                    "branch": {"type": "string", "description": "Branch to commit to"},
                     "sha": {
                         "type": "string",
-                        "description": "SHA of the file to update (required for updating existing files)"
-                    }
+                        "description": "SHA of the file to update (required for updating existing files)",
+                    },
                 },
-                "required": ["path", "content", "message", "branch"]
-            }
-        }
+                "required": ["path", "content", "message", "branch"],
+            },
+        },
     },
     {
         "type": "function",
@@ -116,16 +142,16 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Path to the file in the repository (e.g., 'core/brain.py')"
+                        "description": "Path to the file in the repository (e.g., 'core/brain.py')",
                     },
                     "branch": {
                         "type": "string",
-                        "description": "Branch name (default: main)"
-                    }
+                        "description": "Branch name (default: main)",
+                    },
                 },
-                "required": ["path"]
-            }
-        }
+                "required": ["path"],
+            },
+        },
     },
     {
         "type": "function",
@@ -137,15 +163,15 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "path": {
                         "type": "string",
-                        "description": "Directory path (e.g., 'core/' or empty for root)"
+                        "description": "Directory path (e.g., 'core/' or empty for root)",
                     },
                     "branch": {
                         "type": "string",
-                        "description": "Branch name (default: main)"
-                    }
-                }
-            }
-        }
+                        "description": "Branch name (default: main)",
+                    },
+                },
+            },
+        },
     },
     {
         "type": "function",
@@ -157,16 +183,16 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "branch_name": {
                         "type": "string",
-                        "description": "Name for the new branch"
+                        "description": "Name for the new branch",
                     },
                     "from_branch": {
                         "type": "string",
-                        "description": "Base branch to create from (default: main)"
-                    }
+                        "description": "Base branch to create from (default: main)",
+                    },
                 },
-                "required": ["branch_name"]
-            }
-        }
+                "required": ["branch_name"],
+            },
+        },
     },
     {
         "type": "function",
@@ -178,24 +204,18 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "head": {
                         "type": "string",
-                        "description": "Branch containing changes"
+                        "description": "Branch containing changes",
                     },
-                    "title": {
-                        "type": "string",
-                        "description": "PR title"
-                    },
-                    "body": {
-                        "type": "string",
-                        "description": "PR description"
-                    },
+                    "title": {"type": "string", "description": "PR title"},
+                    "body": {"type": "string", "description": "PR description"},
                     "base": {
                         "type": "string",
-                        "description": "Target branch (default: main)"
-                    }
+                        "description": "Target branch (default: main)",
+                    },
                 },
-                "required": ["head", "title"]
-            }
-        }
+                "required": ["head", "title"],
+            },
+        },
     },
     {
         "type": "function",
@@ -207,19 +227,18 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "pr_number": {
                         "type": "integer",
-                        "description": "Pull request number to merge"
+                        "description": "Pull request number to merge",
                     },
                     "merge_method": {
                         "type": "string",
                         "enum": ["merge", "squash", "rebase"],
-                        "description": "Merge method to use (default: squash)"
-                    }
+                        "description": "Merge method to use (default: squash)",
+                    },
                 },
-                "required": ["pr_number"]
-            }
-        }
+                "required": ["pr_number"],
+            },
+        },
     },
-
     # ============================================================
     # RAILWAY TOOLS
     # ============================================================
@@ -228,11 +247,8 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
         "function": {
             "name": "railway_list_services",
             "description": "List all Railway services in the JUGGERNAUT project",
-            "parameters": {
-                "type": "object",
-                "properties": {}
-            }
-        }
+            "parameters": {"type": "object", "properties": {}},
+        },
     },
     {
         "type": "function",
@@ -244,15 +260,15 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "service_id": {
                         "type": "string",
-                        "description": "Railway service ID"
+                        "description": "Railway service ID",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Number of deployments to return (default: 5)"
-                    }
-                }
-            }
-        }
+                        "description": "Number of deployments to return (default: 5)",
+                    },
+                },
+            },
+        },
     },
     {
         "type": "function",
@@ -264,18 +280,17 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "deployment_id": {
                         "type": "string",
-                        "description": "Railway deployment ID"
+                        "description": "Railway deployment ID",
                     },
                     "limit": {
                         "type": "integer",
-                        "description": "Number of log lines (default: 100)"
-                    }
+                        "description": "Number of log lines (default: 100)",
+                    },
                 },
-                "required": ["deployment_id"]
-            }
-        }
+                "required": ["deployment_id"],
+            },
+        },
     },
-
     # ============================================================
     # COMMUNICATION TOOLS
     # ============================================================
@@ -287,18 +302,15 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "message": {
-                        "type": "string",
-                        "description": "Message to post"
-                    },
+                    "message": {"type": "string", "description": "Message to post"},
                     "bot": {
                         "type": "string",
-                        "description": "Bot name to post as (e.g., 'JUGGERNAUT', 'BRAIN')"
-                    }
+                        "description": "Bot name to post as (e.g., 'JUGGERNAUT', 'BRAIN')",
+                    },
                 },
-                "required": ["message", "bot"]
-            }
-        }
+                "required": ["message", "bot"],
+            },
+        },
     },
     {
         "type": "function",
@@ -310,13 +322,12 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                 "properties": {
                     "limit": {
                         "type": "integer",
-                        "description": "Number of messages to retrieve (default: 20)"
+                        "description": "Number of messages to retrieve (default: 20)",
                     }
-                }
-            }
-        }
+                },
+            },
+        },
     },
-
     # ============================================================
     # WEB/SEARCH TOOLS
     # ============================================================
@@ -328,18 +339,15 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Search query"
-                    },
+                    "query": {"type": "string", "description": "Search query"},
                     "detailed": {
                         "type": "boolean",
-                        "description": "Whether to return detailed results (default: false)"
-                    }
+                        "description": "Whether to return detailed results (default: false)",
+                    },
                 },
-                "required": ["query"]
-            }
-        }
+                "required": ["query"],
+            },
+        },
     },
     {
         "type": "function",
@@ -349,19 +357,16 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "URL to fetch"
-                    },
+                    "url": {"type": "string", "description": "URL to fetch"},
                     "method": {
                         "type": "string",
                         "enum": ["GET", "POST"],
-                        "description": "HTTP method (default: GET)"
-                    }
+                        "description": "HTTP method (default: GET)",
+                    },
                 },
-                "required": ["url"]
-            }
-        }
+                "required": ["url"],
+            },
+        },
     },
 ]
 
