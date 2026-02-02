@@ -30,7 +30,12 @@ REQUEST_TIMEOUT_SECONDS = 30
 RESEARCH_FINDINGS_TABLE = "research_findings"
 PERPLEXITY_API_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 PERPLEXITY_API_KEY = os.environ.get("PERPLEXITY_API_KEY", "").strip()
+# Puppeteer configuration with proper URL normalization
 PUPPETEER_URL = os.environ.get("PUPPETEER_URL", "").strip()
+if PUPPETEER_URL and not (PUPPETEER_URL.startswith("http://") or PUPPETEER_URL.startswith("https://")):
+    PUPPETEER_URL = f"https://{PUPPETEER_URL}"
+
+# Auth token with default for backward compatibility
 PUPPETEER_AUTH_TOKEN = os.environ.get("PUPPETEER_AUTH_TOKEN", "jug-pup-auth-2024").strip()
 
 _DOMAIN_RE = re.compile(r"\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|co|xyz|ai|app|dev)\b", re.IGNORECASE)
@@ -475,25 +480,42 @@ class ResearchHandler(BaseHandler):
 
 
     def _puppeteer_action(self, action: str, params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Execute a Puppeteer action with improved error handling and URL normalization."""
         if not PUPPETEER_URL:
             return None
 
+        # Prepare request body and headers
         body = json.dumps({"action": action, **(params or {})}).encode("utf-8")
         headers = {"Content-Type": "application/json"}
         if PUPPETEER_AUTH_TOKEN:
             headers["Authorization"] = f"Bearer {PUPPETEER_AUTH_TOKEN}"
 
-        req = urllib.request.Request(
-            f"{PUPPETEER_URL.rstrip('/')}/action",
-            data=body,
-            headers=headers,
-            method="POST",
-        )
-
+        # Ensure URL is properly formatted
+        endpoint_url = f"{PUPPETEER_URL.rstrip('/')}/action"
+        
+        # Log the request (without sensitive data)
+        logger.debug(f"Puppeteer request: {action} to {endpoint_url}")
+        
         try:
+            # Create and execute request
+            req = urllib.request.Request(
+                endpoint_url,
+                data=body,
+                headers=headers,
+                method="POST",
+            )
+            
             with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT_SECONDS) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception:
+                response_data = resp.read().decode("utf-8")
+                return json.loads(response_data)
+        except urllib.error.URLError as e:
+            logger.warning(f"Puppeteer connection error: {e.reason}")
+            return None
+        except json.JSONDecodeError as e:
+            logger.warning(f"Puppeteer response parsing error: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Puppeteer unexpected error: {type(e).__name__}: {e}")
             return None
 
 
