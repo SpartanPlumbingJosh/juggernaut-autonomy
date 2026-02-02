@@ -50,13 +50,32 @@ This document is the canonical reference for which subsystems are *actually used
 
 **IMPORTANT:** Resource allocation is **tracking-only** right now (no enforcement gate).
 
-**Non-canonical / currently unused allocators:**
+### Alternative Resource Allocation Implementations
 
-- `core/resource_allocator.py` (advanced async ROI/budget allocator)
-- `core/resource_allocation.py` (alternate allocator implementation)
-- `src/wire.py` (time-budget allocator for task orchestration)
+There are three separate resource allocation implementations in the codebase, but only the `main.py` implementation is currently used at runtime:
 
-These are not the canonical runtime path for allocations today.
+1. **Canonical Implementation (Active)**: `main.py`
+   - Simple tracking-only implementation that records allocations in the database
+   - No enforcement or gating of resource usage
+   - Used in the actual runtime task lifecycle
+
+2. **Advanced ROI/Budget Allocator (Inactive)**: `core/resource_allocator.py`
+   - More sophisticated implementation with ROI calculation and priority adjustment
+   - Features dynamic budget tracking, time allocation, and conflict resolution
+   - Includes `ResourceAllocator` class with methods like `check_budget`, `record_cost`, `calculate_roi`
+   - **Not currently wired** into the runtime task lifecycle
+
+3. **Basic Allocation Implementation (Inactive)**: `core/resource_allocation.py`
+   - Simpler implementation with basic budget status checking
+   - Includes `ResourceType`, `BudgetStatus`, `PriorityScore` dataclasses
+   - **Not currently wired** into the runtime task lifecycle
+
+4. **Time Budget Allocator (Inactive)**: `src/wire.py`
+   - Specialized for time budget allocation across tasks
+   - Uses priority and estimated complexity to distribute time budget
+   - **Not currently wired** into the runtime task lifecycle
+
+**Future Direction:** The plan is to eventually replace the simple tracking implementation with the more sophisticated `core/resource_allocator.py` implementation once it's fully tested and integrated.
 
 ## Puppeteer / Web Browsing
 

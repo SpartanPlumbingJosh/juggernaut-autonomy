@@ -35,8 +35,8 @@ PUPPETEER_URL = os.environ.get("PUPPETEER_URL", "").strip()
 if PUPPETEER_URL and not (PUPPETEER_URL.startswith("http://") or PUPPETEER_URL.startswith("https://")):
     PUPPETEER_URL = f"https://{PUPPETEER_URL}"
 
-# Auth token with default for backward compatibility
-PUPPETEER_AUTH_TOKEN = os.environ.get("PUPPETEER_AUTH_TOKEN", "jug-pup-auth-2024").strip()
+# Auth token from environment variable
+PUPPETEER_AUTH_TOKEN = os.environ.get("PUPPETEER_AUTH_TOKEN", "").strip()
 
 _DOMAIN_RE = re.compile(r"\b[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.(?:com|net|org|io|co|xyz|ai|app|dev)\b", re.IGNORECASE)
 _PRICE_RE = re.compile(r"(?:\$\s?\d{1,6}(?:[\.,]\d{1,2})?)|(?:\b\d{1,6}\s?(?:usd|\$)\b)", re.IGNORECASE)
