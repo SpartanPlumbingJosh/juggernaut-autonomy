@@ -6,6 +6,8 @@
 
 JUGGERNAUT is an autonomous AI business system designed to scale from basic conversational AI (L1) to full organizational coordination (L5). The system uses a task-driven governance model where multiple AI workers claim and execute tasks from a central queue, coordinated by an orchestrator with monitoring and failover capabilities.
 
+The system now features a **Unified Brain architecture** that centralizes AI reasoning and standardizes tool execution through the Model Context Protocol (MCP) server.
+
 ```mermaid
 flowchart TD
     subgraph External["External Layer"]
@@ -19,6 +21,7 @@ flowchart TD
     end
     
     subgraph Core["Core Engine"]
+        BRAIN[Unified Brain<br>core/unified_brain.py]
         DB[(Database<br>core/database.py)]
         TASK[Task Queue<br>governance_tasks]
         WORKERS[Claude Workers]
@@ -30,7 +33,8 @@ flowchart TD
         NEON[(Neon PostgreSQL)]
     end
     
-    API --> ORCH
+    API --> BRAIN
+    BRAIN --> MCP
     MCP --> ORCH
     ORCH --> DB
     WATCH --> ORCH
@@ -50,6 +54,8 @@ flowchart TD
 3. **Graceful Degradation**: Systems fail safely with rollback capabilities
 4. **Observable Operations**: Comprehensive logging and monitoring
 5. **Human-in-the-Loop**: Escalation paths for critical decisions
+6. **Unified Brain**: Centralized reasoning with standardized tool execution
+7. **Strict Completion Semantics**: Code tasks complete only when PRs are merged
 
 ### Deployment Architecture
 
@@ -66,10 +72,15 @@ flowchart TD
 ```
 juggernaut-autonomy/
 ├── core/                   # Core business logic (30 modules)
+│   ├── unified_brain.py    # Unified Brain implementation
+│   ├── mcp_tool_schemas.py # Tool definitions for OpenRouter
+│   └── verification.py     # Task completion verification
 ├── agents/                 # AI agent definitions
 ├── api/                    # API route handlers
+│   └── brain_api.py        # Unified Brain API endpoints
 ├── experiments/            # Experiment configurations
 ├── mcp/                    # MCP server implementation
+│   └── server.py           # MCP server with tool execution
 ├── migrations/             # Database migrations
 ├── orchestrator/           # Orchestrator components
 ├── services/               # External service integrations
@@ -107,8 +118,10 @@ The `core/` directory contains 30 modules totaling ~700KB of business logic:
 
 | Module | Size | Responsibility |
 |--------|------|----------------|
+| `unified_brain.py` | 120KB | Unified Brain with tool execution, OpenRouter integration |
 | `agents.py` | 30KB | AI agent lifecycle, capabilities, registration |
 | `mcp_factory.py` | 18KB | MCP (Model Context Protocol) server creation |
+| `mcp_tool_schemas.py` | 25KB | Tool schemas for OpenRouter function calling |
 | `tools.py` | 17KB | Tool definitions available to AI agents |
 
 ### Experiments & Learning
@@ -163,35 +176,64 @@ The `core/` directory contains 30 modules totaling ~700KB of business logic:
 
 JUGGERNAUT implements a graduated autonomy model:
 
-### L1: Conversational AI
-- Basic chat interactions
-- Information retrieval
-- Simple Q&A
+### L1: Conversational AI ✅ COMPLETE
+- **Core Capabilities**:
+  - Basic chat interactions
+  - Information retrieval
+  - Simple Q&A
+  - Short-term context
+  - Session logging
 - **Modules**: `agents.py`, `tools.py`
+- **Status**: Complete and operational
 
-### L2: Task Execution with Approval
-- Human-approved task execution
-- Structured workflows
-- Audit trails
+### L2: Reasoners ✅ COMPLETE
+- **Core Capabilities**:
+  - Multi-turn memory
+  - Chain-of-thought reasoning
+  - Suggests actions
+  - References & sourcing
+  - Structured outputs
 - **Modules**: `task_validation.py`, `verification.py`
+- **Status**: Complete and operational
 
-### L3: Semi-Autonomous with Escalation
-- Independent task execution within bounds
-- Automatic escalation for edge cases
-- Learning from outcomes
-- **Modules**: `orchestration.py`, `escalation_manager.py`, `learning_capture.py`
+### L3: Agents ✅ CURRENT LEVEL
+- **Core Capabilities**:
+  - Goal/task acceptance
+  - Workflow planning
+  - Tool/API execution
+  - Persistent task memory
+  - Error recovery
+  - Human-in-the-loop
+  - Action logging
+- **Modules**: `unified_brain.py`, `orchestration.py`, `escalation_manager.py`, `learning_capture.py`
+- **Status**: Mostly complete, active development
 
-### L4: Full Task Autonomy
-- End-to-end task completion
-- Self-correction and recovery
-- Experiment-driven optimization
+### L4: Innovators ⚠️ IN PROGRESS
+- **Core Capabilities**:
+  - Proactive scanning
+  - Experimentation
+  - Hypothesis tracking
+  - Self-improvement
+  - Sandboxed innovation
+  - Rollback
+  - Proposes new automations
+  - Impact simulation
 - **Modules**: `experiments.py`, `error_recovery.py`, `auto_scaling.py`
+- **Status**: Partially implemented
 
-### L5: Organizational Coordination
-- Multi-agent coordination
-- Resource allocation across teams
-- Strategic decision support
+### L5: Organizations ❌ NOT YET
+- **Core Capabilities**:
+  - Goal decomposition
+  - Multi-agent orchestration
+  - Resource allocation
+  - Cross-team conflict management
+  - Org-wide memory
+  - Advanced access control
+  - Automated escalation
+  - Resilience/failover
+  - Executive reporting
 - **Modules**: `conflict_manager.py`, `resource_allocator.py`, `impact_simulation.py`
+- **Status**: Not yet implemented
 
 ## Data Flow
 
@@ -310,8 +352,8 @@ pytest tests/test_database.py
 - [API.md](./API.md) - API endpoint reference
 - [SCHEMA.md](./SCHEMA.md) - Database schema details
 - [DEVELOPMENT.md](./DEVELOPMENT.md) - Development setup
-- [L1_L5_CAPABILITY_MATRIX.md](./L1_L5_CAPABILITY_MATRIX.md) - Capability details
-- [PHASE7_README.md](./PHASE7_README.md) - Phase 7 implementation notes
+- [WORKER_INSTRUCTIONS.md](./WORKER_INSTRUCTIONS.md) - Worker protocol documentation
+- [AUDIT_2026-02-01.md](./AUDIT_2026-02-01.md) - Latest system audit
 
 ## Quick Reference
 
@@ -335,6 +377,9 @@ SELECT * FROM coordination_events ORDER BY created_at DESC LIMIT 20;
 ### Module Import Map
 
 ```python
+# Unified Brain
+from core.unified_brain import BrainService
+
 # Task management
 from core.orchestration import run_orchestration_loop, get_orchestrator_dashboard
 from core.scheduler import Scheduler
@@ -347,15 +392,19 @@ from core.connection_pool import get_connection
 # AI/Agents
 from core.agents import AgentManager
 from core.tools import get_available_tools
+from core.mcp_tool_schemas import BRAIN_TOOLS
 
 # Monitoring
 from core.monitoring import SystemMonitor
 from core.alerting import AlertManager
 from core.slack_notifications import send_slack_alert
+
+# Verification
+from core.verification import CompletionVerifier
 ```
 
 ---
 
-*Last updated: January 2026*
+*Last updated: February 2026*
 *Target audience: Developers new to JUGGERNAUT*
 *Read time: ~15 minutes*

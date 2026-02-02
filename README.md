@@ -11,18 +11,21 @@ JUGGERNAUT is a self-operating business system where AI workers autonomously cla
 - **Tracks revenue experiments** - tests different business approaches and measures results
 - **Coordinates multiple agents** - scales from single-worker execution to multi-agent collaboration
 - **Self-monitors** - logs all activity, tracks progress, and surfaces issues
+- **Unified Brain architecture** - centralized AI reasoning with standardized tool execution
 
 The goal is an AI system that can identify opportunities, build solutions, and generate revenue with minimal human oversight.
 
 ## Structure
 ```
 /core        - Database operations, logging, shared utilities
+/core/unified_brain.py - Centralized brain with tool execution
 /agents      - L3-L5 agent implementations  
 /experiments - Revenue experiment definitions and tracking
 /api         - External API endpoints
 /docs        - Schema documentation, architecture decisions
 /orchestrator - Task coordination and worker management
 /services    - Business logic and integrations
+/mcp         - Model Context Protocol server for tool execution
 ```
 
 ## Quick Start
@@ -33,6 +36,35 @@ python -m core.database  # Verify database connection
 ```
 
 ## Core Functions
+
+### Unified Brain
+```python
+from core.unified_brain import BrainService
+
+brain = BrainService()
+result = brain.consult_with_tools(
+    question="What's the status of our revenue experiments?",
+    enable_tools=True,
+    auto_execute=True
+)
+print(result["response"])
+```
+
+### Code Execution
+```python
+from core.unified_brain import BrainService
+
+brain = BrainService()
+result = brain._execute_tool(
+    tool_name="code_executor",
+    arguments={
+        "task_title": "Add new feature",
+        "task_description": "Implement X functionality",
+        "auto_merge": True
+    }
+)
+print(result)
+```
 
 ### Logging
 ```python
@@ -59,13 +91,17 @@ opp_id = create_opportunity(
 )
 ```
 
-## Current Phase: 0 (Foundation)
+## Current Phase: 3 (Autonomous Development)
 
 - [x] Database schema deployed (21 tables)
 - [x] Core logging functions
 - [x] Opportunity tracking
 - [x] Schema documentation
-- [ ] First revenue experiment
+- [x] Unified Brain architecture
+- [x] Code executor pipeline
+- [x] Strict completion semantics
+- [x] Secrets hardening
+- [ ] Revenue experiments
 
 ## L1-L5 Autonomy Levels
 
@@ -73,7 +109,7 @@ opp_id = create_opportunity(
 |-------|------|--------------|
 | L1 | Conversational | Basic Q&A, chat interface |
 | L2 | Reasoners | Multi-turn memory, chain-of-thought |
-| L3 | Agents | Goal acceptance, tool execution, error recovery |
+| L3 | Agents | Goal acceptance, tool execution, error recovery ← **Current** |
 | L4 | Innovators | Proactive scanning, experimentation, self-improvement |
 | L5 | Organizations | Multi-agent coordination, resource allocation |
 
