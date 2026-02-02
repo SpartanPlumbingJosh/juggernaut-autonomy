@@ -155,18 +155,23 @@ def register_watchdog() -> bool:
 
 
 def send_heartbeat() -> None:
-    """Update heartbeat timestamp in worker registry."""
-    try:
-        execute_query(
-            """
-            UPDATE worker_registry
-            SET last_heartbeat = NOW(), consecutive_failures = 0
-            WHERE worker_id = $1
-            """,
-            [WORKER_ID]
-        )
-    except Exception as e:
-        logger.warning(f"Failed to send heartbeat: {e}")
+    """Update heartbeat timestamp using Redis SETEX pattern."""
+    from core.heartbeat import send_heartbeat as redis_heartbeat
+    
+    success = redis_heartbeat(WORKER_ID)
+    if not success:
+        logger.warning("Failed to send heartbeat via Redis, check Redis connection")
+        
+    # Also try to claim leadership if we're a WATCHDOG
+    if WORKER_ID.startswith("WATCHDOG"):
+        from core.heartbeat import claim_watchdog_leadership, renew_leadership
+        
+        if renew_leadership():
+            logger.debug("Renewed WATCHDOG leadership")
+        elif claim_watchdog_leadership():
+            logger.info("Claimed WATCHDOG leadership")
+        else:
+            logger.debug("Not the leader WATCHDOG instance")
 
 
 def run_all_health_checks() -> Dict[str, Any]:

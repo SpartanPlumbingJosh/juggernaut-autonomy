@@ -226,6 +226,10 @@ def classify_experiment(experiment: Dict[str, Any]) -> Optional[str]:
     if "rollback" in combined and "test" in combined:
         return "rollback_test"
         
+    # Match FIX-XX pattern for rollback tests
+    if combined.startswith("fix-") or combined.startswith("fix:") or "fix-" in combined:
+        return "rollback_test"
+        
     # Match wire-up tests
     if "wire" in combined and "test" in combined:
         return "test"

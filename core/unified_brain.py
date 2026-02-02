@@ -25,6 +25,7 @@ import requests
 
 from .database import query_db, escape_sql_value
 from .mcp_tool_schemas import get_tool_schemas
+from .retry import exponential_backoff, RateLimitError, APIConnectionError
 
 
 @dataclass
@@ -1522,9 +1523,10 @@ class BrainService:
             logger.error(f"Failed to clear history from chat_messages: {e}")
             raise DatabaseError(f"Failed to clear history: {e}")
 
+    @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
     def _call_api(self, messages: List[Dict[str, str]]) -> str:
         """
-        Call the OpenRouter API.
+        Call the OpenRouter API with exponential backoff retry.
 
         Args:
             messages: List of message dicts with role and content.
@@ -1533,7 +1535,9 @@ class BrainService:
             Response text from the model.
 
         Raises:
-            APIError: If API call fails.
+            APIError: If API call fails after all retries.
+            RateLimitError: If rate limited by the API.
+            APIConnectionError: If connection fails.
         """
         headers = {
             "Content-Type": "application/json",
@@ -1570,19 +1574,25 @@ class BrainService:
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
             logger.error(f"OpenRouter API error: HTTP {e.code} - {error_body}")
+            
+            # Check for rate limiting
+            if e.code == 429:
+                raise RateLimitError(f"Rate limited: {error_body}")
+                
             raise APIError(f"API error {e.code}: {error_body}")
         except urllib.error.URLError as e:
             logger.error(f"OpenRouter API connection error: {e}")
-            raise APIError(f"Connection error: {e}")
+            raise APIConnectionError(f"Connection error: {e}")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse API response: {e}")
             raise APIError(f"Invalid API response: {e}")
 
+    @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
     def _call_api_with_tools(
         self, messages: List[Dict[str, Any]], tools: List[Dict[str, Any]] = None
     ) -> Tuple[str, List[Dict[str, Any]]]:
         """
-        Call the OpenRouter API with optional tool/function calling support.
+        Call the OpenRouter API with optional tool/function calling support and exponential backoff retry.
 
         Args:
             messages: List of message dicts with role and content.
@@ -1592,7 +1602,9 @@ class BrainService:
             Tuple of (response_content, tool_calls) where tool_calls may be empty.
 
         Raises:
-            APIError: If API call fails.
+            APIError: If API call fails after all retries.
+            RateLimitError: If rate limited by the API.
+            APIConnectionError: If connection fails.
         """
         headers = {
             "Content-Type": "application/json",
@@ -1607,14 +1619,13 @@ class BrainService:
             "max_tokens": self.max_tokens,
         }
 
-        provider = _provider_routing()
-        if provider is not None:
-            payload["provider"] = provider
-
-        # Add tools if provided
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+
+        provider = _provider_routing()
+        if provider is not None:
+            payload["provider"] = provider
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -1622,15 +1633,16 @@ class BrainService:
         )
 
         try:
-            with urllib.request.urlopen(req, timeout=120) as response:
+            with urllib.request.urlopen(req, timeout=60) as response:
                 result = json.loads(response.read().decode("utf-8"))
 
                 choices = result.get("choices", [])
                 if not choices:
                     raise APIError("No choices in API response")
 
-                message = choices[0].get("message", {})
-                content = message.get("content", "") or ""
+                choice = choices[0]
+                message = choice.get("message", {})
+                content = message.get("content", "")
                 tool_calls = message.get("tool_calls", [])
 
                 return content, tool_calls
@@ -1638,10 +1650,15 @@ class BrainService:
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
             logger.error(f"OpenRouter API error: HTTP {e.code} - {error_body}")
+            
+            # Check for rate limiting
+            if e.code == 429:
+                raise RateLimitError(f"Rate limited: {error_body}")
+                
             raise APIError(f"API error {e.code}: {error_body}")
         except urllib.error.URLError as e:
             logger.error(f"OpenRouter API connection error: {e}")
-            raise APIError(f"Connection error: {e}")
+            raise APIConnectionError(f"Connection error: {e}")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse API response: {e}")
             raise APIError(f"Invalid API response: {e}")
