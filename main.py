@@ -2168,7 +2168,10 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
 
             evidence_type_lower = str(evidence_type or "").strip().lower()
             if evidence_type_lower == "pr_merged":
-                pass
+                if isinstance(evidence_json, dict):
+                    evidence_json["type"] = "pr_merged"
+                evidence_json_type_lower = "pr_merged"
+                evidence_type_lower = "pr_merged"
             elif pr_ref_present or evidence_type_lower in (
                 "pr_created",
                 "pr_created_awaiting_merge",
