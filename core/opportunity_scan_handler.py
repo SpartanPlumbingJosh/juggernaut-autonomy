@@ -29,12 +29,13 @@ def handle_opportunity_scan(task, execute_sql, log_action):
               sources_scanned, opportunities_found, opportunities_qualified,
               and tasks_created counts. On failure, includes error message.
     """
-    config = task.get("config", {})
-    if isinstance(config, str):
-        config = json.loads(config)
-    min_score = config.get("min_confidence_score", 0.7)
-    create_tasks = config.get("create_tasks_for_high_scoring", True)
-    dedupe_hours = config.get("dedupe_hours", 6)
+    # Parse and coerce config with proper type handling
+    config = _coerce_config(task.get("config", {}), log_action)
+    
+    # Extract config values with defaults
+    min_score = _safe_float(config.get("min_confidence_score"), 0.7)
+    create_tasks = _safe_bool(config.get("create_tasks_for_high_scoring"), True)
+    dedupe_hours = _safe_int(config.get("dedupe_hours"), 6)
     results = {
         "sources_scanned": 0,
         "opportunities_found": 0,
@@ -48,12 +49,34 @@ def handle_opportunity_scan(task, execute_sql, log_action):
         src = execute_sql("SELECT id, name, source_type FROM opportunity_sources WHERE active = true")
         sources = src.get("rows", [])
         if not sources:
-            # No sources configured: fall back to diversified proactive work generation
-            created = _create_diverse_tasks(execute_sql, log_action, config)
-            results["tasks_created"] += created.get("tasks_created", 0)
-            results["tasks_skipped_duplicate"] += created.get("tasks_skipped_duplicate", 0)
-            results["tasks_skipped_quality"] = created.get("tasks_skipped_quality", 0)
-            return {"success": True, **results}
+            # No sources configured: log this condition and fall back to diversified proactive work generation
+            log_action(
+                "opportunity_scan.no_sources",
+                "No active opportunity sources found. Falling back to diversified task generation.",
+                "warning"
+            )
+            
+            # Only create diverse tasks if explicitly enabled or not specified
+            if _safe_bool(config.get("fallback_to_diverse_tasks"), True):
+                created = _create_diverse_tasks(execute_sql, log_action, config)
+                results["tasks_created"] += created.get("tasks_created", 0)
+                results["tasks_skipped_duplicate"] += created.get("tasks_skipped_duplicate", 0)
+                results["tasks_skipped_quality"] = created.get("tasks_skipped_quality", 0)
+                
+                # Log the fallback action results
+                log_action(
+                    "opportunity_scan.fallback_complete",
+                    f"Fallback created {created.get('tasks_created', 0)} diverse tasks",
+                    "info"
+                )
+            else:
+                log_action(
+                    "opportunity_scan.fallback_disabled",
+                    "Fallback to diverse tasks is disabled in config",
+                    "info"
+                )
+                
+            return {"success": True, "no_sources": True, **results}
         
         scan_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
@@ -110,8 +133,9 @@ def handle_opportunity_scan(task, execute_sql, log_action):
                                     f"Skipped duplicate evaluation task: {dedupe_key_raw}",
                                     "info",
                                 )
-                            except Exception:
-                                pass
+                            except Exception as log_err:
+                                # Don't silently fail - at least print to stderr
+                                print(f"ERROR: Failed to log skipped task: {log_err}")
                             continue
                     except Exception as dedupe_err:
                         # Best-effort: do not block task creation if dedupe query fails
@@ -132,8 +156,9 @@ def handle_opportunity_scan(task, execute_sql, log_action):
                             f"Created evaluation task: {dedupe_key_raw}",
                             "info",
                         )
-                    except Exception:
-                        pass
+                    except Exception as log_err:
+                        # Don't silently fail - at least print to stderr
+                        print(f"ERROR: Failed to log task creation: {log_err}")
             results["sources_scanned"] += 1
 
         # After scanning, also ensure we generate diverse meaningful work (when allowed)
@@ -187,8 +212,9 @@ def _create_diverse_tasks(execute_sql, log_action, config):
     except Exception as e:
         try:
             log_action("proactive.diverse_generation_failed", str(e), "warning")
-        except Exception:
-            pass
+        except Exception as log_err:
+            # Don't silently fail - at least print to stderr
+            print(f"ERROR: Failed to log diverse generation failure: {log_err}, Original error: {e}")
         return {
             "tasks_created": 0,
             "tasks_skipped_duplicate": 0,
@@ -225,8 +251,9 @@ def _create_diverse_tasks(execute_sql, log_action, config):
                         f"Skipped (title cap): {cand.title}",
                         "info",
                     )
-                except Exception:
-                    pass
+                except Exception as log_err:
+                    # Don't silently fail - at least print to stderr
+                    print(f"ERROR: Failed to log skipped duplicate: {log_err}")
                 continue
         except Exception:
             pass
@@ -256,14 +283,16 @@ def _create_diverse_tasks(execute_sql, log_action, config):
                     f"Created proactive task: {payload.get('dedupe_key')}",
                     "info",
                 )
-            except Exception:
-                pass
+            except Exception as log_err:
+                # Don't silently fail - at least print to stderr
+                print(f"ERROR: Failed to log proactive task creation: {log_err}")
         except Exception as e:
             tasks_skipped_quality += 1
             try:
                 log_action("proactive.task_create_failed", str(e), "warning")
-            except Exception:
-                pass
+            except Exception as log_err:
+                # Don't silently fail - at least print to stderr
+                print(f"ERROR: Failed to log task creation failure: {log_err}, Original error: {e}")
 
     return {
         "tasks_created": tasks_created,
@@ -281,3 +310,71 @@ def _gen_opps(source_id, source_type):
     """
     _ = (source_id, source_type)
     return []
+
+
+def _coerce_config(config, log_action):
+    """Parse and coerce config values to appropriate types.
+    
+    Args:
+        config: Raw config dict or JSON string
+        log_action: Logging function for warnings
+        
+    Returns:
+        dict: Parsed and validated config dictionary
+    """
+    # Handle string configs (from DB or API)
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except Exception as e:
+            log_action(
+                "opportunity_scan.config_parse_error",
+                f"Failed to parse config JSON: {e}",
+                "warning"
+            )
+            return {}
+    
+    # Ensure we have a dict
+    if not isinstance(config, dict):
+        log_action(
+            "opportunity_scan.invalid_config",
+            f"Config is not a dictionary: {type(config)}",
+            "warning"
+        )
+        return {}
+    
+    return config
+
+
+def _safe_float(value, default=0.0):
+    """Safely convert value to float with fallback."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_int(value, default=0):
+    """Safely convert value to int with fallback."""
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (ValueError, TypeError):
+        return default
+
+
+def _safe_bool(value, default=False):
+    """Safely convert value to boolean with fallback."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "yes", "1", "t", "y")
+    try:
+        return bool(value)
+    except (ValueError, TypeError):
+        return default
