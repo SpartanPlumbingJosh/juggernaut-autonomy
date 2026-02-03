@@ -3228,15 +3228,23 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
         log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
         return False, {"blocked": True, "reason": reason}
     
+    # Check approval status FIRST before triggering new approval requests
+    # This prevents infinite loop where risk assessment re-triggers on every pickup
+    requires_approval, approval_id, status = check_approval_status(task)
+    
     # L2: High-risk tasks require approval even if not explicitly marked
-    # Log if approval was bypassed (already approved in prior step)
+    # BUT: If already approved, don't re-trigger approval
     if approval_bypassed and should_require_approval_for_risk(risk_score, risk_level):
         log_action("approval.bypassed", 
                   f"Task '{task.title}' bypassing risk approval (already approved)",
                   task_id=task.id,
                   output_data={"risk_score": risk_score, "risk_level": risk_level, "reason": "prior_approval"})
 
-    if should_require_approval_for_risk(risk_score, risk_level) and not task.requires_approval and not approval_bypassed:
+    # Only trigger risk-based approval if:
+    # 1. Task is high risk
+    # 2. Not already approved (status != "approved")
+    # 3. Not explicitly bypassed
+    if should_require_approval_for_risk(risk_score, risk_level) and status != "approved" and not approval_bypassed:
         if is_code_task:
             # L4-P1: Code tasks should not block on human approval. CodeRabbit is the quality gate.
             log_action(
@@ -3261,8 +3269,7 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
             })
             return False, {"waiting_approval": True, "risk_triggered": True, "risk_score": risk_score, "risk_level": risk_level}
     
-    # Check approval (read-only check)
-    requires_approval, approval_id, status = check_approval_status(task)
+    # Process approval status (already checked above)
     if requires_approval and not is_code_task:
         if status == "denied":
             update_task_status(task.id, "failed", {"reason": "Approval denied"})
