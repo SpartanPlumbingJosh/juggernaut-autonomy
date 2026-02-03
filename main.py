@@ -4835,6 +4835,26 @@ def autonomy_loop():
                               task_id=task_id)
         except Exception as orphan_err:
             log_error(f"Orphaned task handler failed: {orphan_err}")
+        
+        # L4-AUTONOMY: Self-improvement check - detect failure patterns and create fix tasks
+        # Runs every 10 cycles to avoid spam
+        if loop_count % 10 == 0:
+            try:
+                from core.self_improvement import self_improvement_check
+                improvement_result = self_improvement_check()
+                if improvement_result.get("tasks_created", 0) > 0:
+                    log_action(
+                        "self_improvement.fix_tasks_created",
+                        f"Created {improvement_result['tasks_created']} fix tasks from {improvement_result['patterns_detected']} failure patterns",
+                        level="info",
+                        output_data=improvement_result
+                    )
+            except Exception as improvement_err:
+                log_action(
+                    "self_improvement.error",
+                    f"Self-improvement check failed: {improvement_err}",
+                    level="warn"
+                )
 
         # L5-WIRE-04: Create escalations for stuck tasks (in_progress > 30 min)
         try:
