@@ -192,9 +192,6 @@ class RailwayClient:
         """
         Get logs for a deployment.
         
-        Note: Railway's GraphQL API has limited log access.
-        This is a simplified implementation.
-        
         Args:
             deployment_id: Deployment ID
             limit: Max logs to fetch
@@ -203,43 +200,45 @@ class RailwayClient:
         Returns:
             List of log entries
         """
-        # Note: Railway's actual log API may differ
-        # This is a placeholder for the structure
+        # Use deploymentLogs query (correct Railway API)
         query = """
-        query($deploymentId: String!) {
-            deployment(id: $deploymentId) {
-                logs {
-                    edges {
-                        node {
-                            message
-                            timestamp
-                            severity
-                        }
-                    }
-                }
+        query($deploymentId: String!, $limit: Int!) {
+            deploymentLogs(deploymentId: $deploymentId, limit: $limit) {
+                message
+                timestamp
             }
         }
         """
         
         try:
-            data = self._make_request(query, {"deploymentId": deployment_id})
+            data = self._make_request(query, {
+                "deploymentId": deployment_id,
+                "limit": limit
+            })
+            
             logs = []
-            for edge in data.get("deployment", {}).get("logs", {}).get("edges", []):
-                log = edge["node"]
+            for log_entry in data.get("deploymentLogs", []):
+                message = log_entry.get("message", "")
+                
+                # Determine log level from message content
+                level = "INFO"
+                if "ERROR" in message.upper() or "Exception" in message or "Traceback" in message:
+                    level = "ERROR"
+                elif "WARN" in message.upper() or "Warning" in message:
+                    level = "WARN"
+                elif "CRITICAL" in message.upper():
+                    level = "CRITICAL"
                 
                 # Filter by level if specified
-                if filter_level and log.get("severity") != filter_level:
+                if filter_level and level != filter_level:
                     continue
                 
                 logs.append({
-                    "message": log.get("message", ""),
-                    "timestamp": log.get("timestamp", ""),
-                    "level": log.get("severity", "INFO"),
-                    "raw": log
+                    "message": message,
+                    "timestamp": log_entry.get("timestamp", ""),
+                    "level": level,
+                    "raw": log_entry
                 })
-                
-                if len(logs) >= limit:
-                    break
             
             return logs
         except Exception as e:
