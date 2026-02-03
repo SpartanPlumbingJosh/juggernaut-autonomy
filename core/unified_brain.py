@@ -166,6 +166,7 @@ MCP_SERVER_URL = os.getenv(
 )
 MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
 MAX_TOOL_ITERATIONS = 10  # Prevent infinite tool loops
+MAX_STREAM_TOOL_ITERATIONS = int(os.getenv("MAX_STREAM_TOOL_ITERATIONS", "30"))
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
@@ -1179,11 +1180,7 @@ class BrainService:
                     guardrails.stop_reason = "guardrail.stop.no_progress"
 
                 if guardrails.stop_reason:
-                    yield {
-                        "type": "guardrails",
-                        "stop_reason": guardrails.stop_reason,
-                        "state": guardrails.to_dict(),
-                    }
+                    break
 
                 # Add assistant message with tool call
                 messages.append(
@@ -1319,10 +1316,13 @@ class BrainService:
             Event dicts with these types:
                 {"type": "session", "session_id": "...", "is_new_session": bool}
                 {"type": "token", "content": "..."}
+                {"type": "status", "status": "thinking"|"reasoning"|"tool_running"|"summarizing"|"stopped"|..., "detail": "..."}
+                {"type": "budget", "mode": "...", "steps": {"used": N, "max": N}, "policy": {...}}
                 {"type": "tool_start", "tool": "...", "arguments": {...}}
                 {"type": "tool_result", "tool": "...", "result": {...}, "success": bool}
+                {"type": "guardrails", "stop_reason": "...", "state": {...}}
                 {"type": "done", "input_tokens": N, "output_tokens": N, "cost_cents": N,
-                 "tool_executions": [...], "iterations": N}
+                 "tool_executions": [...], "iterations": N, "mode": "...", "budget": {...}}
                 {"type": "error", "message": "..."}
         """
         if not self.api_key:
@@ -1404,6 +1404,8 @@ class BrainService:
 
         max_same_failure = int(requested_max_same_failure) if isinstance(requested_max_same_failure, int) else mode_defaults[normalized_mode]["max_same_failure"]
         max_no_progress_steps = int(requested_max_no_progress_steps) if isinstance(requested_max_no_progress_steps, int) else mode_defaults[normalized_mode]["max_no_progress_steps"]
+        max_same_failure = max(1, max_same_failure)
+        max_no_progress_steps = max(1, max_no_progress_steps)
         
         # Initialize reasoning state for multi-step reasoning
         reasoning_state = ReasoningState(original_question=question)
@@ -1436,6 +1438,7 @@ class BrainService:
             max_iterations = max(int(mode_defaults[normalized_mode]["max_iterations"]), 1)
         if isinstance(requested_max_iterations, int) and requested_max_iterations > 0:
             max_iterations = int(requested_max_iterations)
+        max_iterations = min(max_iterations, MAX_STREAM_TOOL_ITERATIONS)
 
         # Emit budget snapshot up front (and keep updated later)
         yield {
