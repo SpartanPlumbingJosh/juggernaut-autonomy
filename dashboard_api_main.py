@@ -93,6 +93,20 @@ except ImportError as e:
     logger.warning("Code API not available: %s", e)
     CODE_API_AVAILABLE = False
 
+# Engine API (Milestone 5)
+try:
+    from api.engine_api import (
+        handle_get_status as handle_engine_status,
+        handle_start as handle_engine_start,
+        handle_stop as handle_engine_stop,
+        handle_get_assignments,
+        handle_get_workers
+    )
+    ENGINE_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Engine API not available: %s", e)
+    ENGINE_API_AVAILABLE = False
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -498,6 +512,68 @@ async def code_get_health():
     )
 
 
+# Engine API Routes (Milestone 5)
+@app.get("/api/engine/status")
+async def engine_get_status():
+    if not ENGINE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Engine API not available")
+    
+    result = handle_engine_status()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/engine/start")
+async def engine_start():
+    if not ENGINE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Engine API not available")
+    
+    result = handle_engine_start()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/engine/stop")
+async def engine_stop():
+    if not ENGINE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Engine API not available")
+    
+    result = handle_engine_stop()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/engine/assignments")
+async def engine_get_assignments(request: Request):
+    if not ENGINE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Engine API not available")
+    
+    query_params = dict(request.query_params)
+    result = handle_get_assignments(query_params)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/engine/workers")
+async def engine_get_workers():
+    if not ENGINE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Engine API not available")
+    
+    result = handle_get_workers()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
 @app.get("/health")
 async def health():
     """Detailed health check"""
@@ -557,7 +633,13 @@ async def health():
             "/api/code/runs",
             "/api/code/runs/{id}",
             "/api/code/findings",
-            "/api/code/health"
+            "/api/code/health",
+            # Engine API (Milestone 5)
+            "/api/engine/status",
+            "/api/engine/start",
+            "/api/engine/stop",
+            "/api/engine/assignments",
+            "/api/engine/workers"
         ]
     }
 
