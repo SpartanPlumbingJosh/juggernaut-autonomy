@@ -62,38 +62,56 @@ class CodeCrawler:
         self,
         run_id: str,
         status: str,
-        health_score: Optional[float] = None,
-        findings_count: int = 0,
-        prs_created: int = 0,
-        tasks_created: int = 0,
-        error_message: Optional[str] = None
+        health_score: float = None,
+        findings_count: int = None,
+        prs_created: int = None,
+        tasks_created: int = None,
+        files_analyzed: int = None,
+        progress_message: str = None
     ):
         """Update analysis run status."""
         try:
-            query = """
+            updates = ["status = %s"]
+            params = [status]
+            
+            if health_score is not None:
+                updates.append("health_score = %s")
+                params.append(health_score)
+            
+            if findings_count is not None:
+                updates.append("findings_count = %s")
+                params.append(findings_count)
+            
+            if prs_created is not None:
+                updates.append("prs_created = %s")
+                params.append(prs_created)
+            
+            if tasks_created is not None:
+                updates.append("tasks_created = %s")
+                params.append(tasks_created)
+            
+            if files_analyzed is not None:
+                updates.append("files_analyzed = %s")
+                params.append(files_analyzed)
+            
+            if progress_message is not None:
+                updates.append("progress_message = %s")
+                params.append(progress_message)
+            
+            if status == 'completed':
+                updates.append("completed_at = NOW()")
+            
+            params.append(run_id)
+            
+            query = f"""
                 UPDATE code_analysis_runs
-                SET 
-                    status = %s,
-                    completed_at = %s,
-                    health_score = %s,
-                    findings_count = %s,
-                    prs_created = %s,
-                    tasks_created = %s,
-                    error_message = %s
+                SET {', '.join(updates)}
                 WHERE id = %s
             """
-            execute_sql(query, (
-                status,
-                datetime.now(timezone.utc).isoformat(),
-                health_score,
-                findings_count,
-                prs_created,
-                tasks_created,
-                error_message,
-                run_id
-            ))
+            
+            execute_sql(query, tuple(params))
         except Exception as e:
-            logger.exception(f"Error updating analysis run: {e}")
+            logger.exception(f"Error updating run: {e}")
     
     def store_finding(self, run_id: str, finding: Dict[str, Any]) -> Optional[str]:
         """Store a code finding."""
@@ -165,17 +183,38 @@ class CodeCrawler:
             
             logger.info(f"Found {len(python_files)} Python files")
             
-            # Fetch file contents
+            # Fetch and analyze file contents with progress logging
             file_contents = {}
-            for file_path in python_files[:50]:  # Limit to 50 files for now
+            all_findings = []
+            total_files = min(len(python_files), 50)
+            
+            for idx, file_path in enumerate(python_files[:50], 1):  # Limit to 50 files for now
+                # Update progress in database
+                progress_msg = f"[{idx}/{total_files}] Analyzing {file_path}..."
+                self.update_analysis_run(run_id, 'running', files_analyzed=idx, progress_message=progress_msg)
+                logger.info(progress_msg)
+                
                 content = self.github_client.get_file_content(owner, repo, file_path, branch)
                 if content:
                     file_contents[file_path] = content
+                    
+                    # Analyze file immediately
+                    file_findings = self.stale_detector.analyze_file(file_path, content)
+                    
+                    if file_findings:
+                        result_msg = f"[{idx}/{total_files}] {file_path} - {len(file_findings)} issue(s) found"
+                        self.update_analysis_run(run_id, 'running', files_analyzed=idx, progress_message=result_msg)
+                        logger.info(result_msg)
+                        all_findings.extend(file_findings)
+                    else:
+                        result_msg = f"[{idx}/{total_files}] {file_path} - Clean ✓"
+                        self.update_analysis_run(run_id, 'running', files_analyzed=idx, progress_message=result_msg)
+                        logger.info(result_msg)
             
-            logger.info(f"Fetched {len(file_contents)} file contents")
+            logger.info(f"Analysis complete: {len(file_contents)} files analyzed")
             
-            # Run stale code analysis
-            findings = self.stale_detector.analyze_repository(file_contents)
+            # Use collected findings instead of re-analyzing
+            findings = all_findings
             
             logger.info(f"Found {len(findings)} issues")
             
