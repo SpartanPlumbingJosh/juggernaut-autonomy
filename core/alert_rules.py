@@ -51,6 +51,10 @@ class AlertRulesEngine:
         if isinstance(last_triggered, str):
             last_triggered = datetime.fromisoformat(last_triggered.replace('Z', '+00:00'))
         
+        # Ensure timezone-aware (handle naive datetimes from database)
+        if last_triggered.tzinfo is None:
+            last_triggered = last_triggered.replace(tzinfo=timezone.utc)
+        
         cooldown_until = last_triggered + timedelta(minutes=cooldown_minutes)
         return datetime.now(timezone.utc) < cooldown_until
     
