@@ -27,6 +27,7 @@ import os
 import sys
 import time
 import json
+import logging
 import signal
 import threading
 import traceback
@@ -45,6 +46,8 @@ from core.notifications import (
     notify_task_failed,
     notify_engine_started
 )
+
+logger = logging.getLogger(__name__)
 
 EXPERIMENT_EXECUTOR_AVAILABLE = False
 GOAL_TRACKER_AVAILABLE = False
@@ -4277,6 +4280,17 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                 log_action("code_task.unavailable", "Code task executor not available",
                           level="warn", task_id=task.id, error_data=result)
 
+                try:
+                    hold_data = {
+                        "waiting_approval": True,
+                        "reason": "code_executor_unavailable",
+                        "import_error": _code_task_import_error,
+                    }
+                    update_task_status(task.id, "waiting_approval", hold_data)
+                    return False, {"waiting_approval": True, **hold_data}
+                except Exception:
+                    pass
+
         else:
             # Unknown task type - attempt modular handler dispatch, then fall back to AI.
             handler_result = None
@@ -4944,6 +4958,37 @@ def autonomy_loop():
                                    level="warn", task_id=task.id)
                         continue  # Skip forbidden tasks without claiming
 
+                    if task.task_type == "code" and not CODE_TASK_AVAILABLE:
+                        hold_data = {
+                            "waiting_approval": True,
+                            "reason": "code_executor_unavailable",
+                            "import_error": _code_task_import_error,
+                        }
+                        try:
+                            if SINGLE_WORKER_MODE:
+                                update_task_status(task.id, "waiting_approval", hold_data)
+                            else:
+                                execute_sql(
+                                    f"""
+                                    UPDATE governance_tasks
+                                    SET status = 'waiting_approval',
+                                        result = {escape_value(hold_data)}
+                                    WHERE id = {escape_value(task.id)}
+                                      AND status = 'pending'
+                                      AND assigned_worker IS NULL
+                                    """
+                                )
+                        except Exception:
+                            pass
+                        log_action(
+                            "code_task.waiting_approval",
+                            "Code task requires approval (executor unavailable)",
+                            level="warn",
+                            task_id=task.id,
+                            output_data=hold_data,
+                        )
+                        continue
+
                     # Capability check BEFORE claiming (avoid claiming tasks we can't execute)
                     worker_capabilities = get_worker_capabilities(WORKER_ID)
                     if task.task_type == "code" and ("task.execute" not in worker_capabilities and "*" not in worker_capabilities):
@@ -5321,15 +5366,6 @@ class HealthHandler(BaseHTTPRequestHandler):
             # Don't log health checks
             return
         logger.info("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
-    
-    def do_GET(self):
-        """Handle GET requests."""
-        if self.path == '/health':
-            self._handle_health_check()
-            return
-        
-        # Handle other GET requests...
-        self.send_error(404, "Not Found")
     
     def _handle_health_check(self):
         """Handle health check requests."""

@@ -8,6 +8,7 @@ appropriate health check endpoint.
 
 import json
 import logging
+from datetime import datetime
 from typing import Dict, Any
 
 from fastapi import FastAPI, Response
