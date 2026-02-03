@@ -151,19 +151,15 @@ class RailwayClient:
         """
         query = """
         query($projectId: String!, $environmentId: String!) {
-            deployments(
-                input: {
-                    projectId: $projectId
-                    environmentId: $environmentId
-                }
-                first: 10
-            ) {
-                edges {
-                    node {
-                        id
-                        status
-                        createdAt
-                        staticUrl
+            project(id: $projectId) {
+                deployments(environmentId: $environmentId, first: 10) {
+                    edges {
+                        node {
+                            id
+                            status
+                            createdAt
+                            staticUrl
+                        }
                     }
                 }
             }
@@ -176,7 +172,7 @@ class RailwayClient:
                 "environmentId": environment_id
             })
             deployments = []
-            for edge in data.get("deployments", {}).get("edges", []):
+            for edge in data.get("project", {}).get("deployments", {}).get("edges", []):
                 deployments.append(edge["node"])
             return deployments
         except Exception as e:
