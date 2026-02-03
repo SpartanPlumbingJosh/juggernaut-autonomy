@@ -50,8 +50,8 @@ def _send_heartbeat() -> None:
         try:
             query_db(
                 """
-                INSERT INTO worker_registry (worker_id, worker_type, status, last_heartbeat)
-                VALUES ($1, 'watchdog', 'active', NOW())
+                INSERT INTO worker_registry (worker_id, name, worker_type, status, last_heartbeat)
+                VALUES ($1, 'JUGGERNAUT Watchdog', 'watchdog', 'active', NOW())
                 ON CONFLICT (worker_id) DO UPDATE SET
                     last_heartbeat = NOW(),
                     status = 'active'
