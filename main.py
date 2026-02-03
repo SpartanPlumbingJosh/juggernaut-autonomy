@@ -4848,7 +4848,7 @@ def autonomy_loop():
         if loop_count % 10 == 0:
             try:
                 from core.self_improvement import self_improvement_check
-                improvement_result = self_improvement_check()
+                improvement_result = await self_improvement_check()
                 if improvement_result.get("tasks_created", 0) > 0:
                     log_action(
                         "self_improvement.fix_tasks_created",
