@@ -66,6 +66,19 @@ except ImportError as e:
     logger.warning("Self-Heal API not available: %s", e)
     SELF_HEAL_API_AVAILABLE = False
 
+# Logs API (Milestone 3)
+try:
+    from api.logs_api import (
+        handle_crawl,
+        handle_get_errors,
+        handle_get_error_detail,
+        handle_get_stats
+    )
+    LOGS_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Logs API not available: %s", e)
+    LOGS_API_AVAILABLE = False
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -342,6 +355,61 @@ async def self_heal_get_execution_detail(execution_id: str):
         raise HTTPException(status_code=503, detail="Self-Heal API not available")
     
     result = handle_get_execution_detail(execution_id)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+# Logs API Routes (Milestone 3)
+@app.post("/api/logs/crawl")
+async def logs_crawl(request: Request):
+    if not LOGS_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Logs API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_crawl(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/logs/errors")
+async def logs_get_errors(request: Request):
+    if not LOGS_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Logs API not available")
+    
+    query_params = dict(request.query_params)
+    result = handle_get_errors(query_params)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/logs/errors/{fingerprint}")
+async def logs_get_error_detail(fingerprint: str):
+    if not LOGS_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Logs API not available")
+    
+    result = handle_get_error_detail(fingerprint)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/logs/stats")
+async def logs_get_stats():
+    if not LOGS_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Logs API not available")
+    
+    result = handle_get_stats()
     return JSONResponse(
         status_code=result.get("statusCode", 200),
         content=json.loads(result.get("body", "{}"))
