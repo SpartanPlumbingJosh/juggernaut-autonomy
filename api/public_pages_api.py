@@ -167,6 +167,9 @@ def public_opportunity_detail(opportunity_id: str) -> Dict[str, Any]:
 
 # ============================================================================
 # REVENUE ENDPOINTS
+# Actual schema: id, opportunity_id, event_type, revenue_type, gross_amount, 
+#                net_amount, currency, source, attribution, description, 
+#                external_id, metadata, occurred_at, recorded_at
 # ============================================================================
 
 
@@ -189,27 +192,27 @@ def public_revenue(
         summary_result = query_db(summary_sql)
         summary = (summary_result.get("rows", [{}])[0] or {})
         
-        # Cost summary
+        # Cost summary - use occurred_at for filtering
         cost_sql = """
         SELECT
             COALESCE(SUM(amount_cents), 0) / 100.0 as total_cost,
-            COALESCE(SUM(CASE WHEN recorded_at >= date_trunc('month', NOW()) THEN amount_cents ELSE 0 END), 0) / 100.0 as mtd_cost
+            COALESCE(SUM(CASE WHEN occurred_at >= date_trunc('month', NOW()) THEN amount_cents ELSE 0 END), 0) / 100.0 as mtd_cost
         FROM cost_events
         """
         
         cost_result = query_db(cost_sql)
         costs = (cost_result.get("rows", [{}])[0] or {})
         
-        # Recent transactions
+        # Recent transactions - use actual columns: source (not source_type), opportunity_id (not source_id)
         safe_limit = min(int(limit), 200)
         transactions_sql = f"""
         SELECT 
             id, 
             occurred_at as date,
-            source_type as type,
-            source_id as source,
+            revenue_type as type,
+            source,
             gross_amount as amount,
-            experiment_id,
+            opportunity_id,
             metadata
         FROM revenue_events
         ORDER BY occurred_at DESC
@@ -245,14 +248,15 @@ def public_revenue(
 def public_revenue_by_source() -> Dict[str, Any]:
     """Get revenue breakdown by source."""
     try:
+        # Use 'source' column (actual schema) not 'source_type'
         sql = """
         SELECT 
-            COALESCE(source_type, 'unknown') as source,
+            COALESCE(source, 'unknown') as source,
             COUNT(*) as transaction_count,
             COALESCE(SUM(gross_amount), 0) as total_revenue,
             COALESCE(AVG(gross_amount), 0) as avg_transaction
         FROM revenue_events
-        GROUP BY source_type
+        GROUP BY source
         ORDER BY total_revenue DESC
         """
         
@@ -271,6 +275,12 @@ def public_revenue_by_source() -> Dict[str, Any]:
 
 # ============================================================================
 # EXPERIMENTS ENDPOINTS
+# Actual schema: id, name, description, experiment_type, status, hypothesis,
+#                success_criteria, failure_criteria, budget_limit, budget_spent,
+#                cost_per_iteration, max_iterations, current_iteration,
+#                start_date, end_date, scheduled_end, owner_worker, template_id,
+#                parent_experiment_id, tags, config, results_summary, conclusion,
+#                created_at, updated_at, created_by, hypothesis_id, risk_level, etc.
 # ============================================================================
 
 
@@ -288,6 +298,7 @@ def public_experiments(
             safe_status = str(status).replace("'", "''")
             where_clause = f"WHERE status = '{safe_status}'"
         
+        # Use actual columns: budget_limit, budget_spent, start_date, end_date
         sql = f"""
         SELECT 
             id,
@@ -295,18 +306,18 @@ def public_experiments(
             hypothesis,
             experiment_type as type,
             status,
-            budget_cents / 100.0 as budget,
-            spent_cents / 100.0 as spent,
-            revenue_cents / 100.0 as revenue,
+            COALESCE(budget_limit, 0) as budget,
+            COALESCE(budget_spent, 0) as spent,
+            0 as revenue,
             CASE 
-                WHEN spent_cents > 0 THEN ((revenue_cents - spent_cents)::float / spent_cents * 100)
+                WHEN COALESCE(budget_spent, 0) > 0 THEN ((0 - budget_spent)::float / budget_spent * 100)
                 ELSE 0
             END as roi,
-            confidence_score,
-            metadata,
+            risk_level,
+            config as metadata,
             created_at,
-            started_at,
-            completed_at
+            start_date as started_at,
+            end_date as completed_at
         FROM experiments
         {where_clause}
         ORDER BY created_at DESC
@@ -330,6 +341,7 @@ def public_experiments(
 def public_experiments_stats() -> Dict[str, Any]:
     """Get experiment statistics."""
     try:
+        # Use actual columns
         sql = """
         SELECT 
             COUNT(*) as total,
@@ -337,10 +349,9 @@ def public_experiments_stats() -> Dict[str, Any]:
             COUNT(*) FILTER (WHERE status = 'completed') as completed,
             COUNT(*) FILTER (WHERE status = 'success') as successful,
             COUNT(*) FILTER (WHERE status IN ('completed', 'success', 'failed')) as finished,
-            COALESCE(SUM(budget_cents), 0) / 100.0 as total_budget,
-            COALESCE(SUM(spent_cents), 0) / 100.0 as total_spent,
-            COALESCE(SUM(revenue_cents), 0) / 100.0 as total_revenue,
-            COALESCE(AVG(confidence_score), 0) as avg_confidence
+            COALESCE(SUM(budget_limit), 0) as total_budget,
+            COALESCE(SUM(budget_spent), 0) as total_spent,
+            0 as total_revenue
         FROM experiments
         """
         
@@ -365,7 +376,7 @@ def public_experiments_stats() -> Dict[str, Any]:
             "totalBudget": _to_float(stats.get("total_budget"), 0),
             "totalSpent": total_spent,
             "totalRevenue": total_revenue,
-            "avgConfidence": round(_to_float(stats.get("avg_confidence"), 0) * 100, 1),
+            "avgConfidence": 0,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
@@ -381,14 +392,14 @@ def public_experiment_detail(experiment_id: str) -> Dict[str, Any]:
         sql = f"""
         SELECT 
             id, name, hypothesis, experiment_type as type, status,
-            budget_cents / 100.0 as budget,
-            spent_cents / 100.0 as spent,
-            revenue_cents / 100.0 as revenue,
+            COALESCE(budget_limit, 0) as budget,
+            COALESCE(budget_spent, 0) as spent,
+            0 as revenue,
             CASE 
-                WHEN spent_cents > 0 THEN ((revenue_cents - spent_cents)::float / spent_cents * 100)
+                WHEN COALESCE(budget_spent, 0) > 0 THEN ((0 - budget_spent)::float / budget_spent * 100)
                 ELSE 0
             END as roi,
-            confidence_score, metadata, created_at, started_at, completed_at
+            risk_level, config as metadata, created_at, start_date as started_at, end_date as completed_at
         FROM experiments
         WHERE id = '{safe_id}'
         """
