@@ -458,7 +458,18 @@ async def health():
             # Chat sessions API (authenticated)
             "/api/chat/sessions",
             "/api/chat/sessions/{id}",
-            "/api/chat/sessions/{id}/messages"
+            "/api/chat/sessions/{id}/messages",
+            # Self-Heal API (Milestone 2)
+            "/api/self-heal/diagnose",
+            "/api/self-heal/repair",
+            "/api/self-heal/auto-heal",
+            "/api/self-heal/executions",
+            "/api/self-heal/executions/{id}",
+            # Logs API (Milestone 3)
+            "/api/logs/crawl",
+            "/api/logs/errors",
+            "/api/logs/errors/{fingerprint}",
+            "/api/logs/stats"
         ]
     }
 
