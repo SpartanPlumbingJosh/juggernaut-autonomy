@@ -166,7 +166,13 @@ MCP_SERVER_URL = os.getenv(
 )
 MCP_AUTH_TOKEN = os.getenv("MCP_AUTH_TOKEN", "")
 MAX_TOOL_ITERATIONS = 10  # Prevent infinite tool loops
-MAX_STREAM_TOOL_ITERATIONS = int(os.getenv("MAX_STREAM_TOOL_ITERATIONS", "30"))
+
+# Safely parse MAX_STREAM_TOOL_ITERATIONS with fallback and clamping
+try:
+    _raw_max_stream = os.getenv("MAX_STREAM_TOOL_ITERATIONS", "30")
+    MAX_STREAM_TOOL_ITERATIONS = max(1, min(int(_raw_max_stream), 1000))
+except (ValueError, TypeError):
+    MAX_STREAM_TOOL_ITERATIONS = 30
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
@@ -1556,10 +1562,20 @@ class BrainService:
                 tool_key = _tool_call_key(tool_name, arguments)
                 if tool_key in guardrails.attempted_tool_calls:
                     guardrails.stop_reason = f"guardrail.stop.repeated_tool_call:{tool_key}"
+                    yield {
+                        "type": "guardrails",
+                        "stop_reason": guardrails.stop_reason,
+                        "state": guardrails.to_dict(),
+                    }
                     break
 
                 if guardrails.tool_failures.get(tool_name, 0) >= max_same_failure:
                     guardrails.stop_reason = f"guardrail.stop.circuit_open:{tool_name}"
+                    yield {
+                        "type": "guardrails",
+                        "stop_reason": guardrails.stop_reason,
+                        "state": guardrails.to_dict(),
+                    }
                     break
 
                 # Yield tool_start event
@@ -1588,6 +1604,11 @@ class BrainService:
 
                     if guardrails.failure_fingerprints[failure_fp] >= max_same_failure:
                         guardrails.stop_reason = f"guardrail.stop.repeated_failure:{failure_fp}"
+                        yield {
+                            "type": "guardrails",
+                            "stop_reason": guardrails.stop_reason,
+                            "state": guardrails.to_dict(),
+                        }
                 else:
                     guardrails.no_progress_steps = 0
                     if tool_name in guardrails.tool_failures:
@@ -1629,6 +1650,11 @@ class BrainService:
 
                 if guardrails.no_progress_steps >= max_no_progress_steps:
                     guardrails.stop_reason = "guardrail.stop.no_progress"
+                    yield {
+                        "type": "guardrails",
+                        "stop_reason": guardrails.stop_reason,
+                        "state": guardrails.to_dict(),
+                    }
 
                 # Update reasoning state based on tool execution
                 if reasoning_state.is_multi_step:
