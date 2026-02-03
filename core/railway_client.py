@@ -47,7 +47,8 @@ class RailwayClient:
         """
         headers = {
             "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "application/json"
+            "Content-Type": "application/json",
+            "User-Agent": "JUGGERNAUT/1.0 (Railway Log Crawler)"
         }
         
         payload = {
