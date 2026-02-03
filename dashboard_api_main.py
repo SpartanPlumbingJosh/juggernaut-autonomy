@@ -107,6 +107,14 @@ except ImportError as e:
     logger.warning("Repositories API not available: %s", e)
     REPOSITORIES_API_AVAILABLE = False
 
+# GitHub API
+try:
+    from api.github_api import handle_list_github_repos
+    GITHUB_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("GitHub API not available: %s", e)
+    GITHUB_API_AVAILABLE = False
+
 # Engine API (Milestone 5)
 try:
     from api.engine_api import (
@@ -604,6 +612,20 @@ async def repositories_delete(repo_id: str):
         raise HTTPException(status_code=503, detail="Repositories API not available")
     
     result = handle_delete_repository(repo_id)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+# GitHub API Routes
+@app.get("/api/github/repos")
+async def github_list_repos(request: Request):
+    if not GITHUB_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="GitHub API not available")
+    
+    query_params = dict(request.query_params)
+    result = handle_list_github_repos(query_params)
     return JSONResponse(
         status_code=result.get("statusCode", 200),
         content=json.loads(result.get("body", "{}"))
