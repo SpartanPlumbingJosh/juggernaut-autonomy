@@ -211,10 +211,10 @@ class LogCrawler:
         Returns:
             True if error was found and processed
         """
-        level = log_entry.get('level', 'INFO')
+        level = log_entry.get('level', 'INFO').upper()
         
-        # Only process ERROR and CRITICAL logs
-        if level not in ['ERROR', 'CRITICAL']:
+        # Only process ERROR, CRITICAL, and WARN logs
+        if level not in ['ERROR', 'CRITICAL', 'WARN']:
             return False
         
         # Fingerprint the error
