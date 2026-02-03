@@ -280,12 +280,19 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
+    """Review running experiments and trigger learning loop for completed ones."""
+    try:
+        from core.learning_loop import on_experiment_complete
+    except ImportError:
+        on_experiment_complete = None
+    
     try:
         res = execute_sql(
             """
-            SELECT id, name, status, budget_spent, budget_limit, start_date, created_at
+            SELECT id, name, status, budget_spent, budget_limit, start_date, created_at,
+                   revenue_generated, actual_cost, experiment_type, metadata, hypothesis
             FROM experiments
-            WHERE status IN ('running')
+            WHERE status IN ('running', 'completed')
             ORDER BY updated_at DESC NULLS LAST, created_at DESC
             LIMIT 50
             """
@@ -294,14 +301,107 @@ def review_experiments_stub(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+    running_count = 0
+    completed_count = 0
+    learning_triggered = 0
+    
+    for exp in rows:
+        exp_id = exp.get("id")
+        status = exp.get("status")
+        
+        if status == "running":
+            running_count += 1
+            
+            budget_spent = float(exp.get("budget_spent") or 0)
+            budget_limit = float(exp.get("budget_limit") or 0)
+            
+            if budget_limit > 0 and budget_spent >= budget_limit:
+                try:
+                    execute_sql(f"""
+                        UPDATE experiments 
+                        SET status = 'completed',
+                            completed_at = NOW()
+                        WHERE id = '{exp_id}'
+                    """)
+                    status = "completed"
+                    log_action(
+                        "experiment.auto_completed",
+                        f"Experiment {exp.get('name')} completed (budget exhausted)",
+                        level="info",
+                        output_data={"experiment_id": exp_id, "budget_spent": budget_spent}
+                    )
+                except Exception as e:
+                    log_action(
+                        "experiment.completion_failed",
+                        f"Failed to mark experiment complete: {str(e)}",
+                        level="error",
+                        error_data={"experiment_id": exp_id, "error": str(e)}
+                    )
+        
+        if status == "completed" and on_experiment_complete:
+            completed_count += 1
+            
+            revenue = float(exp.get("revenue_generated") or 0)
+            cost = float(exp.get("actual_cost") or exp.get("budget_spent") or 0)
+            roi = ((revenue - cost) / cost * 100) if cost > 0 else 0
+            
+            experiment_data = {
+                "id": exp_id,
+                "name": exp.get("name"),
+                "status": status,
+                "experiment_type": exp.get("experiment_type", "unknown"),
+                "revenue_generated": revenue,
+                "actual_cost": cost,
+                "budget_spent": exp.get("budget_spent"),
+                "roi": roi,
+                "metadata": exp.get("metadata"),
+                "hypothesis": exp.get("hypothesis")
+            }
+            
+            try:
+                check_sql = f"""
+                    SELECT COUNT(*) as count 
+                    FROM learnings 
+                    WHERE source_task_id = '{exp_id}' 
+                    AND category = 'experiment_outcome'
+                """
+                check_res = execute_sql(check_sql)
+                already_processed = (check_res.get("rows", [{}])[0] or {}).get("count", 0) > 0
+                
+                if not already_processed:
+                    on_experiment_complete(execute_sql, log_action, exp_id, experiment_data)
+                    learning_triggered += 1
+                    log_action(
+                        "learning.triggered",
+                        f"Learning loop triggered for experiment {exp.get('name')}",
+                        level="info",
+                        output_data={"experiment_id": exp_id, "roi": roi}
+                    )
+            except Exception as e:
+                log_action(
+                    "learning.trigger_failed",
+                    f"Failed to trigger learning loop: {str(e)}",
+                    level="error",
+                    error_data={"experiment_id": exp_id, "error": str(e)}
+                )
+
     try:
         log_action(
             "experiment.reviewed",
-            "Experiment review (stub) completed",
+            f"Experiment review completed: {running_count} running, {completed_count} completed, {learning_triggered} learning triggered",
             level="info",
-            output_data={"running": len(rows), "decision": "HOLD"},
+            output_data={
+                "running": running_count,
+                "completed": completed_count,
+                "learning_triggered": learning_triggered
+            },
         )
     except Exception:
         pass
 
-    return {"success": True, "running": len(rows), "decision": "HOLD"}
+    return {
+        "success": True,
+        "running": running_count,
+        "completed": completed_count,
+        "learning_triggered": learning_triggered
+    }

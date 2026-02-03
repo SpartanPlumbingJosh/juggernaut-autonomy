@@ -4862,6 +4862,33 @@ def autonomy_loop():
                     f"Self-improvement check failed: {improvement_err}",
                     level="warn"
                 )
+        
+        # L5-HEALTH: System health monitoring - check workers, tasks, revenue pipeline
+        # Runs every 20 cycles to monitor system health
+        if loop_count % 20 == 0:
+            try:
+                from core.health_monitor import run_full_health_check
+                health_result = run_full_health_check(execute_sql, log_action)
+                if health_result.get("critical_issues"):
+                    log_action(
+                        "health.critical_alert",
+                        f"CRITICAL: System health issues detected: {', '.join(health_result['critical_issues'])}",
+                        level="error",
+                        error_data={"issues": health_result["critical_issues"], "status": health_result["overall_health"]}
+                    )
+                elif health_result.get("warnings"):
+                    log_action(
+                        "health.warning_alert",
+                        f"System health warnings: {', '.join(health_result['warnings'])}",
+                        level="warn",
+                        output_data={"warnings": health_result["warnings"], "status": health_result["overall_health"]}
+                    )
+            except Exception as health_err:
+                log_action(
+                    "health.check_error",
+                    f"Health monitoring check failed: {health_err}",
+                    level="warn"
+                )
 
         # L5-WIRE-04: Create escalations for stuck tasks (in_progress > 30 min)
         try:
