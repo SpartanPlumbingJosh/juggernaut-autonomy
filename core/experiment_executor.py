@@ -313,6 +313,11 @@ def create_task_for_experiment(
         "auto_generated": True,
         "template_title": template.get("title", "")
     }
+    
+    # Add query field for research tasks
+    if task_type == "research":
+        payload["query"] = title  # Use task title as research query
+    
     payload_json = json.dumps(payload).replace("'", "''")
 
     # Build tags for easy lookup

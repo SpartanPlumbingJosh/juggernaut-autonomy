@@ -67,7 +67,7 @@ def check_worker_health(
             log_action(
                 "health.workers_stale",
                 f"Warning: {len(stale_workers)} workers have stale heartbeats",
-                level="warning",
+                level="warn",
                 output_data={"stale_workers": [w.get("worker_id") for w in stale_workers]}
             )
         
@@ -123,7 +123,7 @@ def check_stuck_tasks(
             log_action(
                 "health.stuck_tasks_detected",
                 f"Warning: {len(stuck_tasks)} tasks running longer than {stuck_threshold_minutes} minutes",
-                level="warning",
+                level="warn",
                 output_data={
                     "stuck_count": len(stuck_tasks),
                     "tasks": [{"id": t.get("id"), "title": t.get("title"), "minutes": t.get("minutes_running")} for t in stuck_tasks[:5]]
@@ -233,7 +233,7 @@ def check_revenue_generation(
             log_action(
                 "health.no_ideas_generated",
                 "Warning: No revenue ideas generated in last 24 hours",
-                level="warning",
+                level="warn",
                 output_data={"alert": "no_ideas"}
             )
         
@@ -352,7 +352,7 @@ def run_full_health_check(
         log_action(
             "health.warnings_detected",
             f"Warnings detected: {', '.join(warnings)}",
-            level="warning",
+            level="warn",
             output_data={"warnings": warnings}
         )
     else:
