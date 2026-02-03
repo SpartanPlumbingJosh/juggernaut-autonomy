@@ -19,6 +19,8 @@ pypdf>=6.6.0
 
 requests>=2.31.0
 
+redis>=5.0.0
+
 # Optional (uncomment if needed):
 # psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)
 # schedule==1.2.1         # Cron scheduling (optional)
