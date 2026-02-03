@@ -54,7 +54,8 @@ class LogCrawler:
         errors_found: int = 0,
         tasks_created: int = 0,
         run_duration_ms: int = 0,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        progress_message: Optional[str] = None
     ):
         """Update crawler state in database."""
         try:
@@ -68,8 +69,9 @@ class LogCrawler:
                     run_duration_ms,
                     status,
                     error_message,
+                    progress_message,
                     updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             params = (
                 datetime.now(timezone.utc).isoformat(),
@@ -80,6 +82,7 @@ class LogCrawler:
                 run_duration_ms,
                 status,
                 error_message,
+                progress_message,
                 datetime.now(timezone.utc).isoformat()
             )
             execute_sql(query, params)
@@ -308,7 +311,8 @@ class LogCrawler:
                 }
             
             # Process each log
-            for log_entry in logs:
+            total_logs = len(logs)
+            for idx, log_entry in enumerate(logs, 1):
                 logs_processed += 1
                 
                 # Convert database log to expected format
@@ -319,9 +323,22 @@ class LogCrawler:
                     'error_data': log_entry.get('error_data')
                 }
                 
+                # Update progress
+                msg_preview = formatted_log['message'][:60] + '...' if len(formatted_log['message']) > 60 else formatted_log['message']
+                progress_msg = f"[{idx}/{total_logs}] Processing: {msg_preview}"
+                self.update_crawler_state('running', logs_processed, errors_found, 0, 0, None, progress_msg)
+                logger.info(progress_msg)
+                
                 # Process the log
                 if self.process_log_entry(formatted_log):
                     errors_found += 1
+                    result_msg = f"[{idx}/{total_logs}] Error found: {formatted_log['level']}"
+                    self.update_crawler_state('running', logs_processed, errors_found, 0, 0, None, result_msg)
+                    logger.info(result_msg)
+                else:
+                    result_msg = f"[{idx}/{total_logs}] Filtered/Clean"
+                    self.update_crawler_state('running', logs_processed, errors_found, 0, 0, None, result_msg)
+                    logger.info(result_msg)
             
             # Calculate duration
             end_time = datetime.now(timezone.utc)
