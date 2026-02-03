@@ -46,24 +46,27 @@ async def handle_list_experiments(query_params: Dict[str, Any]) -> Dict[str, Any
         
         sql = f"""
         SELECT 
-            id,
-            name,
-            hypothesis,
-            experiment_type,
-            status,
-            success_criteria,
-            budget_allocated,
-            actual_cost,
-            revenue_generated,
-            roi,
-            confidence_level,
-            metadata,
-            started_at,
-            completed_at,
-            created_at
-        FROM experiments
+            e.id,
+            e.name,
+            e.hypothesis,
+            e.experiment_type,
+            e.status,
+            e.success_criteria,
+            e.budget_allocated,
+            e.actual_cost,
+            COALESCE(
+                (SELECT SUM(net_amount) FROM revenue_events WHERE attribution->>'experiment_id' = e.id::text),
+                0
+            ) as revenue_generated,
+            e.roi,
+            e.confidence_level,
+            e.metadata,
+            e.started_at,
+            e.completed_at,
+            e.created_at
+        FROM experiments e
         {where_clause}
-        ORDER BY created_at DESC
+        ORDER BY e.created_at DESC
         LIMIT {limit}
         OFFSET {offset}
         """

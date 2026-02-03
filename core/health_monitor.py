@@ -180,7 +180,7 @@ def check_revenue_generation(
         revenue_sql = """
         SELECT 
             COUNT(*) as event_count,
-            SUM(amount_cents) FILTER (WHERE event_type = 'revenue') as total_revenue_cents,
+            SUM(gross_amount) FILTER (WHERE event_type = 'revenue') as total_revenue_cents,
             COUNT(*) FILTER (WHERE recorded_at > NOW() - INTERVAL '24 hours') as last_24h
         FROM revenue_events
         WHERE event_type = 'revenue';

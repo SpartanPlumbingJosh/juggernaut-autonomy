@@ -331,7 +331,7 @@ def create_task_for_experiment(
                 '{description}',
                 '{task_type}',
                 'pending',
-                '{priority}'::priority_level,
+                '{priority}'::task_priority,
                 '{payload_json}'::jsonb,
                 '{tags_json}'::jsonb,
                 '{now}',

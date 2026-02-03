@@ -289,11 +289,15 @@ def review_experiments_stub(
     try:
         res = execute_sql(
             """
-            SELECT id, name, status, budget_spent, budget_limit, start_date, created_at,
-                   revenue_generated, actual_cost, experiment_type, metadata, hypothesis
-            FROM experiments
-            WHERE status IN ('running', 'completed')
-            ORDER BY updated_at DESC NULLS LAST, created_at DESC
+            SELECT e.id, e.name, e.status, e.budget_spent, e.budget_limit, e.start_date, e.created_at,
+                   COALESCE(
+                       (SELECT SUM(net_amount) FROM revenue_events WHERE attribution->>'experiment_id' = e.id::text),
+                       0
+                   ) as revenue_generated,
+                   e.actual_cost, e.experiment_type, e.metadata, e.hypothesis
+            FROM experiments e
+            WHERE e.status IN ('running', 'completed')
+            ORDER BY e.updated_at DESC NULLS LAST, e.created_at DESC
             LIMIT 50
             """
         )
