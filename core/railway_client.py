@@ -258,16 +258,9 @@ class RailwayClient:
             return False
 
 
-# Singleton instance
-_railway_client = None
-
-
 def get_railway_client() -> RailwayClient:
-    """Get or create Railway client singleton."""
-    global _railway_client
-    if _railway_client is None:
-        _railway_client = RailwayClient()
-    return _railway_client
+    """Create a new Railway client (no singleton - env vars may change)."""
+    return RailwayClient()
 
 
 __all__ = ["RailwayClient", "get_railway_client"]
