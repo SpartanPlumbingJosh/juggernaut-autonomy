@@ -63,7 +63,7 @@ def public_opportunities(
             estimated_value,
             confidence_score,
             status,
-            priority,
+            stage,
             metadata,
             created_at,
             updated_at,
@@ -71,13 +71,7 @@ def public_opportunities(
         FROM opportunities
         {where_clause}
         ORDER BY 
-            CASE priority 
-                WHEN 'critical' THEN 1
-                WHEN 'high' THEN 2
-                WHEN 'medium' THEN 3
-                WHEN 'low' THEN 4
-                ELSE 5
-            END,
+            confidence_score DESC NULLS LAST,
             created_at DESC
         LIMIT {safe_limit}
         OFFSET {safe_offset}
@@ -153,7 +147,7 @@ def public_opportunity_detail(opportunity_id: str) -> Dict[str, Any]:
         sql = f"""
         SELECT 
             id, opportunity_type, category, description, source_description,
-            estimated_value, confidence_score, status, priority, metadata,
+            estimated_value, confidence_score, status, stage, metadata,
             created_at, updated_at, expires_at
         FROM opportunities
         WHERE id = '{safe_id}'
