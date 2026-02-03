@@ -149,7 +149,7 @@ class SelfImprovementEngine:
             id,
             category,
             summary,
-            context,
+            details,
             applied_count,
             created_at
         FROM learnings
@@ -240,7 +240,7 @@ class SelfImprovementEngine:
             applied_count=sum(l.get("applied_count", 0) for l in group),
             first_seen=datetime.fromisoformat(last.get("created_at", datetime.now(timezone.utc).isoformat())),
             last_seen=datetime.fromisoformat(first.get("created_at", datetime.now(timezone.utc).isoformat())),
-            example_context=first.get("context", {})
+            example_context=first.get("details", {})
         )
     
     def generate_fix_task(self, pattern: FailurePattern) -> Optional[Dict]:
