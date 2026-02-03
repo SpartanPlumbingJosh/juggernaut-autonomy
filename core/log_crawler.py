@@ -246,13 +246,13 @@ class LogCrawler:
         
         return True
     
-    def crawl(self, project_id: str, environment_id: str) -> Dict[str, Any]:
+    def crawl(self, project_id: str = None, environment_id: str = None) -> Dict[str, Any]:
         """
-        Run a crawl cycle.
+        Run a crawl cycle by reading from execution_logs database.
         
         Args:
-            project_id: Railway project ID
-            environment_id: Railway environment ID
+            project_id: Railway project ID (unused, kept for compatibility)
+            environment_id: Railway environment ID (unused, kept for compatibility)
             
         Returns:
             Crawl statistics
@@ -264,33 +264,48 @@ class LogCrawler:
         try:
             self.update_crawler_state('running')
             
-            # Get recent deployments
-            deployments = self.railway_client.get_deployments(project_id, environment_id, limit=1)
+            # Read logs directly from database instead of Railway API
+            from core.database import fetch_all
             
-            if not deployments:
-                logger.warning("No deployments found")
+            query = """
+                SELECT 
+                    level,
+                    message,
+                    error_data,
+                    created_at as timestamp
+                FROM execution_logs
+                WHERE level IN ('error', 'warn')
+                AND created_at > NOW() - INTERVAL '1 hour'
+                ORDER BY created_at DESC
+                LIMIT 100
+            """
+            
+            logs = fetch_all(query)
+            
+            if not logs:
+                logger.info("No error/warn logs found in last hour")
                 self.update_crawler_state('idle', 0, 0, 0, 0)
                 return {
-                    'success': False,
-                    'message': 'No deployments found',
+                    'success': True,
+                    'message': 'No errors found',
                     'logs_processed': 0,
                     'errors_found': 0
                 }
-            
-            # Get logs from most recent deployment
-            deployment_id = deployments[0]['id']
-            logs = self.railway_client.get_logs(deployment_id, limit=100)
             
             # Process each log
             for log_entry in logs:
                 logs_processed += 1
                 
-                # Add project/environment context
-                log_entry['project_id'] = project_id
-                log_entry['environment_id'] = environment_id
+                # Convert database log to expected format
+                formatted_log = {
+                    'level': log_entry.get('level', 'ERROR'),
+                    'message': log_entry.get('message', ''),
+                    'timestamp': log_entry.get('timestamp'),
+                    'error_data': log_entry.get('error_data')
+                }
                 
                 # Process the log
-                if self.process_log_entry(log_entry):
+                if self.process_log_entry(formatted_log):
                     errors_found += 1
             
             # Calculate duration
