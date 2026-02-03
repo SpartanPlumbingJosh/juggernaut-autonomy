@@ -14,6 +14,7 @@ Part of Milestone 3: Railway Logs Crawler
 
 import json
 import logging
+import os
 from typing import Dict, Any
 
 from core.log_crawler import get_log_crawler
@@ -51,8 +52,9 @@ def handle_crawl(body: Dict[str, Any]) -> Dict[str, Any]:
     Trigger manual log crawl.
     """
     try:
-        project_id = body.get("project_id")
-        environment_id = body.get("environment_id")
+        # Get from body or fall back to env vars
+        project_id = body.get("project_id") or os.getenv("RAILWAY_PROJECT_ID", "e785854e-d4d6-4975-a025-812b63fe8961")
+        environment_id = body.get("environment_id") or os.getenv("RAILWAY_ENVIRONMENT_ID", "8bfa6a1a-92f4-4a42-bf51-194b1c844a76")
         
         if not project_id or not environment_id:
             return _error_response(400, "project_id and environment_id required")
