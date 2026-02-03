@@ -631,11 +631,26 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if action == "task.create":
                 # Validate priority - must be valid enum value
                 valid_priorities = {"critical", "high", "medium", "normal", "low", "background"}
-                priority = params.get("priority", "medium")
-                if priority not in valid_priorities:
-                    priority = "medium"  # Default to medium for invalid values
+                priority_raw = params.get("priority", "medium")
+                priority_num_map = {
+                    5: "critical",
+                    4: "high",
+                    3: "medium",
+                    2: "normal",
+                    1: "low",
+                    0: "background",
+                }
+                priority: str
+                if isinstance(priority_raw, (int, float)):
+                    priority = priority_num_map.get(int(priority_raw), "medium")
+                else:
+                    priority = str(priority_raw or "medium").strip().lower()
+                    if priority.isdigit():
+                        priority = priority_num_map.get(int(priority), "medium")
+                    if priority not in valid_priorities:
+                        priority = "medium"  # Default to medium for invalid values
                 # Always use the SYSTEM user ID for created_by
-                created_by = params.get("created_by", "00000000-0000-0000-0000-000000000001")
+                created_by = params.get("created_by") or params.get("createdBy") or "00000000-0000-0000-0000-000000000001"
                 result = await execute_sql("INSERT INTO governance_tasks (title, description, priority, task_type, assigned_worker, status, created_by) VALUES ($1, $2, $3, $4, $5, 'pending', $6) RETURNING id", [params.get("title"), params.get("description"), priority, params.get("task_type", "code"), params.get("assigned_worker", "claude-chat"), created_by])
             elif action == "task.complete":
                 result = await execute_sql("UPDATE governance_tasks SET status = 'completed', completed_at = NOW(), completion_evidence = $1 WHERE id = $2", [params.get("evidence", ""), params.get("id")])
