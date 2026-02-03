@@ -52,6 +52,20 @@ except ImportError as e:
     def handle_consult_stream(*args, **kwargs):
         yield 'data: {"type": "error", "message": "brain api not available"}\n\n'
 
+# Self-Heal API (Milestone 2)
+try:
+    from api.self_heal_api import (
+        handle_diagnose,
+        handle_repair,
+        handle_auto_heal,
+        handle_get_executions,
+        handle_get_execution_detail
+    )
+    SELF_HEAL_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Self-Heal API not available: %s", e)
+    SELF_HEAL_API_AVAILABLE = False
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -255,6 +269,83 @@ async def brain_route(request: Request, endpoint: str):
 
     result = handle_brain_request(method, endpoint, query_params, body, headers)
     return JSONResponse(status_code=result.get("status", 200), content=result.get("body", {}))
+
+
+# Self-Heal API Routes
+@app.post("/api/self-heal/diagnose")
+async def self_heal_diagnose(request: Request):
+    if not SELF_HEAL_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Self-Heal API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_diagnose(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/self-heal/repair")
+async def self_heal_repair(request: Request):
+    if not SELF_HEAL_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Self-Heal API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_repair(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/self-heal/auto-heal")
+async def self_heal_auto_heal(request: Request):
+    if not SELF_HEAL_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Self-Heal API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_auto_heal(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/self-heal/executions")
+async def self_heal_get_executions(request: Request):
+    if not SELF_HEAL_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Self-Heal API not available")
+    
+    query_params = dict(request.query_params)
+    result = handle_get_executions(query_params)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/self-heal/executions/{execution_id}")
+async def self_heal_get_execution_detail(execution_id: str):
+    if not SELF_HEAL_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Self-Heal API not available")
+    
+    result = handle_get_execution_detail(execution_id)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
 
 
 @app.get("/health")
