@@ -19,6 +19,7 @@ Usage:
 """
 
 import asyncio
+import inspect
 import logging
 import time
 from datetime import datetime, timedelta
@@ -154,6 +155,8 @@ class CircuitBreaker:
                 raise TypeError("call_sync cannot be used with coroutine functions")
 
             result = func(*args, **kwargs)
+            if inspect.isawaitable(result):
+                raise TypeError("call_sync cannot be used with awaitable return values")
             self._on_success()
             return result
         except Exception as e:

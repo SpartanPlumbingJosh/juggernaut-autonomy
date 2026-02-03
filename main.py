@@ -4965,7 +4965,19 @@ def autonomy_loop():
                             "import_error": _code_task_import_error,
                         }
                         try:
-                            update_task_status(task.id, "waiting_approval", hold_data)
+                            if SINGLE_WORKER_MODE:
+                                update_task_status(task.id, "waiting_approval", hold_data)
+                            else:
+                                execute_sql(
+                                    f"""
+                                    UPDATE governance_tasks
+                                    SET status = 'waiting_approval',
+                                        result = {escape_value(hold_data)}
+                                    WHERE id = {escape_value(task.id)}
+                                      AND status = 'pending'
+                                      AND assigned_worker IS NULL
+                                    """
+                                )
                         except Exception:
                             pass
                         log_action(

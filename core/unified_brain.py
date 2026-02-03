@@ -60,6 +60,19 @@ def _normalize_error_text(text: str) -> str:
     return s[:500]
 
 
+def _normalize_key_text(text: str) -> str:
+    s = str(text or "")
+    s = re.sub(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+        "<uuid>",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "<date>", s)
+    s = " ".join(s.replace("\n", " ").replace("\r", " ").split())
+    return s[:500]
+
+
 def _fingerprint_tool_failure(tool_name: str, tool_result: Dict[str, Any]) -> Optional[str]:
     if not isinstance(tool_result, dict) or "error" not in tool_result:
         return None
@@ -75,7 +88,7 @@ def _tool_call_key(tool_name: str, arguments: Dict[str, Any]) -> str:
         args_text = json.dumps(arguments or {}, sort_keys=True, separators=(",", ":"))
     except Exception:
         args_text = str(arguments)
-    args_text = _normalize_error_text(args_text)
+    args_text = _normalize_key_text(args_text)
     return f"{tool_name}|{args_text}"
 
 
@@ -1730,7 +1743,6 @@ class BrainService:
             logger.error(f"OpenRouter circuit breaker open: {e}")
             raise
             
-    @exponential_backoff(max_retries=5, base_delay=2.0, max_delay=30.0)
     def _call_api_internal(self, messages: List[Dict[str, str]]) -> str:
         """
         Internal implementation of OpenRouter API call with retry.
