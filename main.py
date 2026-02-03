@@ -27,6 +27,7 @@ import os
 import sys
 import time
 import json
+import logging
 import signal
 import threading
 import traceback
@@ -38,6 +39,8 @@ from dataclasses import dataclass
 from enum import Enum
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from uuid import uuid4
+
+logger = logging.getLogger(__name__)
 
 # Slack notifications for #war-room
 from core.notifications import (
@@ -4277,6 +4280,17 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                 log_action("code_task.unavailable", "Code task executor not available",
                           level="warn", task_id=task.id, error_data=result)
 
+                try:
+                    hold_data = {
+                        "waiting_approval": True,
+                        "reason": "code_executor_unavailable",
+                        "import_error": _code_task_import_error,
+                    }
+                    update_task_status(task.id, "waiting_approval", hold_data)
+                    return False, {"waiting_approval": True, **hold_data}
+                except Exception:
+                    pass
+
         else:
             # Unknown task type - attempt modular handler dispatch, then fall back to AI.
             handler_result = None
@@ -4943,6 +4957,25 @@ def autonomy_loop():
                         log_action("task.skipped", f"Task skipped (forbidden): {reason}", 
                                    level="warn", task_id=task.id)
                         continue  # Skip forbidden tasks without claiming
+
+                    if task.task_type == "code" and not CODE_TASK_AVAILABLE:
+                        hold_data = {
+                            "waiting_approval": True,
+                            "reason": "code_executor_unavailable",
+                            "import_error": _code_task_import_error,
+                        }
+                        try:
+                            update_task_status(task.id, "waiting_approval", hold_data)
+                        except Exception:
+                            pass
+                        log_action(
+                            "code_task.waiting_approval",
+                            "Code task requires approval (executor unavailable)",
+                            level="warn",
+                            task_id=task.id,
+                            output_data=hold_data,
+                        )
+                        continue
 
                     # Capability check BEFORE claiming (avoid claiming tasks we can't execute)
                     worker_capabilities = get_worker_capabilities(WORKER_ID)

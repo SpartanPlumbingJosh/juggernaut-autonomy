@@ -30,6 +30,57 @@ from .circuit_breaker import CircuitOpenError, get_circuit_breaker
 
 
 @dataclass
+class GuardrailState:
+    failure_fingerprints: Dict[str, int] = field(default_factory=dict)
+    tool_failures: Dict[str, int] = field(default_factory=dict)
+    attempted_tool_calls: Set[str] = field(default_factory=set)
+    no_progress_steps: int = 0
+    stop_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "failure_fingerprints": dict(self.failure_fingerprints),
+            "tool_failures": dict(self.tool_failures),
+            "attempted_tool_calls": sorted(self.attempted_tool_calls),
+            "no_progress_steps": self.no_progress_steps,
+            "stop_reason": self.stop_reason,
+        }
+
+
+def _normalize_error_text(text: str) -> str:
+    s = str(text or "")
+    s = re.sub(
+        r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b",
+        "<uuid>",
+        s,
+        flags=re.IGNORECASE,
+    )
+    s = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", "<date>", s)
+    s = re.sub(r"\b\d+\b", "<n>", s)
+    s = " ".join(s.replace("\n", " ").replace("\r", " ").split())
+    return s[:500]
+
+
+def _fingerprint_tool_failure(tool_name: str, tool_result: Dict[str, Any]) -> Optional[str]:
+    if not isinstance(tool_result, dict) or "error" not in tool_result:
+        return None
+    err_text = _normalize_error_text(str(tool_result.get("error") or ""))
+    err_type = _normalize_error_text(str(tool_result.get("error_type") or ""))
+    if not err_type:
+        err_type = "error"
+    return f"tool:{tool_name}|{err_type}|{err_text}"
+
+
+def _tool_call_key(tool_name: str, arguments: Dict[str, Any]) -> str:
+    try:
+        args_text = json.dumps(arguments or {}, sort_keys=True, separators=(",", ":"))
+    except Exception:
+        args_text = str(arguments)
+    args_text = _normalize_error_text(args_text)
+    return f"{tool_name}|{args_text}"
+
+
+@dataclass
 class ReasoningState:
     """Tracks state for multi-step reasoning processes.
     
@@ -956,10 +1007,16 @@ class BrainService:
         total_output_tokens = 0
         iterations = 0
         response_text = ""
+        guardrails = GuardrailState()
+        max_same_failure = 2
+        max_no_progress_steps = 3
 
         # Agentic loop - continue until no more tool calls
         while iterations < MAX_TOOL_ITERATIONS:
             iterations += 1
+
+            if guardrails.stop_reason:
+                break
 
             # Estimate tokens for this iteration
             input_text = "".join(
@@ -1023,10 +1080,36 @@ class BrainService:
                     arguments = {}
                     logger.warning(f"Failed to parse tool arguments: {arguments_str}")
 
+                tool_key = _tool_call_key(tool_name, arguments)
+                if tool_key in guardrails.attempted_tool_calls:
+                    guardrails.stop_reason = f"guardrail.stop.repeated_tool_call:{tool_key}"
+                    break
+
+                if guardrails.tool_failures.get(tool_name, 0) >= max_same_failure:
+                    guardrails.stop_reason = f"guardrail.stop.circuit_open:{tool_name}"
+                    break
+
                 logger.info(f"Executing tool: {tool_name} with args: {arguments}")
 
                 # Execute tool via MCP server
                 tool_result = self._execute_tool(tool_name, arguments)
+
+                guardrails.attempted_tool_calls.add(tool_key)
+                failure_fp = _fingerprint_tool_failure(tool_name, tool_result)
+                if failure_fp:
+                    guardrails.failure_fingerprints[failure_fp] = (
+                        guardrails.failure_fingerprints.get(failure_fp, 0) + 1
+                    )
+                    guardrails.tool_failures[tool_name] = (
+                        guardrails.tool_failures.get(tool_name, 0) + 1
+                    )
+
+                    if guardrails.failure_fingerprints[failure_fp] >= max_same_failure:
+                        guardrails.stop_reason = f"guardrail.stop.repeated_failure:{failure_fp}"
+                else:
+                    guardrails.no_progress_steps = 0
+                    if tool_name in guardrails.tool_failures:
+                        guardrails.tool_failures[tool_name] = 0
 
                 # Build execution record
                 execution_record = {
@@ -1034,6 +1117,8 @@ class BrainService:
                     "arguments": arguments,
                     "result": tool_result,
                     "success": "error" not in tool_result,
+                    "tool_call_key": tool_key,
+                    "failure_fingerprint": failure_fp,
                 }
 
                 # Create fallback governance task if tool execution failed
@@ -1056,6 +1141,14 @@ class BrainService:
 
                 tool_executions.append(execution_record)
 
+                if failure_fp:
+                    guardrails.no_progress_steps += 1
+                else:
+                    guardrails.no_progress_steps = 0
+
+                if guardrails.no_progress_steps >= max_no_progress_steps:
+                    guardrails.stop_reason = "guardrail.stop.no_progress"
+
                 # Add assistant message with tool call
                 messages.append(
                     {"role": "assistant", "content": "", "tool_calls": [tool_call]}
@@ -1069,6 +1162,12 @@ class BrainService:
                         "content": json.dumps(tool_result, default=str),
                     }
                 )
+
+                if guardrails.stop_reason:
+                    break
+
+            if guardrails.stop_reason:
+                break
 
         # Calculate cost
         cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
@@ -1147,6 +1246,8 @@ class BrainService:
             "model": self.model,
             "tool_executions": tool_executions,
             "iterations": iterations,
+            "stop_reason": guardrails.stop_reason,
+            "guardrails": guardrails.to_dict(),
         }
 
     def consult_with_tools_stream(
@@ -1237,6 +1338,9 @@ class BrainService:
         total_output_tokens = 0
         iterations = 0
         accumulated_response = ""
+        guardrails = GuardrailState()
+        max_same_failure = 2
+        max_no_progress_steps = 3
         
         # Initialize reasoning state for multi-step reasoning
         reasoning_state = ReasoningState(original_question=question)
@@ -1278,6 +1382,9 @@ class BrainService:
         # Streaming agentic loop
         while iterations < max_iterations:
             iterations += 1
+
+            if guardrails.stop_reason:
+                break
 
             # Estimate input tokens
             input_text = "".join(
@@ -1338,11 +1445,23 @@ class BrainService:
                 arguments_str = func.get("arguments", "{}")
                 tool_call_id = tool_call.get("id", f"call_{uuid4().hex[:8]}")
 
+                if not tool_call.get("id"):
+                    tool_call["id"] = tool_call_id
+
                 try:
                     arguments = json.loads(arguments_str) if arguments_str else {}
                 except json.JSONDecodeError:
                     arguments = {}
                     logger.warning(f"Failed to parse tool arguments: {arguments_str}")
+
+                tool_key = _tool_call_key(tool_name, arguments)
+                if tool_key in guardrails.attempted_tool_calls:
+                    guardrails.stop_reason = f"guardrail.stop.repeated_tool_call:{tool_key}"
+                    break
+
+                if guardrails.tool_failures.get(tool_name, 0) >= max_same_failure:
+                    guardrails.stop_reason = f"guardrail.stop.circuit_open:{tool_name}"
+                    break
 
                 # Yield tool_start event
                 yield {"type": "tool_start", "tool": tool_name, "arguments": arguments}
@@ -1351,41 +1470,36 @@ class BrainService:
 
                 # Execute tool via MCP server
                 tool_result = self._execute_tool(tool_name, arguments)
+
+                guardrails.attempted_tool_calls.add(tool_key)
+                failure_fp = _fingerprint_tool_failure(tool_name, tool_result)
+                if failure_fp:
+                    guardrails.failure_fingerprints[failure_fp] = (
+                        guardrails.failure_fingerprints.get(failure_fp, 0) + 1
+                    )
+                    guardrails.tool_failures[tool_name] = (
+                        guardrails.tool_failures.get(tool_name, 0) + 1
+                    )
+
+                    if guardrails.failure_fingerprints[failure_fp] >= max_same_failure:
+                        guardrails.stop_reason = f"guardrail.stop.repeated_failure:{failure_fp}"
+                else:
+                    guardrails.no_progress_steps = 0
+                    if tool_name in guardrails.tool_failures:
+                        guardrails.tool_failures[tool_name] = 0
                 success = "error" not in tool_result
 
-                # Yield tool_result event
-                yield {
-                    "type": "tool_result",
-                    "tool": tool_name,
-                    "arguments": arguments,
-                    "result": tool_result,
-                    "success": success,
-                }
-                
-                # Update reasoning state based on tool execution
-                if reasoning_state.is_multi_step:
-                    self._update_reasoning_state(reasoning_state, tool_name, arguments, tool_result, success)
-                    
-                    # Add reasoning progress as a system message
-                    next_step = reasoning_state.get_next_step()
-                    if next_step:
-                        next_step_formatted = next_step.replace('_', ' ').title()
-                        
-                        # Add reasoning progress as a system message
-                        messages.append({
-                            "role": "system",
-                            "content": f"## Reasoning Progress\nCurrent stage: {reasoning_state.stage}\nNext step: {next_step_formatted}\n\nYou have collected {len(reasoning_state.findings)} findings so far. Continue with the next step in your reasoning process."
-                        })
-
-                # Build execution record
                 execution_record = {
                     "tool": tool_name,
                     "arguments": arguments,
                     "result": tool_result,
                     "success": success,
+                    "tool_call_key": tool_key,
+                    "failure_fingerprint": failure_fp,
                 }
 
-                # Create fallback task if tool failed (not for hq_execute to avoid recursion)
+                # Create fallback governance task if tool execution failed
+                # Don't create fallback for hq_execute failures to avoid recursion
                 if not success and tool_name != "hq_execute":
                     fallback = self._create_fallback_task(
                         tool_name,
@@ -1398,8 +1512,37 @@ class BrainService:
                         execution_record["fallback_task_id"] = fallback["result"].get(
                             "id"
                         )
+                    elif isinstance(fallback, dict) and "id" in fallback:
+                        execution_record["fallback_task_id"] = fallback["id"]
 
                 tool_executions.append(execution_record)
+
+                if failure_fp:
+                    guardrails.no_progress_steps += 1
+                else:
+                    guardrails.no_progress_steps = 0
+
+                if guardrails.no_progress_steps >= max_no_progress_steps:
+                    guardrails.stop_reason = "guardrail.stop.no_progress"
+
+                # Update reasoning state based on tool execution
+                if reasoning_state.is_multi_step:
+                    self._update_reasoning_state(
+                        reasoning_state, tool_name, arguments, tool_result, success
+                    )
+
+                    next_step = reasoning_state.get_next_step()
+                    if next_step:
+                        next_step_formatted = next_step.replace("_", " ").title()
+                        messages.append(
+                            {
+                                "role": "system",
+                                "content": "## Reasoning Progress\n"
+                                f"Current stage: {reasoning_state.stage}\n"
+                                f"Next step: {next_step_formatted}\n\n"
+                                f"Findings collected: {len(reasoning_state.findings)}",
+                            }
+                        )
 
                 # Add assistant message with tool call
                 messages.append(
@@ -1414,6 +1557,20 @@ class BrainService:
                         "content": json.dumps(tool_result, default=str),
                     }
                 )
+
+                # Yield tool_result event
+                yield {
+                    "type": "tool_result",
+                    "tool": tool_name,
+                    "result": tool_result,
+                    "success": success,
+                }
+
+                if guardrails.stop_reason:
+                    break
+
+            if guardrails.stop_reason:
+                break
 
         if (
             enable_tools
@@ -1442,13 +1599,15 @@ class BrainService:
         # Yield done event with final stats
         yield {
             "type": "done",
+            "response": accumulated_response,
             "session_id": session_id,
             "input_tokens": total_input_tokens,
             "output_tokens": total_output_tokens,
             "cost_cents": cost_cents,
             "tool_executions": tool_executions,
             "iterations": iterations,
-            "model": self.model,
+            "stop_reason": guardrails.stop_reason,
+            "guardrails": guardrails.to_dict(),
         }
 
         logger.info(
