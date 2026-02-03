@@ -1557,7 +1557,6 @@ class BrainService:
                     fallback_model = healing_mgr.get_next_fallback_model(selected_model)
                     if fallback_model:
                         logger.info(f"Switching from {selected_model} to {fallback_model}")
-                        original_selected = selected_model
                         selected_model = fallback_model
                         self.model = fallback_model
                         
@@ -1584,7 +1583,8 @@ class BrainService:
                             return
                         break
                 else:
-                    # Other strategies: try non-streaming fallback
+                    # Other recovery strategies: try non-streaming fallback
+                    # Falls through to use response_text and tool_calls from recovery attempt
                     try:
                         response_text, tool_calls = self._call_api_with_tools(
                             messages, tools

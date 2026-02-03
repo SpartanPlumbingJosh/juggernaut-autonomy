@@ -301,8 +301,9 @@ def handle_health(
             }
         }
     """
-    if not _validate_auth(query_params, headers):
-        return _error_response(401, "Unauthorized")
+    is_authed, auth_error = _validate_auth(query_params, headers)
+    if not is_authed:
+        return _error_response(401, auth_error or "Unauthorized")
 
     if not BRAIN_AVAILABLE:
         return _error_response(503, "Brain service not available")
@@ -815,6 +816,7 @@ __all__ = [
     "handle_consult",
     "handle_history",
     "handle_clear",
+    "handle_health",
     "handle_options",
     "route_request",
     "create_flask_routes",

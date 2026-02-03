@@ -10,10 +10,11 @@ This module provides enhanced self-healing capabilities beyond basic circuit bre
 """
 
 import logging
+from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Deque, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class FailureContext:
     failure_type: FailureType
     error_message: str
     component: str
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     retry_count: int = 0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
@@ -63,7 +64,8 @@ class SelfHealingManager:
     
     def __init__(self):
         """Initialize self-healing manager."""
-        self.failure_history: List[FailureContext] = []
+        # Use deque with maxlen to prevent memory leak from unbounded growth
+        self.failure_history: Deque[FailureContext] = deque(maxlen=1000)
         self.recovery_attempts: Dict[str, int] = {}
         self.successful_recoveries: Dict[str, int] = {}
         self.model_fallback_chain: List[str] = [
@@ -213,7 +215,7 @@ class SelfHealingManager:
         total_successes = sum(self.successful_recoveries.values())
         recovery_rate = (total_successes / total_attempts * 100) if total_attempts > 0 else 0
         
-        one_hour_ago = datetime.now() - timedelta(hours=1)
+        one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
         recent_failures = [f for f in self.failure_history if f.timestamp > one_hour_ago]
         
         failure_by_type = {}
