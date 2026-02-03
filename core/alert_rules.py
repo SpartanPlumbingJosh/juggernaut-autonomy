@@ -92,8 +92,8 @@ class AlertRulesEngine:
                 ORDER BY first_seen DESC
             """
             
-            five_min_ago = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-            results = fetch_all(query, (five_min_ago,))
+            five_min_ago = datetime.now(timezone.utc) - timedelta(minutes=5)
+            results = fetch_all(query, (five_min_ago.isoformat(),))
             
             return [str(r['id']) for r in results]
         except Exception as e:
@@ -132,8 +132,8 @@ class AlertRulesEngine:
                 HAVING COUNT(o.id) >= %s
             """
             
-            since = (datetime.now(timezone.utc) - timedelta(minutes=window_minutes)).isoformat()
-            results = fetch_all(query, (since, rate_threshold * window_minutes))
+            since = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+            results = fetch_all(query, (since.isoformat(), rate_threshold * window_minutes))
             
             return [str(r['id']) for r in results]
         except Exception as e:
@@ -174,8 +174,8 @@ class AlertRulesEngine:
                 HAVING COUNT(o.id) >= %s
             """
             
-            since = (datetime.now(timezone.utc) - timedelta(minutes=duration_minutes)).isoformat()
-            results = fetch_all(query, (since, min_occurrences))
+            since = datetime.now(timezone.utc) - timedelta(minutes=duration_minutes)
+            results = fetch_all(query, (since.isoformat(), min_occurrences))
             
             return [str(r['id']) for r in results]
         except Exception as e:
