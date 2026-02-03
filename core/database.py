@@ -2323,3 +2323,50 @@ def validate_learning(learning_id: str, validated_by: str) -> bool:
             level="error"
         )
         return False
+
+
+# Helper functions for self-heal playbooks
+def execute_sql(sql: str, params: tuple = None) -> None:
+    """
+    Execute a SQL statement (INSERT, UPDATE, DELETE).
+    
+    Args:
+        sql: SQL statement to execute
+        params: Optional tuple of parameters for parameterized queries
+    """
+    if params:
+        # Simple parameter substitution for basic queries
+        for param in params:
+            if isinstance(param, str):
+                sql = sql.replace('%s', f"'{param}'", 1)
+            elif param is None:
+                sql = sql.replace('%s', 'NULL', 1)
+            else:
+                sql = sql.replace('%s', str(param), 1)
+    
+    _db.query(sql)
+
+
+def fetch_all(sql: str, params: tuple = None) -> List[Dict[str, Any]]:
+    """
+    Execute a SQL query and return all rows as a list of dictionaries.
+    
+    Args:
+        sql: SQL query to execute
+        params: Optional tuple of parameters for parameterized queries
+    
+    Returns:
+        List of dictionaries representing rows
+    """
+    if params:
+        # Simple parameter substitution for basic queries
+        for param in params:
+            if isinstance(param, str):
+                sql = sql.replace('%s', f"'{param}'", 1)
+            elif param is None:
+                sql = sql.replace('%s', 'NULL', 1)
+            else:
+                sql = sql.replace('%s', str(param), 1)
+    
+    result = _db.query(sql)
+    return result.get('rows', [])
