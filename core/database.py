@@ -2326,6 +2326,11 @@ def validate_learning(learning_id: str, validated_by: str) -> bool:
 
 
 # Helper functions for self-heal playbooks
+def _escape_sql_string(value: str) -> str:
+    """Escape a string value for SQL by doubling single quotes."""
+    return value.replace("'", "''")
+
+
 def execute_sql(sql: str, params: tuple = None) -> None:
     """
     Execute a SQL statement (INSERT, UPDATE, DELETE).
@@ -2335,12 +2340,15 @@ def execute_sql(sql: str, params: tuple = None) -> None:
         params: Optional tuple of parameters for parameterized queries
     """
     if params:
-        # Simple parameter substitution for basic queries
+        # Parameter substitution with proper escaping
         for param in params:
             if isinstance(param, str):
-                sql = sql.replace('%s', f"'{param}'", 1)
+                escaped = _escape_sql_string(param)
+                sql = sql.replace('%s', f"'{escaped}'", 1)
             elif param is None:
                 sql = sql.replace('%s', 'NULL', 1)
+            elif isinstance(param, bool):
+                sql = sql.replace('%s', 'TRUE' if param else 'FALSE', 1)
             else:
                 sql = sql.replace('%s', str(param), 1)
     
@@ -2359,12 +2367,15 @@ def fetch_all(sql: str, params: tuple = None) -> List[Dict[str, Any]]:
         List of dictionaries representing rows
     """
     if params:
-        # Simple parameter substitution for basic queries
+        # Parameter substitution with proper escaping
         for param in params:
             if isinstance(param, str):
-                sql = sql.replace('%s', f"'{param}'", 1)
+                escaped = _escape_sql_string(param)
+                sql = sql.replace('%s', f"'{escaped}'", 1)
             elif param is None:
                 sql = sql.replace('%s', 'NULL', 1)
+            elif isinstance(param, bool):
+                sql = sql.replace('%s', 'TRUE' if param else 'FALSE', 1)
             else:
                 sql = sql.replace('%s', str(param), 1)
     

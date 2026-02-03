@@ -105,6 +105,10 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
             """
             workers = fetch_all(query)
             
+            if not workers:
+                self.add_finding("workers_status", "No workers table or no workers found", "warning")
+                return {"total": 0, "online": 0, "offline": 0, "stale": 0, "workers": []}
+            
             online_workers = [w for w in workers if w.get('status') == 'online']
             offline_workers = [w for w in workers if w.get('status') != 'online']
             stale_workers = [w for w in workers if w.get('seconds_since_heartbeat', 0) > 300]
@@ -149,7 +153,7 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
                 AND created_at < NOW() - INTERVAL '1 hour'
             """
             blocked_result = fetch_all(blocked_query)
-            blocked_count = blocked_result[0].get('count', 0) if blocked_result else 0
+            blocked_count = int(blocked_result[0].get('count', 0)) if blocked_result else 0
             
             # Check for stuck running tasks
             stuck_query = """
@@ -159,7 +163,7 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
                 AND updated_at < NOW() - INTERVAL '30 minutes'
             """
             stuck_result = fetch_all(stuck_query)
-            stuck_count = stuck_result[0].get('count', 0) if stuck_result else 0
+            stuck_count = int(stuck_result[0].get('count', 0)) if stuck_result else 0
             
             self.add_finding("blocked_tasks", blocked_count,
                            "critical" if blocked_count > 10 else "warning" if blocked_count > 0 else "info")
@@ -192,8 +196,15 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
                 LIMIT 10
             """
             errors = fetch_all(query)
+        except Exception as e:
+            if "does not exist" in str(e):
+                self.add_finding("recent_errors_check", "dashboard_logs table not found", "info")
+                return {"total_errors": 0, "error_patterns": []}
+            raise
+        
+        try:
             
-            total_errors = sum(e.get('count', 0) for e in errors)
+            total_errors = sum(int(e.get('count', 0)) for e in errors)
             
             self.add_finding("recent_errors_1h", total_errors,
                            "critical" if total_errors > 50 else "warning" if total_errors > 10 else "info")
@@ -219,9 +230,9 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
             """
             stats = fetch_all(query)
             
-            completed = sum(s.get('count', 0) for s in stats if s.get('status') == 'completed')
-            failed = sum(s.get('count', 0) for s in stats if s.get('status') == 'failed')
-            total = sum(s.get('count', 0) for s in stats)
+            completed = sum(int(s.get('count', 0)) for s in stats if s.get('status') == 'completed')
+            failed = sum(int(s.get('count', 0)) for s in stats if s.get('status') == 'failed')
+            total = sum(int(s.get('count', 0)) for s in stats)
             
             success_rate = (completed / total * 100) if total > 0 else 0
             
@@ -249,7 +260,7 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
                 WHERE datname = current_database()
             """
             pool_result = fetch_all(pool_query)
-            active_connections = pool_result[0].get('active_connections', 0) if pool_result else 0
+            active_connections = int(pool_result[0].get('active_connections', 0)) if pool_result else 0
             
             # Check table sizes
             size_query = """
