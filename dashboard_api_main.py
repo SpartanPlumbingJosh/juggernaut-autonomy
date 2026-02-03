@@ -31,6 +31,9 @@ from api.internal_dashboard import router as internal_dashboard_router
 # Public (browser-direct) dashboard endpoints - no auth required
 from api.public_dashboard import router as public_dashboard_router
 
+# Public pages API (opportunities, revenue, experiments) - no auth required
+from api.public_pages_api import router as public_pages_router
+
 # Approvals API (authenticated via INTERNAL_API_SECRET)
 from api.approvals_api import router as approvals_api_router
 
@@ -60,6 +63,9 @@ app.include_router(internal_dashboard_router)
 
 # Public routes (no auth, CORS-enabled for browser access)
 app.include_router(public_dashboard_router)
+
+# Public pages API (opportunities, revenue, experiments)
+app.include_router(public_pages_router)
 
 # Approval queue routes (authenticated)
 app.include_router(approvals_api_router)
@@ -279,6 +285,15 @@ async def health():
             "/public/dashboard/cost",
             "/public/dashboard/revenue/summary",
             "/public/dashboard/alerts",
+            # Public pages API (Spartan HQ)
+            "/public/pages/opportunities",
+            "/public/pages/opportunities/stats",
+            "/public/pages/opportunities/{id}",
+            "/public/pages/revenue",
+            "/public/pages/revenue/by-source",
+            "/public/pages/experiments",
+            "/public/pages/experiments/stats",
+            "/public/pages/experiments/{id}",
             # Approvals API (authenticated)
             "/api/approvals",
             # Chat sessions API (authenticated)
