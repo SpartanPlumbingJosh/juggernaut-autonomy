@@ -174,10 +174,19 @@ try:
 except (ValueError, TypeError):
     MAX_STREAM_TOOL_ITERATIONS = 30
 
+# Per-mode model policies for cost/speed/quality tradeoffs
+MODE_MODEL_POLICIES = {
+    "normal": "openrouter/auto",  # Balanced - let OpenRouter choose
+    "deep_research": "anthropic/claude-3.5-sonnet",  # Quality - best reasoning
+    "code": "anthropic/claude-3.5-sonnet",  # Quality - best code generation
+    "ops": "anthropic/claude-3-haiku",  # Speed/cost - cheapest and fastest
+}
+
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
     "openrouter/auto": {"input": 5.0, "output": 15.0},
     "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
+    "anthropic/claude-3.5-sonnet:beta": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
     "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "openai/gpt-4o": {"input": 2.5, "output": 10.0},
@@ -1353,6 +1362,11 @@ class BrainService:
         if normalized_mode not in {"normal", "deep_research", "code", "ops"}:
             normalized_mode = "normal"
 
+        # Select model based on mode policy
+        selected_model = MODE_MODEL_POLICIES.get(normalized_mode, self.model)
+        original_model = self.model
+        self.model = selected_model  # Temporarily override for this request
+
         budgets = budgets if isinstance(budgets, dict) else {}
         requested_max_iterations = budgets.get("max_iterations")
         requested_max_same_failure = budgets.get("max_same_failure")
@@ -1362,7 +1376,7 @@ class BrainService:
         yield {
             "type": "status",
             "status": "thinking",
-            "detail": f"mode={normalized_mode}",
+            "detail": f"mode={normalized_mode}, model={selected_model}",
         }
 
         # Load history and memories
@@ -1464,7 +1478,12 @@ class BrainService:
             "type": "budget",
             "mode": normalized_mode,
             "steps": {"used": 0, "max": max_iterations},
-            "policy": {"model": self.model, "max_iterations": max_iterations},
+            "policy": {
+                "model": selected_model,
+                "max_iterations": max_iterations,
+                "max_same_failure": max_same_failure,
+                "max_no_progress_steps": max_no_progress_steps,
+            },
         }
         
         # Add reasoning context to system prompt if this is a multi-step task
@@ -1729,6 +1748,9 @@ class BrainService:
         if is_first_exchange and accumulated_response:
             self._maybe_generate_title(session_id, question, accumulated_response)
 
+        # Restore original model
+        self.model = original_model
+
         # Yield done event with final stats
         yield {"type": "status", "status": "summarizing"}
         yield {
@@ -1743,6 +1765,7 @@ class BrainService:
             "stop_reason": guardrails.stop_reason,
             "guardrails": guardrails.to_dict(),
             "mode": normalized_mode,
+            "model": selected_model,
             "budget": {"steps": {"used": iterations, "max": max_iterations}},
         }
 
@@ -1755,6 +1778,8 @@ class BrainService:
                 "cost_cents": cost_cents,
                 "tool_calls": len(tool_executions),
                 "iterations": iterations,
+                "mode": normalized_mode,
+                "model": selected_model,
             },
         )
 
