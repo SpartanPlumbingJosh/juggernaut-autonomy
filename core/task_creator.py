@@ -137,7 +137,7 @@ class TaskCreator:
                 description,
                 'pending',
                 priority,
-                str(metadata),
+                json.dumps(metadata),
                 datetime.now(timezone.utc).isoformat()
             )
             
