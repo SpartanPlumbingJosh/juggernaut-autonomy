@@ -41,6 +41,7 @@ _brain_import_error = None
 
 try:
     from core.unified_brain import BrainService
+    from core.self_healing import get_self_healing_manager
 
     BRAIN_AVAILABLE = True
 except ImportError as e:
@@ -272,6 +273,59 @@ def handle_consult(
         return _error_response(503, "Brain service not available")
     except Exception as e:
         logger.exception("Error in brain consult: %s", str(e))
+        return _error_response(500, f"Internal error: {str(e)}")
+
+
+def handle_health(
+    query_params: Dict[str, Any], headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """
+    Handle GET /api/brain/health request.
+
+    Returns self-healing system health metrics.
+
+    Returns:
+        {
+            "success": true,
+            "metrics": {
+                "total_recovery_attempts": 10,
+                "successful_recoveries": 8,
+                "recovery_rate_percent": 80.0,
+                "recent_failures_1h": 3,
+                "failure_breakdown": {"rate_limit": 2, "timeout": 1},
+                "component_health": {"model:gpt-5.1:rate_limit": "healthy"}
+            },
+            "alert": {
+                "triggered": false,
+                "reason": ""
+            }
+        }
+    """
+    if not _validate_auth(query_params, headers):
+        return _error_response(401, "Unauthorized")
+
+    if not BRAIN_AVAILABLE:
+        return _error_response(503, "Brain service not available")
+
+    try:
+        healing_mgr = get_self_healing_manager()
+        metrics = healing_mgr.get_health_metrics()
+        should_alert, alert_reason = healing_mgr.should_trigger_alert()
+
+        return _make_response(
+            200,
+            {
+                "success": True,
+                "metrics": metrics,
+                "alert": {
+                    "triggered": should_alert,
+                    "reason": alert_reason,
+                },
+            },
+        )
+
+    except Exception as e:
+        logger.exception("Error getting health metrics: %s", str(e))
         return _error_response(500, f"Internal error: {str(e)}")
 
 
@@ -566,6 +620,11 @@ def handle_brain_request(
     elif endpoint == "clear":
         if method == "DELETE":
             resp = handle_clear(params, headers)
+        else:
+            resp = _error_response(405, f"Method {method} not allowed")
+    elif endpoint == "health":
+        if method == "GET":
+            resp = handle_health(params, headers)
         else:
             resp = _error_response(405, f"Method {method} not allowed")
     else:

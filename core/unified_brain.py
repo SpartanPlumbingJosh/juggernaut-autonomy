@@ -26,6 +26,7 @@ from .database import query_db, escape_sql_value
 from .mcp_tool_schemas import get_tool_schemas
 from .retry import exponential_backoff, RateLimitError, APIConnectionError
 from .circuit_breaker import CircuitOpenError, get_circuit_breaker
+from .self_healing import get_self_healing_manager, FailureType, RecoveryStrategy
 
 
 @dataclass
@@ -1532,22 +1533,71 @@ class BrainService:
 
                 total_output_tokens += estimate_tokens(iteration_content)
 
-            except APIError as e:
+            except (APIError, RateLimitError, CircuitOpenError) as e:
                 logger.error(
                     f"Streaming API call failed on iteration {iterations}: {e}"
                 )
-                try:
-                    response_text, tool_calls = self._call_api_with_tools(
-                        messages, tools
-                    )
-                except APIError as e2:
-                    logger.error(
-                        f"Non-streaming fallback failed on iteration {iterations}: {e2}"
-                    )
-                    if iterations == 1:
-                        yield {"type": "error", "message": str(e2)}
-                        return
-                    break
+                
+                # Self-healing: classify failure and attempt recovery
+                healing_mgr = get_self_healing_manager()
+                failure_ctx = healing_mgr.classify_failure(e, f"model:{selected_model}")
+                recovery_action = healing_mgr.select_recovery_strategy(failure_ctx)
+                healing_mgr.record_recovery_attempt(failure_ctx)
+                
+                # Emit self-healing event
+                yield {
+                    "type": "self_healing",
+                    "failure_type": failure_ctx.failure_type.value,
+                    "recovery_strategy": recovery_action.strategy.value,
+                    "reason": recovery_action.reason,
+                }
+                
+                # Attempt recovery based on strategy
+                if recovery_action.strategy == RecoveryStrategy.SWITCH_MODEL:
+                    fallback_model = healing_mgr.get_next_fallback_model(selected_model)
+                    if fallback_model:
+                        logger.info(f"Switching from {selected_model} to {fallback_model}")
+                        original_selected = selected_model
+                        selected_model = fallback_model
+                        self.model = fallback_model
+                        
+                        yield {
+                            "type": "status",
+                            "status": "recovering",
+                            "detail": f"Switching to {fallback_model}",
+                        }
+                        
+                        try:
+                            response_text, tool_calls = self._call_api_with_tools(
+                                messages, tools
+                            )
+                            healing_mgr.record_recovery_success(failure_ctx)
+                        except Exception as e3:
+                            logger.error(f"Fallback model {fallback_model} also failed: {e3}")
+                            if iterations == 1:
+                                yield {"type": "error", "message": f"All models failed: {str(e3)}"}
+                                return
+                            break
+                    else:
+                        if iterations == 1:
+                            yield {"type": "error", "message": "No fallback models available"}
+                            return
+                        break
+                else:
+                    # Other strategies: try non-streaming fallback
+                    try:
+                        response_text, tool_calls = self._call_api_with_tools(
+                            messages, tools
+                        )
+                        healing_mgr.record_recovery_success(failure_ctx)
+                    except APIError as e2:
+                        logger.error(
+                            f"Non-streaming fallback failed on iteration {iterations}: {e2}"
+                        )
+                        if iterations == 1:
+                            yield {"type": "error", "message": str(e2)}
+                            return
+                        break
 
                 if response_text:
                     iteration_content = response_text
