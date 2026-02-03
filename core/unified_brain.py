@@ -1402,9 +1402,21 @@ class BrainService:
             "ops": {"max_iterations": 6, "max_same_failure": 2, "max_no_progress_steps": 3},
         }
 
-        max_same_failure = int(requested_max_same_failure) if isinstance(requested_max_same_failure, int) else mode_defaults[normalized_mode]["max_same_failure"]
-        max_no_progress_steps = int(requested_max_no_progress_steps) if isinstance(requested_max_no_progress_steps, int) else mode_defaults[normalized_mode]["max_no_progress_steps"]
+        def _safe_int(val: Any) -> Optional[int]:
+            """Permissively coerce value to int, accepting strings and floats."""
+            if val is None:
+                return None
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                return None
+
+        temp_max_same_failure = _safe_int(requested_max_same_failure)
+        max_same_failure = temp_max_same_failure if temp_max_same_failure is not None else mode_defaults[normalized_mode]["max_same_failure"]
         max_same_failure = max(1, max_same_failure)
+
+        temp_max_no_progress = _safe_int(requested_max_no_progress_steps)
+        max_no_progress_steps = temp_max_no_progress if temp_max_no_progress is not None else mode_defaults[normalized_mode]["max_no_progress_steps"]
         max_no_progress_steps = max(1, max_no_progress_steps)
         
         # Initialize reasoning state for multi-step reasoning
@@ -1436,8 +1448,9 @@ class BrainService:
         max_iterations = self._determine_max_iterations(question, context)
         if isinstance(mode_defaults[normalized_mode]["max_iterations"], int):
             max_iterations = max(int(mode_defaults[normalized_mode]["max_iterations"]), 1)
-        if isinstance(requested_max_iterations, int) and requested_max_iterations > 0:
-            max_iterations = int(requested_max_iterations)
+        temp_max_iterations = _safe_int(requested_max_iterations)
+        if temp_max_iterations is not None and temp_max_iterations > 0:
+            max_iterations = temp_max_iterations
         max_iterations = min(max_iterations, MAX_STREAM_TOOL_ITERATIONS)
 
         # Emit budget snapshot up front (and keep updated later)
