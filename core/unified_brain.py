@@ -177,14 +177,18 @@ except (ValueError, TypeError):
 # Per-mode model policies for cost/speed/quality tradeoffs
 MODE_MODEL_POLICIES = {
     "normal": "openrouter/auto",  # Balanced - let OpenRouter choose
-    "deep_research": "anthropic/claude-3.5-sonnet",  # Quality - best reasoning
-    "code": "anthropic/claude-3.5-sonnet",  # Quality - best code generation
-    "ops": "anthropic/claude-3-haiku",  # Speed/cost - cheapest and fastest
+    "deep_research": "openai/gpt-5.1",  # Quality - 77.9% SWE-bench, 58% cheaper than Claude
+    "code": "openai/gpt-5.1",  # Quality - best coding benchmarks, cost-effective
+    "ops": "google/gemini-2.0-flash:free",  # Speed/cost - FREE tier for high-volume ops
 }
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
     "openrouter/auto": {"input": 5.0, "output": 15.0},
+    "openai/gpt-5.1": {"input": 1.25, "output": 10.0},
+    "google/gemini-2.0-flash:free": {"input": 0.0, "output": 0.0},
+    "google/gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40},
+    "anthropic/claude-sonnet-4.5": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3.5-sonnet:beta": {"input": 3.0, "output": 15.0},
     "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
@@ -873,6 +877,93 @@ class BrainService:
             if token not in evidence:
                 return False
         return True
+
+    def _detect_hallucination_indicators(self, response_text: str) -> Dict[str, Any]:
+        """Detect hallucination indicators in model response.
+        
+        Returns dict with:
+            - has_uncertainty: bool - contains uncertainty phrases
+            - uncertainty_phrases: list - detected uncertainty markers
+            - confidence_score: float - 0.0 to 1.0 (lower = more uncertain)
+            - has_contradictions: bool - contains contradictory statements
+        """
+        content = str(response_text or "").lower()
+        
+        # Uncertainty markers that indicate potential hallucination
+        uncertainty_markers = [
+            "i think", "i believe", "probably", "maybe", "might be",
+            "could be", "possibly", "not sure", "unclear", "uncertain",
+            "i'm not certain", "i don't know", "cannot verify",
+            "may not be accurate", "to the best of my knowledge"
+        ]
+        
+        detected_uncertainty = [m for m in uncertainty_markers if m in content]
+        has_uncertainty = len(detected_uncertainty) > 0
+        
+        # Calculate confidence score (inverse of uncertainty)
+        confidence_score = 1.0 - min(len(detected_uncertainty) * 0.15, 0.8)
+        
+        # Check for contradictions (basic heuristic)
+        contradiction_patterns = [
+            (r"\byes\b.*\bno\b", r"\bno\b.*\byes\b"),
+            (r"\btrue\b.*\bfalse\b", r"\bfalse\b.*\btrue\b"),
+            (r"\bsuccess\b.*\bfailed\b", r"\bfailed\b.*\bsuccess\b"),
+        ]
+        
+        has_contradictions = False
+        for p1, p2 in contradiction_patterns:
+            if re.search(p1, content) or re.search(p2, content):
+                has_contradictions = True
+                break
+        
+        return {
+            "has_uncertainty": has_uncertainty,
+            "uncertainty_phrases": detected_uncertainty,
+            "confidence_score": confidence_score,
+            "has_contradictions": has_contradictions,
+        }
+
+    def _validate_response_quality(self, response_text: str, tool_executions: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Comprehensive response quality validation.
+        
+        Returns dict with:
+            - is_valid: bool - overall quality gate
+            - reason: str - explanation if invalid
+            - hallucination_check: dict - hallucination indicators
+            - evidence_check: bool - has valid evidence
+        """
+        hallucination_check = self._detect_hallucination_indicators(response_text)
+        
+        # Check evidence requirement
+        requires_evidence = self._requires_evidence(response_text)
+        has_valid_evidence = self._response_has_valid_evidence(response_text, tool_executions) if requires_evidence else True
+        
+        # Quality gate logic
+        is_valid = True
+        reason = ""
+        
+        # Gate 1: Evidence requirement
+        if requires_evidence and not has_valid_evidence:
+            is_valid = False
+            reason = "Response contains factual claims without tool evidence"
+        
+        # Gate 2: High uncertainty
+        elif hallucination_check["confidence_score"] < 0.5:
+            is_valid = False
+            reason = f"Low confidence response ({hallucination_check['confidence_score']:.2f})"
+        
+        # Gate 3: Contradictions
+        elif hallucination_check["has_contradictions"]:
+            is_valid = False
+            reason = "Response contains contradictory statements"
+        
+        return {
+            "is_valid": is_valid,
+            "reason": reason,
+            "hallucination_check": hallucination_check,
+            "evidence_check": has_valid_evidence,
+            "requires_evidence": requires_evidence,
+        }
 
     def consult(
         self,
@@ -1736,6 +1827,27 @@ class BrainService:
                 "message": "Evidence required: no valid tool evidence for response",
             }
             return
+
+        if guardrails.stop_reason:
+            # Hallucination gating: validate response quality
+            quality_check = self._validate_response_quality(accumulated_response, tool_executions)
+            
+            if not quality_check["is_valid"]:
+                yield {
+                    "type": "error",
+                    "message": f"Quality gate failed: {quality_check['reason']}",
+                    "quality_check": quality_check,
+                }
+                yield {
+                    "type": "guardrails",
+                    "stop_reason": "quality_gate_failed",
+                    "state": {
+                        "reason": quality_check["reason"],
+                        "confidence_score": quality_check["hallucination_check"]["confidence_score"],
+                        "has_contradictions": quality_check["hallucination_check"]["has_contradictions"],
+                    },
+                }
+                return
 
         # Calculate cost
         cost_cents = calculate_cost(self.model, total_input_tokens, total_output_tokens)
