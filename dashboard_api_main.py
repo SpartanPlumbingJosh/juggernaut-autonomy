@@ -107,6 +107,19 @@ except ImportError as e:
     logger.warning("Engine API not available: %s", e)
     ENGINE_API_AVAILABLE = False
 
+# Routing API (Milestone 6)
+try:
+    from api.routing_api import (
+        handle_get_policies,
+        handle_get_costs,
+        handle_get_performance,
+        handle_select_model
+    )
+    ROUTING_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Routing API not available: %s", e)
+    ROUTING_API_AVAILABLE = False
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -574,6 +587,60 @@ async def engine_get_workers():
     )
 
 
+# Routing API Routes (Milestone 6)
+@app.get("/api/routing/policies")
+async def routing_get_policies():
+    if not ROUTING_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Routing API not available")
+    
+    result = handle_get_policies()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/routing/costs")
+async def routing_get_costs():
+    if not ROUTING_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Routing API not available")
+    
+    result = handle_get_costs()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/routing/performance")
+async def routing_get_performance():
+    if not ROUTING_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Routing API not available")
+    
+    result = handle_get_performance()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/routing/select")
+async def routing_select_model(request: Request):
+    if not ROUTING_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Routing API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_select_model(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
 @app.get("/health")
 async def health():
     """Detailed health check"""
@@ -639,7 +706,12 @@ async def health():
             "/api/engine/start",
             "/api/engine/stop",
             "/api/engine/assignments",
-            "/api/engine/workers"
+            "/api/engine/workers",
+            # Routing API (Milestone 6)
+            "/api/routing/policies",
+            "/api/routing/costs",
+            "/api/routing/performance",
+            "/api/routing/select"
         ]
     }
 
