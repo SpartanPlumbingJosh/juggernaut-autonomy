@@ -1178,6 +1178,13 @@ class BrainService:
                 if guardrails.no_progress_steps >= max_no_progress_steps:
                     guardrails.stop_reason = "guardrail.stop.no_progress"
 
+                if guardrails.stop_reason:
+                    yield {
+                        "type": "guardrails",
+                        "stop_reason": guardrails.stop_reason,
+                        "state": guardrails.to_dict(),
+                    }
+
                 # Add assistant message with tool call
                 messages.append(
                     {"role": "assistant", "content": "", "tool_calls": [tool_call]}
@@ -1288,6 +1295,8 @@ class BrainService:
         system_prompt: Optional[str] = None,
         enable_tools: bool = True,
         auto_execute: bool = False,
+        mode: Optional[str] = None,
+        budgets: Optional[Dict[str, Any]] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """
         Stream consultation with MCP tool execution capability.
@@ -1334,6 +1343,22 @@ class BrainService:
             "is_new_session": is_new_session,
         }
 
+        normalized_mode = str(mode or "normal").strip().lower()
+        if normalized_mode not in {"normal", "deep_research", "code", "ops"}:
+            normalized_mode = "normal"
+
+        budgets = budgets if isinstance(budgets, dict) else {}
+        requested_max_iterations = budgets.get("max_iterations")
+        requested_max_same_failure = budgets.get("max_same_failure")
+        requested_max_no_progress_steps = budgets.get("max_no_progress_steps")
+
+        # Inform client we're starting a run
+        yield {
+            "type": "status",
+            "status": "thinking",
+            "detail": f"mode={normalized_mode}",
+        }
+
         # Load history and memories
         history = self._load_history(session_id)
         is_first_exchange = len(history) == 0
@@ -1368,8 +1393,17 @@ class BrainService:
         iterations = 0
         accumulated_response = ""
         guardrails = GuardrailState()
-        max_same_failure = 2
-        max_no_progress_steps = 3
+
+        # Per-mode defaults (can be overridden via budgets)
+        mode_defaults = {
+            "normal": {"max_iterations": None, "max_same_failure": 2, "max_no_progress_steps": 3},
+            "deep_research": {"max_iterations": 18, "max_same_failure": 2, "max_no_progress_steps": 4},
+            "code": {"max_iterations": 12, "max_same_failure": 2, "max_no_progress_steps": 3},
+            "ops": {"max_iterations": 6, "max_same_failure": 2, "max_no_progress_steps": 3},
+        }
+
+        max_same_failure = int(requested_max_same_failure) if isinstance(requested_max_same_failure, int) else mode_defaults[normalized_mode]["max_same_failure"]
+        max_no_progress_steps = int(requested_max_no_progress_steps) if isinstance(requested_max_no_progress_steps, int) else mode_defaults[normalized_mode]["max_no_progress_steps"]
         
         # Initialize reasoning state for multi-step reasoning
         reasoning_state = ReasoningState(original_question=question)
@@ -1398,6 +1432,18 @@ class BrainService:
         
         # Determine maximum iterations based on task complexity
         max_iterations = self._determine_max_iterations(question, context)
+        if isinstance(mode_defaults[normalized_mode]["max_iterations"], int):
+            max_iterations = max(int(mode_defaults[normalized_mode]["max_iterations"]), 1)
+        if isinstance(requested_max_iterations, int) and requested_max_iterations > 0:
+            max_iterations = int(requested_max_iterations)
+
+        # Emit budget snapshot up front (and keep updated later)
+        yield {
+            "type": "budget",
+            "mode": normalized_mode,
+            "steps": {"used": 0, "max": max_iterations},
+            "policy": {"model": self.model, "max_iterations": max_iterations},
+        }
         
         # Add reasoning context to system prompt if this is a multi-step task
         if reasoning_state.is_multi_step:
@@ -1412,6 +1458,12 @@ class BrainService:
         while iterations < max_iterations:
             iterations += 1
 
+            yield {
+                "type": "budget",
+                "mode": normalized_mode,
+                "steps": {"used": iterations - 1, "max": max_iterations},
+            }
+
             if guardrails.stop_reason:
                 break
 
@@ -1424,6 +1476,8 @@ class BrainService:
             # Stream API call
             tool_calls_received = []
             iteration_content = ""
+
+            yield {"type": "status", "status": "reasoning"}
 
             try:
                 for content_chunk, tool_calls in self._stream_api_call(messages, tools):
@@ -1494,6 +1548,12 @@ class BrainService:
 
                 # Yield tool_start event
                 yield {"type": "tool_start", "tool": tool_name, "arguments": arguments}
+
+                yield {
+                    "type": "status",
+                    "status": "tool_running",
+                    "detail": tool_name,
+                }
 
                 logger.info(f"Executing tool: {tool_name} with args: {arguments}")
 
@@ -1595,6 +1655,8 @@ class BrainService:
                     "success": success,
                 }
 
+                yield {"type": "status", "status": "reasoning"}
+
                 if guardrails.stop_reason:
                     break
 
@@ -1626,6 +1688,7 @@ class BrainService:
             self._maybe_generate_title(session_id, question, accumulated_response)
 
         # Yield done event with final stats
+        yield {"type": "status", "status": "summarizing"}
         yield {
             "type": "done",
             "response": accumulated_response,
@@ -1637,6 +1700,8 @@ class BrainService:
             "iterations": iterations,
             "stop_reason": guardrails.stop_reason,
             "guardrails": guardrails.to_dict(),
+            "mode": normalized_mode,
+            "budget": {"steps": {"used": iterations, "max": max_iterations}},
         }
 
         logger.info(
