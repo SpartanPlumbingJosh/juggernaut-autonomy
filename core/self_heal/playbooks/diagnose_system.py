@@ -262,20 +262,25 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
             pool_result = fetch_all(pool_query)
             active_connections = int(pool_result[0].get('active_connections', 0)) if pool_result else 0
             
-            # Check table sizes
-            size_query = """
-                SELECT 
-                    pg_size_pretty(pg_total_relation_size('governance_tasks')) as tasks_size,
-                    pg_size_pretty(pg_total_relation_size('dashboard_logs')) as logs_size
-            """
-            size_result = fetch_all(size_query)
+            # Check table sizes (handle missing tables gracefully)
+            table_sizes = {}
+            try:
+                size_query = """
+                    SELECT 
+                        pg_size_pretty(pg_total_relation_size('governance_tasks')) as tasks_size
+                """
+                size_result = fetch_all(size_query)
+                if size_result:
+                    table_sizes = size_result[0]
+            except Exception as e:
+                logger.warning(f"Could not get table sizes: {e}")
             
             self.add_finding("active_db_connections", active_connections,
                            "warning" if active_connections > 50 else "info")
             
             return {
                 "active_connections": active_connections,
-                "table_sizes": size_result[0] if size_result else {}
+                "table_sizes": table_sizes
             }
         except Exception as e:
             logger.exception(f"Error checking resources: {e}")
