@@ -72,7 +72,8 @@ try:
         handle_crawl,
         handle_get_errors,
         handle_get_error_detail,
-        handle_get_stats
+        handle_get_stats,
+        handle_resolve_error
     )
     LOGS_API_AVAILABLE = True
 except ImportError as e:
@@ -451,6 +452,18 @@ async def logs_get_stats():
         raise HTTPException(status_code=503, detail="Logs API not available")
     
     result = handle_get_stats()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/logs/errors/{error_id}/resolve")
+async def logs_resolve_error(error_id: str):
+    if not LOGS_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Logs API not available")
+    
+    result = handle_resolve_error(error_id)
     return JSONResponse(
         status_code=result.get("statusCode", 200),
         content=json.loads(result.get("body", "{}"))

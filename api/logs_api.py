@@ -94,27 +94,47 @@ def handle_get_errors(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """
     try:
         limit = int(query_params.get("limit", ["20"])[0])
-        status = query_params.get("status", ["active"])[0]
+        status = query_params.get("status", [None])[0]
         
-        query = """
-            SELECT 
-                id,
-                fingerprint,
-                normalized_message,
-                error_type,
-                first_seen,
-                last_seen,
-                occurrence_count,
-                status,
-                task_created,
-                task_id
-            FROM error_fingerprints
-            WHERE status = %s
-            ORDER BY last_seen DESC
-            LIMIT %s
-        """
-        
-        errors = fetch_all(query, (status, limit))
+        # Build query based on whether status filter is provided
+        if status:
+            query = """
+                SELECT 
+                    id,
+                    fingerprint,
+                    normalized_message,
+                    error_type,
+                    first_seen,
+                    last_seen,
+                    occurrence_count,
+                    status,
+                    task_created,
+                    task_id
+                FROM error_fingerprints
+                WHERE status = %s
+                ORDER BY last_seen DESC
+                LIMIT %s
+            """
+            errors = fetch_all(query, (status, limit))
+        else:
+            # Return all errors (frontend will filter)
+            query = """
+                SELECT 
+                    id,
+                    fingerprint,
+                    normalized_message,
+                    error_type,
+                    first_seen,
+                    last_seen,
+                    occurrence_count,
+                    status,
+                    task_created,
+                    task_id
+                FROM error_fingerprints
+                ORDER BY last_seen DESC
+                LIMIT %s
+            """
+            errors = fetch_all(query, (limit,))
         
         return _make_response(200, {
             "success": True,
@@ -173,6 +193,36 @@ def handle_get_error_detail(fingerprint: str) -> Dict[str, Any]:
     except Exception as e:
         logger.exception(f"Error getting error detail: {e}")
         return _error_response(500, f"Failed to get error detail: {str(e)}")
+
+
+def handle_resolve_error(error_id: str) -> Dict[str, Any]:
+    """
+    Handle POST /api/logs/errors/{error_id}/resolve
+    
+    Mark an error fingerprint as resolved.
+    """
+    try:
+        from core.database import execute_sql
+        from datetime import datetime, timezone
+        
+        # Update error status to resolved
+        query = """
+            UPDATE error_fingerprints
+            SET 
+                status = 'resolved',
+                updated_at = %s
+            WHERE id = %s
+        """
+        
+        execute_sql(query, (datetime.now(timezone.utc).isoformat(), error_id))
+        
+        return _make_response(200, {
+            "success": True,
+            "message": "Error marked as resolved"
+        })
+    except Exception as e:
+        logger.exception(f"Error resolving error: {e}")
+        return _error_response(500, f"Failed to resolve error: {str(e)}")
 
 
 def handle_get_stats() -> Dict[str, Any]:
@@ -238,5 +288,6 @@ __all__ = [
     "handle_crawl",
     "handle_get_errors",
     "handle_get_error_detail",
-    "handle_get_stats"
+    "handle_get_stats",
+    "handle_resolve_error"
 ]
