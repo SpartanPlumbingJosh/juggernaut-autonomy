@@ -14,6 +14,7 @@ Architecture:
 """
 
 import json
+import os
 import urllib.request
 import urllib.error
 from typing import Any, Dict, List, Optional, Tuple
@@ -113,9 +114,6 @@ except ImportError as e:
         return (False, None)
 
 
-
-# Database configuration from environment variables
-import os
 
 # Get database configuration from environment variables with fallbacks
 NEON_ENDPOINT = os.environ.get(

@@ -14,6 +14,7 @@ Functions:
 
 import json
 import logging
+import os
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -22,9 +23,6 @@ import httpx
 
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# Database configuration from environment variables
-import os
 
 # Get database configuration from environment variables with fallbacks
 NEON_ENDPOINT = os.environ.get(

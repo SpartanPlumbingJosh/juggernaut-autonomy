@@ -40,14 +40,14 @@ from enum import Enum
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from uuid import uuid4
 
-logger = logging.getLogger(__name__)
-
 # Slack notifications for #war-room
 from core.notifications import (
     notify_task_completed,
     notify_task_failed,
     notify_engine_started
 )
+
+logger = logging.getLogger(__name__)
 
 EXPERIMENT_EXECUTOR_AVAILABLE = False
 GOAL_TRACKER_AVAILABLE = False
@@ -5354,15 +5354,6 @@ class HealthHandler(BaseHTTPRequestHandler):
             # Don't log health checks
             return
         logger.info("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
-    
-    def do_GET(self):
-        """Handle GET requests."""
-        if self.path == '/health':
-            self._handle_health_check()
-            return
-        
-        # Handle other GET requests...
-        self.send_error(404, "Not Found")
     
     def _handle_health_check(self):
         """Handle health check requests."""

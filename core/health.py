@@ -151,7 +151,7 @@ class HealthCheck:
         except asyncio.TimeoutError:
             return False, f"Check timed out after 5 seconds", None
         except Exception as e:
-            logger.exception(f"Health check '{name}' failed with exception")
+            logger.exception("Health check '%s' failed with exception", name)
             return False, f"Check failed with exception: {e}", {"exception": str(e)}
     
     def register(self, name: str, check_func: Callable) -> None:

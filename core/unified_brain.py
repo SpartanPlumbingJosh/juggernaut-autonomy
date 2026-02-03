@@ -19,7 +19,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Generator, List, Optional, Set, Tuple, Union
 from uuid import uuid4
-from dataclasses import dataclass, field
 
 import requests
 
