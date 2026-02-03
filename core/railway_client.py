@@ -137,29 +137,30 @@ class RailwayClient:
             logger.exception(f"Error fetching environments: {e}")
             return []
     
-    def get_deployments(self, project_id: str, environment_id: str = None, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_deployments(self, project_id: str, environment_id: str, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        Get recent deployments for a project.
+        Get recent deployments for an environment.
         
         Args:
             project_id: Railway project ID
-            environment_id: Environment ID (kept for backwards compatibility, not used)
+            environment_id: Environment ID
             limit: Max deployments to fetch
             
         Returns:
             List of deployments
         """
         query = """
-        query($projectId: String!, $limit: Int!) {
-            project(id: $projectId) {
-                deployments(first: $limit) {
-                    edges {
-                        node {
-                            id
-                            status
-                            createdAt
-                            staticUrl
-                        }
+        query($projectId: String!, $environmentId: String!) {
+            deployments(
+                input: { projectId: $projectId, environmentId: $environmentId }
+                first: 10
+            ) {
+                edges {
+                    node {
+                        id
+                        status
+                        createdAt
+                        staticUrl
                     }
                 }
             }
@@ -169,10 +170,10 @@ class RailwayClient:
         try:
             data = self._make_request(query, {
                 "projectId": project_id,
-                "limit": limit
+                "environmentId": environment_id
             })
             deployments = []
-            for edge in data.get("project", {}).get("deployments", {}).get("edges", []):
+            for edge in data.get("deployments", {}).get("edges", []):
                 deployments.append(edge["node"])
             return deployments
         except Exception as e:
