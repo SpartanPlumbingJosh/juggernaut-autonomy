@@ -79,6 +79,20 @@ except ImportError as e:
     logger.warning("Logs API not available: %s", e)
     LOGS_API_AVAILABLE = False
 
+# Code API (Milestone 4)
+try:
+    from api.code_api import (
+        handle_analyze,
+        handle_get_runs,
+        handle_get_run_detail,
+        handle_get_findings,
+        handle_get_health as handle_code_health
+    )
+    CODE_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Code API not available: %s", e)
+    CODE_API_AVAILABLE = False
+
 app = FastAPI(
     title="JUGGERNAUT Dashboard API",
     description="Executive Dashboard API for revenue, experiments, agents, and system metrics",
@@ -416,6 +430,74 @@ async def logs_get_stats():
     )
 
 
+# Code API Routes (Milestone 4)
+@app.post("/api/code/analyze")
+async def code_analyze(request: Request):
+    if not CODE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Code API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_analyze(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/code/runs")
+async def code_get_runs(request: Request):
+    if not CODE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Code API not available")
+    
+    query_params = dict(request.query_params)
+    result = handle_get_runs(query_params)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/code/runs/{run_id}")
+async def code_get_run_detail(run_id: str):
+    if not CODE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Code API not available")
+    
+    result = handle_get_run_detail(run_id)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/code/findings")
+async def code_get_findings(request: Request):
+    if not CODE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Code API not available")
+    
+    query_params = dict(request.query_params)
+    result = handle_get_findings(query_params)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.get("/api/code/health")
+async def code_get_health():
+    if not CODE_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Code API not available")
+    
+    result = handle_code_health()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
 @app.get("/health")
 async def health():
     """Detailed health check"""
@@ -469,7 +551,13 @@ async def health():
             "/api/logs/crawl",
             "/api/logs/errors",
             "/api/logs/errors/{fingerprint}",
-            "/api/logs/stats"
+            "/api/logs/stats",
+            # Code API (Milestone 4)
+            "/api/code/analyze",
+            "/api/code/runs",
+            "/api/code/runs/{id}",
+            "/api/code/findings",
+            "/api/code/health"
         ]
     }
 
