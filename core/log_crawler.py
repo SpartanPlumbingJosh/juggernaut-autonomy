@@ -6,6 +6,7 @@ Fetches logs from Railway, fingerprints errors, and triggers alerts.
 Part of Milestone 3: Railway Logs Crawler
 """
 
+import json
 import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
@@ -106,7 +107,7 @@ class LogCrawler:
                 log_entry.get('level', 'INFO'),
                 log_entry.get('message', ''),
                 log_entry.get('timestamp', datetime.now(timezone.utc).isoformat()),
-                str(log_entry.get('raw', {})),
+                json.dumps(log_entry.get('raw', {})),
                 log_entry.get('fingerprint')
             )
             
