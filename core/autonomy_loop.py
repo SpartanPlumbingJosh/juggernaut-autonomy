@@ -278,11 +278,14 @@ class AutonomyLoop:
     
     def stop(self):
         """Stop the autonomy loop."""
-        if not self.is_running:
-            logger.warning("Autonomy loop not running")
-            return False
-        
         try:
+            # Check database state instead of instance variable
+            # (loop may have been started externally by main.py)
+            status = self.get_status()
+            if not status or not status.get('is_running'):
+                logger.warning("Autonomy loop not running (per database)")
+                return False
+            
             # Signal stop
             self.stop_event.set()
             
