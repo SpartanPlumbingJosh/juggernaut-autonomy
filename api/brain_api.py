@@ -455,6 +455,8 @@ def handle_consult_stream(
     enable_tools = body.get("enable_tools", True)
     auto_execute = body.get("auto_execute", False)
     system_prompt = body.get("system_prompt")
+    mode = body.get("mode")
+    budgets = body.get("budgets")
 
     try:
         brain = _get_brain_service()
@@ -492,6 +494,8 @@ def handle_consult_stream(
             system_prompt=system_prompt,
             enable_tools=enable_tools,
             auto_execute=auto_execute,
+            mode=mode,
+            budgets=budgets,
         ):
             yield f"data: {json.dumps(event)}\n\n"
 
