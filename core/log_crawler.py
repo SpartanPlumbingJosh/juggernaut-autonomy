@@ -212,9 +212,24 @@ class LogCrawler:
             True if error was found and processed
         """
         level = log_entry.get('level', 'INFO').upper()
+        message = log_entry.get('message', '')
         
         # Only process ERROR, CRITICAL, and WARN logs
         if level not in ['ERROR', 'CRITICAL', 'WARN']:
+            return False
+        
+        # Filter out false positives
+        # Skip successful HTTP responses (200, 201, 204, etc.)
+        if 'http/' in message.lower() and any(code in message for code in [' 200 ', ' 201 ', ' 204 ', ' 304 ']):
+            return False
+        
+        # Skip INFO level messages that got mislabeled
+        if message.lower().startswith('info:'):
+            return False
+        
+        # Skip health check warnings that are transient
+        if 'stale_workers' in message.lower() and level == 'WARN':
+            # Only flag if it's a real error, not just a warning
             return False
         
         # Fingerprint the error
