@@ -138,7 +138,7 @@ class SelfImprovementEngine:
             }
         ]
     
-    async def detect_patterns(self) -> List[FailurePattern]:
+    def detect_patterns(self) -> List[FailurePattern]:
         """
         Detect repeating failure patterns from learnings table.
         
@@ -159,7 +159,7 @@ class SelfImprovementEngine:
         """
         
         try:
-            result = await query_db(sql)
+            result = query_db(sql)
             learnings = result.get("rows", [])
             
             # Group by similar summaries
@@ -179,7 +179,7 @@ class SelfImprovementEngine:
             return actionable_patterns
             
         except Exception as e:
-            await log_execution(
+            log_execution(
                 worker_id="SELF_IMPROVEMENT",
                 action="pattern_detection.error",
                 message=f"Failed to detect patterns: {e}",
@@ -243,7 +243,7 @@ class SelfImprovementEngine:
             example_context=first.get("context", {})
         )
     
-    async def generate_fix_task(self, pattern: FailurePattern) -> Optional[Dict]:
+    def generate_fix_task(self, pattern: FailurePattern) -> Optional[Dict]:
         """
         Generate a fix task for a detected pattern.
         
@@ -397,7 +397,7 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
             # If template has placeholders we didn't extract, use generic
             return template.format(**{k: k for k in extractions.keys()})
     
-    async def create_fix_task(self, task_data: Dict) -> Optional[str]:
+    def create_fix_task(self, task_data: Dict) -> Optional[str]:
         """
         Create a fix task in governance_tasks table.
         
@@ -412,7 +412,7 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
         """
         
         try:
-            result = await query_db(sql, [
+            result = query_db(sql, [
                 task_data["title"],
                 task_data["description"],
                 task_data["task_type"],
@@ -422,7 +422,7 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
             
             task_id = result.get("rows", [{}])[0].get("id")
             
-            await log_execution(
+            log_execution(
                 worker_id="SELF_IMPROVEMENT",
                 action="fix_task.created",
                 message=f"Created fix task: {task_data['title']}",
@@ -436,7 +436,7 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
             return task_id
             
         except Exception as e:
-            await log_execution(
+            log_execution(
                 worker_id="SELF_IMPROVEMENT",
                 action="fix_task.error",
                 message=f"Failed to create fix task: {e}",
@@ -444,7 +444,7 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
             )
             return None
     
-    async def mark_pattern_applied(self, pattern_id: str) -> bool:
+    def mark_pattern_applied(self, pattern_id: str) -> bool:
         """
         Mark a pattern as applied (fix task created).
         
@@ -457,10 +457,10 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
         """
         
         try:
-            await query_db(sql, [pattern_id])
+            query_db(sql, [pattern_id])
             return True
         except Exception as e:
-            await log_execution(
+            log_execution(
                 worker_id="SELF_IMPROVEMENT",
                 action="mark_applied.error",
                 message=f"Failed to mark pattern applied: {e}",
@@ -468,24 +468,24 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
             )
             return False
     
-    async def run_improvement_cycle(self) -> Dict:
+    def run_improvement_cycle(self) -> Dict:
         """
         Run one complete self-improvement cycle.
         
         Returns:
             Dict with patterns_detected, tasks_created, errors
         """
-        await log_execution(
+        log_execution(
             worker_id="SELF_IMPROVEMENT",
             action="improvement_cycle.start",
             message="Starting self-improvement cycle"
         )
         
         # Detect patterns
-        patterns = await self.detect_patterns()
+        patterns = self.detect_patterns()
         
         if not patterns:
-            await log_execution(
+            log_execution(
                 worker_id="SELF_IMPROVEMENT",
                 action="improvement_cycle.complete",
                 message="No actionable patterns detected"
@@ -502,23 +502,23 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
         
         for pattern in patterns:
             # Generate fix task
-            task_data = await self.generate_fix_task(pattern)
+            task_data = self.generate_fix_task(pattern)
             
             if not task_data:
                 errors += 1
                 continue
             
             # Create task
-            task_id = await self.create_fix_task(task_data)
+            task_id = self.create_fix_task(task_data)
             
             if task_id:
                 # Mark pattern as applied
-                await self.mark_pattern_applied(pattern.pattern_id)
+                self.mark_pattern_applied(pattern.pattern_id)
                 tasks_created += 1
             else:
                 errors += 1
         
-        await log_execution(
+        log_execution(
             worker_id="SELF_IMPROVEMENT",
             action="improvement_cycle.complete",
             message=f"Created {tasks_created} fix tasks from {len(patterns)} patterns",
@@ -536,11 +536,11 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
         }
 
 
-async def self_improvement_check() -> Dict:
+def self_improvement_check() -> Dict:
     """
     Convenience function to run self-improvement check.
     
     Call this from autonomy_loop every 10 cycles.
     """
     engine = SelfImprovementEngine(min_occurrences=3)
-    return await engine.run_improvement_cycle()
+    return engine.run_improvement_cycle()
