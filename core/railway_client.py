@@ -29,7 +29,7 @@ class RailwayClient:
             api_token: Railway API token (or use RAILWAY_API_TOKEN env var)
         """
         self.api_token = api_token or os.getenv("RAILWAY_API_TOKEN", "")
-        self.api_url = "https://backboard.railway.app/graphql/v2"
+        self.api_url = "https://backboard.railway.com/graphql/v2"
         
         if not self.api_token:
             logger.warning("No Railway API token provided")
