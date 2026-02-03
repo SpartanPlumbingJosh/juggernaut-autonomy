@@ -94,6 +94,19 @@ except ImportError as e:
     logger.warning("Code API not available: %s", e)
     CODE_API_AVAILABLE = False
 
+# Repositories API
+try:
+    from api.repositories_api import (
+        handle_list_repositories,
+        handle_add_repository,
+        handle_update_repository,
+        handle_delete_repository
+    )
+    REPOSITORIES_API_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Repositories API not available: %s", e)
+    REPOSITORIES_API_AVAILABLE = False
+
 # Engine API (Milestone 5)
 try:
     from api.engine_api import (
@@ -532,6 +545,65 @@ async def code_get_health():
         raise HTTPException(status_code=503, detail="Code API not available")
     
     result = handle_code_health()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+# Repositories API Routes
+@app.get("/api/repositories")
+async def repositories_list():
+    if not REPOSITORIES_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Repositories API not available")
+    
+    result = handle_list_repositories()
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.post("/api/repositories")
+async def repositories_add(request: Request):
+    if not REPOSITORIES_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Repositories API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_add_repository(body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.put("/api/repositories/{repo_id}")
+async def repositories_update(repo_id: str, request: Request):
+    if not REPOSITORIES_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Repositories API not available")
+    
+    try:
+        body = await request.json()
+    except (json.JSONDecodeError, ValueError):
+        body = {}
+    
+    result = handle_update_repository(repo_id, body)
+    return JSONResponse(
+        status_code=result.get("statusCode", 200),
+        content=json.loads(result.get("body", "{}"))
+    )
+
+
+@app.delete("/api/repositories/{repo_id}")
+async def repositories_delete(repo_id: str):
+    if not REPOSITORIES_API_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Repositories API not available")
+    
+    result = handle_delete_repository(repo_id)
     return JSONResponse(
         status_code=result.get("statusCode", 200),
         content=json.loads(result.get("body", "{}"))
