@@ -49,6 +49,16 @@ _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
     "integration": AIHandler,
     "planning": AIHandler,
     "design": AIHandler,
+    # Code-related task types (map to AIHandler for now)
+    "code": AIHandler,
+    "code_fix": AIHandler,
+    "code_change": AIHandler,
+    "code_implementation": AIHandler,
+    "debugging": AIHandler,
+    "optimization": AIHandler,
+    # Evaluation and verification (map to AnalysisHandler)
+    "evaluation": AnalysisHandler,
+    "verification": AnalysisHandler,
 }
 
 # Public list of available handler types
