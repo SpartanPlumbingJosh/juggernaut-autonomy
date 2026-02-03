@@ -45,7 +45,7 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
                     },
                     "params": {
                         "type": "object",
-                        "description": "Action parameters. For task.create: {title, description, priority, task_type}. For task.complete: {id, evidence}",
+                        "description": "Action parameters. For task.create: {title, description, priority, task_type, assigned_worker, created_by}. Priority accepts enum strings (critical/high/medium/normal/low/background) and numeric levels (0-5). For task.complete: {id, evidence}",
                     },
                 },
                 "required": ["action", "params"],
