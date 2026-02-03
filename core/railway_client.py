@@ -137,22 +137,22 @@ class RailwayClient:
             logger.exception(f"Error fetching environments: {e}")
             return []
     
-    def get_deployments(self, project_id: str, environment_id: str, limit: int = 10) -> List[Dict[str, Any]]:
+    def get_deployments(self, project_id: str, environment_id: str = None, limit: int = 10) -> List[Dict[str, Any]]:
         """
-        Get recent deployments for an environment.
+        Get recent deployments for a project.
         
         Args:
             project_id: Railway project ID
-            environment_id: Environment ID
+            environment_id: Environment ID (kept for backwards compatibility, not used)
             limit: Max deployments to fetch
             
         Returns:
             List of deployments
         """
         query = """
-        query($projectId: String!, $environmentId: String!) {
+        query($projectId: String!, $limit: Int!) {
             project(id: $projectId) {
-                deployments(environmentId: $environmentId, first: 10) {
+                deployments(first: $limit) {
                     edges {
                         node {
                             id
@@ -169,7 +169,7 @@ class RailwayClient:
         try:
             data = self._make_request(query, {
                 "projectId": project_id,
-                "environmentId": environment_id
+                "limit": limit
             })
             deployments = []
             for edge in data.get("project", {}).get("deployments", {}).get("edges", []):
