@@ -54,11 +54,11 @@ def run_migration():
         
         try:
             result = _db.query(statement)
-            print(f"✓ Success")
+            print("✓ Success")
         except Exception as e:
             error_msg = str(e)
             if "already exists" in error_msg:
-                print(f"⚠ Already exists (skipping)")
+                print("⚠ Already exists (skipping)")
             else:
                 print(f"✗ Error: {error_msg[:200]}")
                 raise

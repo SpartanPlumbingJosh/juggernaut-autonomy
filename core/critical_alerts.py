@@ -19,6 +19,8 @@ import urllib.error
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.database import query_db as _query
+
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -26,9 +28,6 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-
-# M-06: Centralized DB access via core.database
-from core.database import query_db as _query
 
 HIGH_PRIORITY_QUEUE_THRESHOLD: int = 10
 DATABASE_TIMEOUT_SECONDS: int = 30

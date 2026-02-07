@@ -20,7 +20,7 @@
 - **Issue:** AIHandler (handles ALL code, workflow, development, debugging, optimization, integration, planning, content_creation, and design tasks) sends task details to OpenRouter and asks the AI to **describe** what it would do, then returns the AI's JSON response as the "result." It has no access to the filesystem, git, shell commands, HTTP clients, or any execution tools.
 - **Impact:** Every code/debugging/optimization/workflow/development task completes in ~2 seconds with a hallucinated description of work that was never done. The system believes it is productive while producing zero real output.
 - **Fix:** Either build real handlers (CodeHandler with git/file ops, WorkflowHandler with tool execution), or at minimum mark AIHandler results as `plan_only` so tasks don't falsely complete.
-- **Status:** DEFERRED to PR2 (architectural change — separate branch)
+- **Status:** FIXED in PR2 (`feature/h01-tool-executor` branch) — AIHandler now has two execution modes: **tool-assisted** (code, workflow, debugging, optimization, development, integration tasks get real file/shell/git/search/SQL tools via agentic loop) and **chat-only** (planning, content, design tasks use original single-shot chat). New files: `core/tool_executor.py` (8 tools with sandbox, timeout, audit logging), updated `core/ai_executor.py` (agentic `chat_with_tools()` loop), updated `core/handlers/ai_handler.py` (dispatches by task type). Controllable via `AIHANDLER_PLAN_ONLY=1` or `AIHANDLER_TOOLS_DISABLED=1` env vars.
 
 ### H-02: Hardcoded Neon Endpoint in 18+ Core Files — FIXED
 - **Status:** FIXED — Removed all hardcoded `NEON_ENDPOINT` URLs and `NEON_CONNECTION_STRING` passwords from 16 core files + `main.py`. `core/database.py` now derives `NEON_ENDPOINT` from `DATABASE_URL` hostname. All other files import `query_db` and `escape_sql_value` from `core.database` instead of defining their own `_query()` functions.
@@ -87,7 +87,7 @@
 | # | Severity | Issue | Status |
 |---|----------|-------|--------|
 | C-01 | CRITICAL | ~~Delegation orphans tasks~~ | **FIXED** |
-| H-01 | HIGH | AIHandler can't execute real work | DEFERRED (PR2) |
+| H-01 | HIGH | ~~AIHandler can't execute real work~~ | **FIXED** (PR2) |
 | H-02 | HIGH | ~~Hardcoded Neon endpoint + password in 18+ files~~ | **FIXED** |
 | H-03 | HIGH | ~~check_cost_limit() never called~~ | **FIXED** |
 | H-07 | MEDIUM | Placeholder tool functions (dead code) | Open |

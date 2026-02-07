@@ -41,6 +41,8 @@ from enum import Enum
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from uuid import uuid4
 
+from core.database import NEON_ENDPOINT
+
 # Slack notifications for #war-room
 from core.notifications import (
     notify_task_completed,
@@ -540,7 +542,6 @@ if not DATABASE_URL:
     print("FATAL: DATABASE_URL environment variable is required")
     sys.exit(1)
 
-from core.database import NEON_ENDPOINT
 WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
 # All logical workers that run inside this single process.
 # Tasks assigned to any of these are local and must be picked up here.

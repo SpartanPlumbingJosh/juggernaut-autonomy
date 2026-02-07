@@ -23,10 +23,9 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 import uuid
 
-logger = logging.getLogger(__name__)
-
-# M-06: Centralized DB access via core.database
 from core.database import query_db as _query, NEON_CONNECTION_STRING
+
+logger = logging.getLogger(__name__)
 
 # Railway configuration
 RAILWAY_API_ENDPOINT = "https://backboard.railway.com/graphql/v2"

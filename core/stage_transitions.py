@@ -33,6 +33,9 @@ from typing import Optional, Dict, Any, Tuple, List
 from dataclasses import dataclass
 from enum import Enum
 
+from core.database import escape_sql_value as _escape_value
+from core.database import query_db as _query_db
+
 
 class TaskStage(Enum):
     """Valid task stages in order."""
@@ -60,10 +63,6 @@ class TransitionResult:
     reason: Optional[str] = None
     evidence_provided: Optional[str] = None
 
-
-# M-06: Centralized DB access via core.database
-from core.database import escape_sql_value as _escape_value
-from core.database import query_db as _query_db
 
 
 def _execute_sql(sql: str) -> list:

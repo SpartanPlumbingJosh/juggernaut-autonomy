@@ -55,7 +55,7 @@ def run_migration():
                 print(f"[{idx}/{len(statements)}] Executing...")
                 print(f"  {statement[:100]}...")
                 execute_sql(statement)
-                print(f"  ✅ Success")
+                print("  ✅ Success")
                 print()
         
         # Verify columns exist

@@ -29,7 +29,7 @@ def check_schema():
         rows = data.get('rows', []) if isinstance(data, dict) else []
         
         if rows:
-            print(f"   ✓ 'name' column exists")
+            print("   ✓ 'name' column exists")
             print(f"   Nullable: {rows[0].get('is_nullable', 'unknown')}")
         else:
             print("   ✗ 'name' column NOT FOUND")
@@ -107,7 +107,7 @@ def check_schema():
         rows = data.get('rows', []) if isinstance(data, dict) else []
         
         if rows and rows[0].get('count', 0) > 0:
-            print(f"   ✓ workers table exists")
+            print("   ✓ workers table exists")
         else:
             print("   ✗ workers table NOT FOUND")
     except Exception as e:

@@ -170,7 +170,7 @@ class SelfImprovementEngine:
             for pattern_key, group in pattern_groups.items():
                 if len(group) >= self.min_occurrences:
                     # Check if any in group have been applied
-                    total_applied = sum(l.get("applied_count", 0) for l in group)
+                    total_applied = sum(entry.get("applied_count", 0) for entry in group)
                     
                     if total_applied == 0:  # Not yet fixed
                         pattern = self._create_pattern_from_group(group)
@@ -237,7 +237,7 @@ class SelfImprovementEngine:
             category=first.get("category", ""),
             summary=first.get("summary", ""),
             occurrence_count=len(group),
-            applied_count=sum(l.get("applied_count", 0) for l in group),
+            applied_count=sum(entry.get("applied_count", 0) for entry in group),
             first_seen=datetime.fromisoformat(last.get("created_at", datetime.now(timezone.utc).isoformat())),
             last_seen=datetime.fromisoformat(first.get("created_at", datetime.now(timezone.utc).isoformat())),
             example_context=first.get("details", {})

@@ -104,7 +104,7 @@ def display_health_check(results: dict):
                 mins = task.get("minutes_running", 0)
                 print(f"    • {task.get('title')[:50]}: {mins:.0f}m")
         else:
-            print(f"  Stuck Tasks: ✅ None")
+            print("  Stuck Tasks: ✅ None")
     else:
         print(f"  Error: {stuck_check.get('error', 'Unknown')}")
     

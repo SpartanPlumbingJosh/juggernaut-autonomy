@@ -42,7 +42,7 @@ def check_crawler_state():
         print(f"Duration: {state.get('run_duration_ms')}ms")
         
         if state.get('error_message'):
-            print(f"\n⚠️ Error Message:")
+            print("\n⚠️ Error Message:")
             print(state.get('error_message'))
         else:
             print("\n✅ No errors")

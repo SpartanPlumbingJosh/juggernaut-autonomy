@@ -15,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.database import query_db as _query, escape_sql_value as _format_value
+
 # Configure module logger
 logger = logging.getLogger(__name__)
 
@@ -30,9 +32,6 @@ MAX_LOCK_DURATION_SECONDS: int = 3600
 
 # Escalation delay - how long to wait before escalating unresolved conflicts
 ESCALATION_DELAY_SECONDS: int = 60
-
-# M-06: Centralized DB access via core.database
-from core.database import query_db as _query, escape_sql_value as _format_value
 
 
 class ConflictResolution(Enum):

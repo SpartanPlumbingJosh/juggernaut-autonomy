@@ -22,15 +22,14 @@ from typing import Any, Dict, List, Optional, Tuple
 # Third-party imports
 import httpx
 
+from core.database import query_db as _db_query, escape_sql_value as _format_value
+
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # =============================================================================
 # CONSTANTS
 # =============================================================================
-
-# M-06: Centralized DB access via core.database
-from core.database import query_db as _db_query, escape_sql_value as _format_value
 
 # Simulation thresholds
 DEFAULT_RISK_THRESHOLD = 0.7
@@ -485,7 +484,7 @@ def _get_experiment_type_failure_rate(experiment_type: str) -> float:
         COUNT(*) FILTER (WHERE status = 'failed') as failed,
         COUNT(*) as total
     FROM experiments
-    WHERE experiment_type = '{_escape_string(experiment_type)}'
+    WHERE experiment_type = {_format_value(experiment_type)}
       AND status IN ('completed', 'failed')
     """
     try:
@@ -642,8 +641,8 @@ def _log_simulation(result: SimulationResult, simulated_by: str) -> None:
         {result.predicted_cost_cents},
         {result.predicted_duration_minutes},
         {result.confidence},
-        '{_escape_string(result.reasoning)}',
-        '{_escape_string(simulated_by)}'
+        {_format_value(result.reasoning)},
+        {_format_value(simulated_by)}
     )
     """
     try:
@@ -687,7 +686,7 @@ def record_actual_outcome(
     accuracy_query = f"""
     SELECT predicted_cost_cents, predicted_duration_minutes, risk_score
     FROM impact_simulations
-    WHERE id = '{_escape_string(simulation_id)}'
+    WHERE id = {_format_value(simulation_id)}
     """
     try:
         result = _execute_sql(accuracy_query)
@@ -708,7 +707,7 @@ def record_actual_outcome(
             actual_duration_minutes = {actual_duration_minutes if actual_duration_minutes else 'NULL'},
             outcome_recorded_at = NOW(),
             accuracy_score = {accuracy}
-        WHERE id = '{_escape_string(simulation_id)}'
+        WHERE id = {_format_value(simulation_id)}
         """
         _execute_sql(update_query)
         logger.info(
