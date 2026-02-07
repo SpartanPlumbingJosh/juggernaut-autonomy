@@ -18,11 +18,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import httpx
 
+from core.database import query_db as _db_query, escape_sql_value as _format_value
+
 # Configure logging
 logger = logging.getLogger(__name__)
-
-# M-06: Centralized DB access via core.database
-from core.database import query_db as _db_query, escape_sql_value as _format_value
 
 # =============================================================================
 # CONSTANTS - Risk Thresholds

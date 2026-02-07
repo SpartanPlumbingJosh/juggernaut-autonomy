@@ -10,11 +10,10 @@ import uuid
 
 import logging
 
+from core.database import query_db as _query, escape_sql_value as _format_value
+
 # Configure module logger
 logger = logging.getLogger(__name__)
-
-# M-06: Centralized DB access via core.database
-from core.database import query_db as _query, escape_sql_value as _format_value
 
 
 # ============================================================
