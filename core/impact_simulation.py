@@ -29,13 +29,8 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # =============================================================================
 
-NEON_ENDPOINT = (
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-NEON_CONNECTION_STRING = (
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
-    "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _db_query, escape_sql_value as _format_value
 
 # Simulation thresholds
 DEFAULT_RISK_THRESHOLD = 0.7
@@ -132,82 +127,13 @@ class SimulationResult:
 
 
 def _execute_sql(query: str) -> Dict[str, Any]:
-    """
-    Execute SQL query against Neon database.
-
-    Args:
-        query: SQL query string to execute
-
-    Returns:
-        Dict containing success status, rows, and rowCount
-
-    Raises:
-        httpx.HTTPStatusError: If HTTP request fails
-        httpx.TimeoutException: If request times out
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING,
+    """Execute SQL query via centralized database module."""
+    result = _db_query(query)
+    return {
+        "success": True,
+        "rows": result.get("rows", []),
+        "rowCount": result.get("rowCount", 0),
     }
-    try:
-        response = httpx.post(
-            NEON_ENDPOINT,
-            json={"query": query},
-            headers=headers,
-            timeout=HTTP_TIMEOUT_SECONDS,
-        )
-        response.raise_for_status()
-        result = response.json()
-        return {
-            "success": True,
-            "rows": result.get("rows", []),
-            "rowCount": result.get("rowCount", 0),
-        }
-    except httpx.TimeoutException as e:
-        logger.error("Database query timeout: %s", str(e))
-        raise
-    except httpx.HTTPStatusError as e:
-        logger.error("Database HTTP error: %s", str(e))
-        raise
-
-
-def _escape_string(value: Optional[str]) -> str:
-    """
-    Escape single quotes for SQL injection prevention.
-
-    Args:
-        value: String value to escape
-
-    Returns:
-        Escaped string safe for SQL, or 'NULL' if None
-    """
-    if value is None:
-        return "NULL"
-    return value.replace("'", "''")
-
-
-def _format_value(value: Any) -> str:
-    """
-    Format a Python value for SQL insertion.
-
-    Args:
-        value: Any Python value to format
-
-    Returns:
-        SQL-safe string representation
-    """
-    if value is None:
-        return "NULL"
-    elif isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, (dict, list)):
-        json_str = json.dumps(value).replace("'", "''")
-        return f"'{json_str}'"
-    else:
-        escaped = str(value).replace("'", "''")
-        return f"'{escaped}'"
 
 
 # =============================================================================
@@ -258,7 +184,7 @@ def create_impact_simulations_table() -> bool:
         _execute_sql(query)
         logger.info("impact_simulations table created or verified")
         return True
-    except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+    except Exception as e:
         logger.error("Failed to create impact_simulations table: %s", str(e))
         return False
 
@@ -569,7 +495,7 @@ def _get_experiment_type_failure_rate(experiment_type: str) -> float:
             failed = int(rows[0].get("failed", 0) or 0)
             total = int(rows[0].get("total", 1))
             return failed / total
-    except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+    except Exception as e:
         logger.warning("Could not get failure rate: %s", str(e))
     return 0.0
 
@@ -728,7 +654,7 @@ def _log_simulation(result: SimulationResult, simulated_by: str) -> None:
             result.decision.value,
             result.risk_score,
         )
-    except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+    except Exception as e:
         logger.error("Failed to log simulation: %s", str(e))
 
 
@@ -792,7 +718,7 @@ def record_actual_outcome(
         )
         return True
 
-    except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+    except Exception as e:
         logger.error("Failed to record outcome: %s", str(e))
         return False
 
@@ -926,7 +852,7 @@ def get_simulation_accuracy_stats() -> Dict[str, Any]:
             "by_action_type": result.get("rows", []),
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
-    except (httpx.HTTPStatusError, httpx.TimeoutException) as e:
+    except Exception as e:
         logger.error("Failed to get accuracy stats: %s", str(e))
         return {"error": str(e)}
 

@@ -160,12 +160,8 @@ def get_scoped_credential(
 
     return os.environ.get(key)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = (
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
-    "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _db_query, escape_sql_value as _escape_value
 
 # Type variable for decorator
 F = TypeVar("F", bound=Callable[..., Any])
@@ -251,48 +247,11 @@ def _execute_query(sql: str) -> Dict[str, Any]:
     Raises:
         RBACError: If query fails
     """
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING,
-    }
-    data = json.dumps({"query": sql}).encode("utf-8")
-
     try:
-        req = urllib.request.Request(
-            NEON_ENDPOINT, data=data, headers=headers, method="POST"
-        )
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode("utf-8"))
-    except urllib.error.URLError as e:
+        return _db_query(sql)
+    except Exception as e:
         logger.error("Database query failed: %s", str(e))
         raise RBACError(f"Database query failed: {e}") from e
-    except json.JSONDecodeError as e:
-        logger.error("Failed to parse database response: %s", str(e))
-        raise RBACError(f"Failed to parse response: {e}") from e
-
-
-def _escape_value(value: Any) -> str:
-    """
-    Escape a value for safe SQL insertion.
-
-    Args:
-        value: Value to escape
-
-    Returns:
-        SQL-safe string representation
-    """
-    if value is None:
-        return "NULL"
-    elif isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, (dict, list)):
-        json_str = json.dumps(value).replace("'", "''")
-        return f"'{json_str}'"
-    else:
-        escaped = str(value).replace("'", "''")
-        return f"'{escaped}'"
 
 
 # =============================================================================

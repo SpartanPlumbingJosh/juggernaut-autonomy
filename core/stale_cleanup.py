@@ -4,25 +4,15 @@ Automatically detects and resets tasks that have been stuck in 'in_progress'
 status for too long, making them available for other workers to pick up.
 """
 
-import json
 import logging
 import os
-import urllib.parse
-import urllib.request
 from typing import Any
+
+# M-06: Centralized DB access via core.database
+from core.database import query_db as execute_sql
 
 # Configuration
 DEFAULT_STALE_THRESHOLD_MINUTES = 30
-
-# Use environment variables with hardcoded fallbacks for Railway deployment
-NEON_ENDPOINT = os.getenv(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-NEON_CONNECTION_STRING = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
 
 # Logger setup
 logger = logging.getLogger(__name__)
@@ -51,52 +41,6 @@ def _validate_threshold(threshold_minutes: int | None) -> int:
     if threshold_minutes <= 0:
         raise ValueError("threshold_minutes must be a positive integer")
     return threshold_minutes
-
-
-def execute_sql(sql: str) -> dict[str, Any]:
-    """Execute SQL against Neon database via HTTP API.
-    
-    Args:
-        sql: SQL query to execute
-        
-    Returns:
-        Dictionary with query results including 'rows' and 'rowCount'
-        
-    Raises:
-        ValueError: If NEON_ENDPOINT is not configured or has invalid scheme
-        Exception: If database query fails
-    """
-    if not NEON_ENDPOINT:
-        raise ValueError(
-            "NEON_ENDPOINT environment variable is not set. "
-            "Please configure it with your Neon database HTTP endpoint."
-        )
-    
-    # Validate URL scheme is HTTPS
-    parsed = urllib.parse.urlparse(NEON_ENDPOINT)
-    if parsed.scheme != "https":
-        raise ValueError(
-            f"NEON_ENDPOINT must use HTTPS scheme, got: {parsed.scheme}. "
-            "Refusing to connect over insecure protocol."
-        )
-    
-    if not NEON_CONNECTION_STRING:
-        raise ValueError(
-            "DATABASE_URL environment variable is not set. "
-            "Please configure it with your Neon connection string."
-        )
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
-    }
-    
-    data = json.dumps({"query": sql}).encode("utf-8")
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers)
-    
-    with urllib.request.urlopen(req, timeout=30) as response:
-        result = json.loads(response.read().decode("utf-8"))
-        return result
 
 
 def reset_stale_tasks(threshold_minutes: int | None = None) -> tuple[int, list[dict[str, Any]]]:

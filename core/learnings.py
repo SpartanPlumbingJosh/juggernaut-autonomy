@@ -13,58 +13,11 @@ Learnings are stored in the learnings table for future reference.
 """
 
 import json
-import urllib.request
-import urllib.error
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
-import os
 
-# Database configuration (from environment)
-DATABASE_URL = os.getenv("DATABASE_URL")
-NEON_ENDPOINT = os.getenv(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-
-
-def _execute_sql(sql: str) -> Dict[str, Any]:
-    """Execute SQL via Neon HTTP API."""
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": DATABASE_URL
-    }
-    
-    data = json.dumps({"query": sql}).encode('utf-8')
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
-    
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        print(f"[ERROR] SQL Error: {error_body}")
-        raise
-    except Exception as e:
-        print(f"[ERROR] SQL Exception: {str(e)}")
-        raise
-
-
-def _escape_value(value: Any) -> str:
-    """Escape a value for SQL insertion."""
-    if value is None:
-        return "NULL"
-    elif isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, (dict, list)):
-        json_str = json.dumps(value)
-        escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
-        return f"'{escaped}'"
-    else:
-        s = str(value)
-        escaped = s.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
-        return f"'{escaped}'"
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _execute_sql, escape_sql_value as _escape_value
 
 
 def extract_learning_from_task(

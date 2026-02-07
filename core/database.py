@@ -16,12 +16,14 @@ import logging
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# Database configuration — derived from environment only (H-02: no hardcoded credentials)
+NEON_CONNECTION_STRING = os.getenv("DATABASE_URL", "") or os.getenv("NEON_CONNECTION_STRING", "")
+if NEON_CONNECTION_STRING:
+    _parsed_db_url = urllib.parse.urlparse(NEON_CONNECTION_STRING)
+    NEON_ENDPOINT = os.getenv("NEON_ENDPOINT", f"https://{_parsed_db_url.hostname}/sql")
+else:
+    NEON_ENDPOINT = os.getenv("NEON_ENDPOINT", "")
+    logger.warning("DATABASE_URL is not set — database operations will fail")
 
 
 class Database:
@@ -106,8 +108,12 @@ class Database:
             return f"'{escaped}'"
 
 
-# Singleton instance
-_db = Database()
+# Singleton instance (safe init — logs error instead of crashing on import)
+try:
+    _db = Database()
+except (ValueError, Exception) as e:
+    logger.error("Database initialization failed: %s — set DATABASE_URL", e)
+    _db = None
 
 
 def escape_sql_value(v: Any) -> str:
@@ -149,6 +155,8 @@ def query_db(sql: str, params: Optional[List] = None) -> Dict[str, Any]:
     Returns:
         Query result dict with 'rows', 'rowCount', etc.
     """
+    if _db is None:
+        raise RuntimeError("Database not configured — set DATABASE_URL environment variable")
     if params:
         # Substitute $1, $2, etc. with formatted values
         formatted_sql = sql

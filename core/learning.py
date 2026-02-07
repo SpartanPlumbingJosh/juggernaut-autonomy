@@ -12,21 +12,13 @@ Every completed task should generate learnings that include:
 This enables the system to improve over time by learning from experience.
 """
 
-import os
 import json
-import urllib.request
-import urllib.error
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 from enum import Enum
 
-
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = os.getenv(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _execute_sql, escape_sql_value as _escape_value
 
 
 class LearningCategory(Enum):
@@ -38,45 +30,6 @@ class LearningCategory(Enum):
     WORKAROUND = "workaround"                # Solutions to problems
     DEPENDENCY = "dependency"                # Task dependency insights
     RESOURCE_USAGE = "resource_usage"        # Cost/resource insights
-
-
-def _execute_sql(sql: str) -> Dict[str, Any]:
-    """Execute SQL via Neon HTTP API."""
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
-    }
-    
-    data = json.dumps({"query": sql}).encode('utf-8')
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
-    
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            result = json.loads(response.read().decode('utf-8'))
-            return result
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        raise Exception(f"SQL Error: {error_body}")
-    except Exception as e:
-        raise Exception(f"SQL Exception: {str(e)}")
-
-
-def _escape_value(value: Any) -> str:
-    """Escape a value for SQL insertion."""
-    if value is None:
-        return "NULL"
-    elif isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, (dict, list)):
-        json_str = json.dumps(value)
-        escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
-        return f"'{escaped}'"
-    else:
-        s = str(value)
-        escaped = s.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
-        return f"'{escaped}'"
 
 
 def save_learning(

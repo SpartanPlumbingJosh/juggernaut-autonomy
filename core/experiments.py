@@ -24,24 +24,8 @@ import httpx
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Get database configuration from environment variables with fallbacks
-NEON_ENDPOINT = os.environ.get(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-
-# Use DATABASE_URL as primary source, then NEON_CONNECTION_STRING as fallback
-NEON_CONNECTION_STRING = os.environ.get("DATABASE_URL", "") or os.environ.get(
-    "NEON_CONNECTION_STRING",
-    "" # No default connection string - will cause error if not configured
-)
-
-# Log warning if no connection string is provided
-if not NEON_CONNECTION_STRING:
-    logger.warning(
-        "No database connection string provided. Set DATABASE_URL or "
-        "NEON_CONNECTION_STRING environment variable."
-    )
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _db_query, escape_sql_value as _escape_sql_value
 
 
 _SCHEMA_ENSURED = False
@@ -426,19 +410,8 @@ def mark_change_reverted(
 
 
 def _execute_sql(query: str, return_results: bool = True) -> Dict[str, Any]:
-    """Execute SQL query against Neon database."""
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
-    }
-    response = httpx.post(
-        NEON_ENDPOINT,
-        json={"query": query},
-        headers=headers,
-        timeout=30.0
-    )
-    result = response.json()
-    
+    """Execute SQL query via centralized database module."""
+    result = _db_query(query)
     if return_results and "rows" in result:
         return {"success": True, "rows": result["rows"], "rowCount": result.get("rowCount", 0)}
     return {"success": True, "rowCount": result.get("rowCount", 0)}

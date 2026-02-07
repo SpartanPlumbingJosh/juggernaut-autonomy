@@ -61,50 +61,15 @@ class TransitionResult:
     evidence_provided: Optional[str] = None
 
 
-# Database configuration
-NEON_ENDPOINT = os.environ.get(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql",
-).strip()
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+# M-06: Centralized DB access via core.database
+from core.database import escape_sql_value as _escape_value
+from core.database import query_db as _query_db
 
 
-def _execute_sql(sql: str) -> List[Dict]:
-    """Execute SQL via Neon HTTP endpoint."""
-    if not DATABASE_URL:
-        raise Exception("DATABASE_URL environment variable is required for stage transitions")
-
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": DATABASE_URL,
-    }
-
-    payload = json.dumps({"query": sql}).encode("utf-8")
-
-    req = urllib.request.Request(NEON_ENDPOINT, data=payload, headers=headers, method="POST")
-    
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            result = json.loads(resp.read().decode())
-            return result.get("rows", [])
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode() if e.fp else str(e)
-        raise Exception(f"SQL error: {error_body}")
-
-
-def _escape_value(value: Any) -> str:
-    """Escape a value for safe SQL insertion."""
-    if value is None:
-        return "NULL"
-    if isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    if isinstance(value, (int, float)):
-        return str(value)
-    if isinstance(value, dict):
-        return f"'{json.dumps(value).replace(chr(39), chr(39)+chr(39))}'"
-    # String - escape single quotes
-    safe = str(value).replace("'", "''")
-    return f"'{safe}'"
+def _execute_sql(sql: str) -> list:
+    """Execute SQL and return rows."""
+    result = _query_db(sql)
+    return result.get("rows", [])
 
 
 def validate_stage_transition(

@@ -21,12 +21,8 @@ import httpx
 # Configure logging
 logger = logging.getLogger(__name__)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = (
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
-    "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _db_query, escape_sql_value as _format_value
 
 # =============================================================================
 # CONSTANTS - Risk Thresholds
@@ -66,55 +62,19 @@ class RiskLevel(str, Enum):
 
 
 def _execute_sql(query: str, return_results: bool = True) -> Dict[str, Any]:
-    """
-    Execute SQL query against Neon database.
-    
-    Args:
-        query: SQL query to execute
-        return_results: Whether to return rows
-        
-    Returns:
-        Dict with success status and results/rowCount
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING,
-    }
-    
+    """Execute SQL query via centralized database module."""
     try:
-        response = httpx.post(
-            NEON_ENDPOINT,
-            json={"query": query},
-            headers=headers,
-            timeout=30.0,
-        )
-        result = response.json()
-        
+        result = _db_query(query)
         if return_results and "rows" in result:
-            return {
-                "success": True,
-                "rows": result["rows"],
-                "rowCount": result.get("rowCount", 0),
-            }
+            return {"success": True, "rows": result["rows"], "rowCount": result.get("rowCount", 0)}
         return {"success": True, "rowCount": result.get("rowCount", 0)}
-    except httpx.TimeoutException:
-        logger.error("Database query timeout")
-        return {"success": False, "error": "Database timeout"}
-    except httpx.RequestError as exc:
-        logger.error("Database request error: %s", exc)
-        return {"success": False, "error": str(exc)}
+    except Exception as e:
+        logger.error("Database error: %s", e)
+        return {"success": False, "error": str(e)}
 
 
 def _escape_string(value: Optional[str]) -> str:
-    """
-    Escape single quotes for SQL.
-    
-    Args:
-        value: String to escape
-        
-    Returns:
-        Escaped string or 'NULL' for None
-    """
+    """Escape single quotes for SQL."""
     if value is None:
         return "NULL"
     return value.replace("'", "''")

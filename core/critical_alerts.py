@@ -27,9 +27,8 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # =============================================================================
 
-# Database configuration from environment - fail fast if not set
-NEON_ENDPOINT: str = os.environ.get("NEON_HTTP_ENDPOINT", "")
-NEON_CONNECTION_STRING: str = os.environ.get("NEON_CONNECTION_STRING", "")
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _query
 
 HIGH_PRIORITY_QUEUE_THRESHOLD: int = 10
 DATABASE_TIMEOUT_SECONDS: int = 30
@@ -43,63 +42,6 @@ _slack_module_checked: bool = False
 # =============================================================================
 # DATABASE UTILITIES
 # =============================================================================
-
-def _get_neon_config() -> Tuple[str, str]:
-    """
-    Get Neon database configuration with fail-fast behavior.
-    
-    Returns:
-        Tuple of (endpoint, connection_string)
-        
-    Raises:
-        RuntimeError: If required environment variables are not set
-    """
-    endpoint = NEON_ENDPOINT or os.environ.get(
-        "NEON_HTTP_ENDPOINT",
-        "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-    )
-    conn_string = NEON_CONNECTION_STRING or os.environ.get("NEON_CONNECTION_STRING", "")
-    
-    if not conn_string:
-        raise RuntimeError(
-            "NEON_CONNECTION_STRING environment variable is not set. "
-            "Database operations require this configuration."
-        )
-    
-    return endpoint, conn_string
-
-
-def _query(sql: str) -> Dict[str, Any]:
-    """
-    Execute SQL query via HTTP.
-    
-    Args:
-        sql: SQL query string
-        
-    Returns:
-        Query result dictionary
-        
-    Raises:
-        RuntimeError: If database configuration is missing
-        Exception: If database connection fails
-    """
-    endpoint, conn_string = _get_neon_config()
-    
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": conn_string
-    }
-    data = json.dumps({"query": sql}).encode("utf-8")
-    req = urllib.request.Request(
-        endpoint, 
-        data=data, 
-        headers=headers, 
-        method="POST"
-    )
-    
-    with urllib.request.urlopen(req, timeout=DATABASE_TIMEOUT_SECONDS) as response:
-        return json.loads(response.read().decode("utf-8"))
-
 
 # =============================================================================
 # ERROR SANITIZATION

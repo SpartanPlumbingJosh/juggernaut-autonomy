@@ -540,11 +540,12 @@ if not DATABASE_URL:
     print("FATAL: DATABASE_URL environment variable is required")
     sys.exit(1)
 
-NEON_ENDPOINT = os.getenv(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
+from core.database import NEON_ENDPOINT
 WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
+# All logical workers that run inside this single process.
+# Tasks assigned to any of these are local and must be picked up here.
+ALL_LOGICAL_WORKERS = ("EXECUTOR", "ANALYST", "STRATEGIST", "WATCHDOG", "ORCHESTRATOR", WORKER_ID)
+_LOGICAL_WORKER_SQL = ", ".join(f"''{w}''" if "'" in w else f"'{w}'" for w in ALL_LOGICAL_WORKERS)
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL", "30"))
 
 # L4-P1: PR auto-merge (CodeRabbit-only) configuration
@@ -1763,8 +1764,9 @@ def check_cost_limit(estimated_cost: float) -> Tuple[bool, str]:
             if spent + (estimated_cost * 100) > limit:
                 return False, f"Cost ${estimated_cost} would exceed monthly limit (${spent/100:.2f}/${limit/100:.2f})"
         return True, "Within budget"
-    except Exception:
-        return True, "Budget check unavailable"
+    except Exception as e:
+        log_error(f"Budget check failed (fail-closed): {e}")
+        return False, f"Budget check failed: {e}"
 
 
 # ============================================================
@@ -1778,7 +1780,7 @@ def get_pending_tasks(limit: int = 10) -> List[Task]:
                payload, assigned_worker, created_at, requires_approval
         FROM governance_tasks 
         WHERE status = 'pending'
-        AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
+        AND (assigned_worker IS NULL OR assigned_worker IN ({_LOGICAL_WORKER_SQL}))
         AND (next_retry_at IS NULL OR next_retry_at < NOW())
         LIMIT {int(limit * 2)}
     """
@@ -1942,7 +1944,7 @@ def _rebalance_pending_tasks(limit: int = 10) -> Dict[str, Any]:
             SELECT id, task_type, title, description, priority, status, payload, assigned_worker, created_at, requires_approval
             FROM governance_tasks
             WHERE status = 'pending'
-              AND assigned_worker IS NULL
+              AND (assigned_worker IS NULL OR assigned_worker IN ({_LOGICAL_WORKER_SQL}))
             ORDER BY created_at ASC
             LIMIT {int(limit)}
             """
@@ -2387,7 +2389,7 @@ def claim_task(task_id: str) -> bool:
             status = 'in_progress',
             started_at = COALESCE(started_at, {escape_value(now)})
         WHERE id = {escape_value(task_id)}
-        AND (assigned_worker IS NULL OR assigned_worker = {escape_value(WORKER_ID)})
+        AND (assigned_worker IS NULL OR assigned_worker IN ({_LOGICAL_WORKER_SQL}))
         AND status = 'pending'
         RETURNING id
     """
@@ -3226,6 +3228,16 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
     if not allowed:
         log_action("task.blocked", f"Task blocked: {reason}", level="warn", task_id=task.id)
         return False, {"blocked": True, "reason": reason}
+    
+    # H-03: Check cost budget before executing (fail-closed)
+    estimated_cost = 0.05  # Default estimate per task (~$0.05 API cost)
+    if isinstance(task.payload, dict):
+        estimated_cost = task.payload.get("estimated_cost", estimated_cost)
+    cost_ok, cost_msg = check_cost_limit(estimated_cost)
+    if not cost_ok:
+        log_action("task.budget_exceeded", f"Task blocked by budget: {cost_msg}",
+                  level="warn", task_id=task.id)
+        return False, {"blocked": True, "reason": cost_msg}
     
     # Check approval status FIRST before triggering new approval requests
     # This prevents infinite loop where risk assessment re-triggers on every pickup
@@ -5028,7 +5040,7 @@ def autonomy_loop():
                                         result = {escape_value(hold_data)}
                                     WHERE id = {escape_value(task.id)}
                                       AND status = 'pending'
-                                      AND assigned_worker IS NULL
+                                      AND (assigned_worker IS NULL OR assigned_worker IN ({_LOGICAL_WORKER_SQL}))
                                     """
                                 )
                         except Exception:
@@ -5265,7 +5277,7 @@ def autonomy_loop():
                         elif sched_task_type == "idea_generation":
                             if REVENUE_DISCOVERY_AVAILABLE:
                                 context = {
-                                    "assets": {"primary_business": "Spartan Plumbing"},
+                                    "assets": {"primary_business": os.getenv("BUSINESS_CONTEXT", "Autonomous Digital Ventures")},
                                     "constraints": {
                                         "max_budget": 50,
                                         "risk_tolerance": "low",

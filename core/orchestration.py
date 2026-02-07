@@ -115,53 +115,8 @@ except ImportError as e:
 
 
 
-# Get database configuration from environment variables with fallbacks
-NEON_ENDPOINT = os.environ.get(
-    "NEON_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-
-# Use DATABASE_URL as primary source, then NEON_CONNECTION_STRING as fallback
-NEON_CONNECTION_STRING = os.environ.get("DATABASE_URL", "") or os.environ.get(
-    "NEON_CONNECTION_STRING",
-    "" # No default connection string - will cause error if not configured
-)
-
-# Log warning if no connection string is provided
-if not NEON_CONNECTION_STRING:
-    logger.warning(
-        "No database connection string provided. Set DATABASE_URL or "
-        "NEON_CONNECTION_STRING environment variable."
-    )
-
-
-def _query(sql: str) -> Dict[str, Any]:
-    """Execute SQL query via HTTP."""
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
-    }
-    data = json.dumps({"query": sql}).encode('utf-8')
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
-    
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return json.loads(response.read().decode('utf-8'))
-
-
-def _format_value(v: Any) -> str:
-    """Format value for SQL."""
-    if v is None:
-        return "NULL"
-    elif isinstance(v, bool):
-        return "true" if v else "false"
-    elif isinstance(v, (int, float)):
-        return str(v)
-    elif isinstance(v, (dict, list)):
-        json_str = json.dumps(v).replace("'", "''")
-        return f"'{json_str}'"
-    else:
-        escaped = str(v).replace("'", "''")
-        return f"'{escaped}'"
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _query, escape_sql_value as _format_value
 
 
 # ============================================================
@@ -1023,8 +978,8 @@ def _resolve_conflict_impl(
             result = _query(sql)
             if result.get("rows"):
                 agents_data.append(result["rows"][0])
-        except:
-            pass
+        except Exception as e:
+            logger.warning("Failed to query agent status: %s", e)
     
     if not agents_data:
         resolution["resolution"] = "no_agent_data"
@@ -1245,7 +1200,8 @@ def _sync_memory_to_agents_impl(
             try:
                 result = _query(sql)
                 target_agents = [r["worker_id"] for r in result.get("rows", [])]
-            except:
+            except Exception as e:
+                logger.warning("Failed to query active agents for sync: %s", e)
                 return 0
         else:
             target_agents = read_perm if isinstance(read_perm, list) else [read_perm]
@@ -1276,8 +1232,8 @@ def _sync_memory_to_agents_impl(
             result = _query(sql)
             if result.get("rowCount", 0) > 0:
                 synced += 1
-        except:
-            pass
+        except Exception as e:
+            logger.warning("Failed to sync memory to agent: %s", e)
     
     return synced
 
@@ -1742,8 +1698,8 @@ def _activate_backup_agent_impl(
             result = _query(sql)
             if result.get("rows"):
                 backup_worker_id = result["rows"][0]["worker_id"]
-        except:
-            pass
+        except Exception as e:
+            logger.warning("Failed to find backup worker: %s", e)
     
     if not backup_worker_id:
         return None

@@ -31,12 +31,8 @@ MAX_LOCK_DURATION_SECONDS: int = 3600
 # Escalation delay - how long to wait before escalating unresolved conflicts
 ESCALATION_DELAY_SECONDS: int = 60
 
-# Database configuration
-NEON_ENDPOINT: str = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING: str = (
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
-    "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _query, escape_sql_value as _format_value
 
 
 class ConflictResolution(Enum):
@@ -82,67 +78,6 @@ class ConflictRecord:
     resolution: str
     resolved_at: Optional[str] = None
     escalated: bool = False
-
-
-# ============================================================
-# DATABASE UTILITIES
-# ============================================================
-
-def _query(sql: str) -> Dict[str, Any]:
-    """
-    Execute SQL query via Neon HTTP API.
-    
-    Args:
-        sql: SQL query string to execute
-        
-    Returns:
-        Dict containing query results with 'rows' and 'rowCount' keys
-        
-    Raises:
-        urllib.error.HTTPError: If HTTP request fails
-        json.JSONDecodeError: If response is not valid JSON
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
-    }
-    data = json.dumps({"query": sql}).encode('utf-8')
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
-    
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            return json.loads(response.read().decode('utf-8'))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode('utf-8')
-        logger.error("SQL HTTP Error: %s - %s", e.code, error_body)
-        raise
-    except urllib.error.URLError as e:
-        logger.error("SQL URL Error: %s", str(e))
-        raise
-
-
-def _format_value(value: Any) -> str:
-    """
-    Format a Python value for SQL insertion with proper escaping.
-    
-    Args:
-        value: Any Python value to format
-        
-    Returns:
-        SQL-safe string representation of the value
-    """
-    if value is None:
-        return "NULL"
-    elif isinstance(value, bool):
-        return "TRUE" if value else "FALSE"
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, (dict, list)):
-        json_str = json.dumps(value).replace("'", "''")
-        return f"'{json_str}'"
-    else:
-        escaped = str(value).replace("'", "''")
-        return f"'{escaped}'"
 
 
 # ============================================================

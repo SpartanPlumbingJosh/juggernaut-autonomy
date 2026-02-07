@@ -4,8 +4,6 @@ Phase 2: Workers, Goals, Tasks, Approvals, Permissions
 """
 
 import json
-import urllib.request
-import urllib.error
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 import uuid
@@ -15,38 +13,8 @@ import logging
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-
-
-def _query(sql: str) -> Dict[str, Any]:
-    """Execute SQL query."""
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING
-    }
-    data = json.dumps({"query": sql}).encode('utf-8')
-    req = urllib.request.Request(NEON_ENDPOINT, data=data, headers=headers, method='POST')
-    
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return json.loads(response.read().decode('utf-8'))
-
-
-def _format_value(v: Any) -> str:
-    """Format value for SQL."""
-    if v is None:
-        return "NULL"
-    elif isinstance(v, bool):
-        return "TRUE" if v else "FALSE"
-    elif isinstance(v, (int, float)):
-        return str(v)
-    elif isinstance(v, (dict, list)):
-        json_str = json.dumps(v).replace("'", "''")
-        return f"'{json_str}'"
-    else:
-        escaped = str(v).replace("'", "''")
-        return f"'{escaped}'"
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _query, escape_sql_value as _format_value
 
 
 # ============================================================

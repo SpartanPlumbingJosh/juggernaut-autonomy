@@ -46,11 +46,83 @@ class AnalysisHandler(BaseHandler):
             insights: Dict[str, Any] = {}
             sql_used: Dict[str, str] = {}
 
-            # Default: worker performance snapshot (success rates + counts)
-            wants_worker_perf = True
+            # M-04: Dispatch analysis type based on task content
             combined_text = f"{title}\n{description}".lower()
-            if any(k in combined_text for k in ["worker", "performance", "success rate", "comparison", "compare"]):
+            category = (payload.get("category") or payload.get("dedupe_key") or "").lower()
+
+            wants_worker_perf = any(k in combined_text or k in category for k in
+                ["worker", "performance", "success rate", "comparison", "compare"])
+            wants_error_analysis = any(k in combined_text or k in category for k in
+                ["error", "failure", "spike", "incident", "alert"])
+            wants_task_analysis = any(k in combined_text or k in category for k in
+                ["task", "pipeline", "queue", "backlog", "throughput"])
+            wants_cost_analysis = any(k in combined_text or k in category for k in
+                ["cost", "budget", "spend", "expense"])
+
+            # If nothing matched, default to worker perf + error rate
+            if not any([wants_worker_perf, wants_error_analysis, wants_task_analysis, wants_cost_analysis]):
                 wants_worker_perf = True
+
+            if wants_error_analysis:
+                sql = f"""
+                    SELECT level, COUNT(*)::int as count,
+                           COUNT(DISTINCT action) as distinct_actions
+                    FROM execution_logs
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                      AND level IN ('error','critical','warn')
+                    GROUP BY level ORDER BY count DESC
+                """
+                sql_used["error_breakdown"] = sql
+                res = self.execute_sql(sql)
+                insights["error_breakdown"] = res.get("rows", []) or []
+
+                sql = f"""
+                    SELECT action, COUNT(*)::int as count,
+                           MAX(created_at) as last_seen
+                    FROM execution_logs
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                      AND level IN ('error','critical')
+                    GROUP BY action ORDER BY count DESC LIMIT 10
+                """
+                sql_used["top_errors_by_action"] = sql
+                res = self.execute_sql(sql)
+                insights["top_errors"] = res.get("rows", []) or []
+
+            if wants_task_analysis:
+                sql = f"""
+                    SELECT status, COUNT(*)::int as count
+                    FROM governance_tasks
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                    GROUP BY status ORDER BY count DESC
+                """
+                sql_used["task_status_breakdown"] = sql
+                res = self.execute_sql(sql)
+                insights["task_pipeline"] = res.get("rows", []) or []
+
+                sql = f"""
+                    SELECT task_type, COUNT(*)::int as count,
+                           COUNT(*) FILTER (WHERE status = 'completed')::int as completed,
+                           COUNT(*) FILTER (WHERE status = 'failed')::int as failed
+                    FROM governance_tasks
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                    GROUP BY task_type ORDER BY count DESC LIMIT 15
+                """
+                sql_used["task_type_breakdown"] = sql
+                res = self.execute_sql(sql)
+                insights["task_types"] = res.get("rows", []) or []
+
+            if wants_cost_analysis:
+                sql = f"""
+                    SELECT category,
+                           SUM(amount_cents)::int as total_cents,
+                           COUNT(*)::int as event_count
+                    FROM cost_events
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                    GROUP BY category ORDER BY total_cents DESC
+                """
+                sql_used["cost_by_category"] = sql
+                res = self.execute_sql(sql)
+                insights["cost_breakdown"] = res.get("rows", []) or []
 
             if wants_worker_perf:
                 sql = f"""

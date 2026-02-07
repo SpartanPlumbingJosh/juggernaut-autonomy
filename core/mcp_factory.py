@@ -25,9 +25,8 @@ import uuid
 
 logger = logging.getLogger(__name__)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = os.environ.get("NEON_CONNECTION_STRING", "")
+# M-06: Centralized DB access via core.database
+from core.database import query_db as _query, NEON_CONNECTION_STRING
 
 # Railway configuration
 RAILWAY_API_ENDPOINT = "https://backboard.railway.com/graphql/v2"
@@ -93,23 +92,6 @@ class MCPDefinition:
     tools: List[ToolDefinition] = field(default_factory=list)
     owner_worker_id: Optional[str] = None
     required_env_vars: List[str] = field(default_factory=list)
-
-
-def _query(sql: str) -> Dict[str, Any]:
-    """Execute SQL query via HTTP."""
-    if not NEON_CONNECTION_STRING:
-        raise RuntimeError("NEON_CONNECTION_STRING not configured")
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": NEON_CONNECTION_STRING,
-    }
-    data = json.dumps({"query": sql}).encode("utf-8")
-    req = urllib.request.Request(
-        NEON_ENDPOINT, data=data, headers=headers, method="POST"
-    )
-
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
 
 
 def _railway_graphql(query: str, variables: Optional[Dict] = None) -> Dict[str, Any]:
