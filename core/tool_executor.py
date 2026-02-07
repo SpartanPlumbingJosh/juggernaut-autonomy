@@ -250,7 +250,7 @@ def tool_search_files(
         )
         lines = result.stdout.strip().split("\n") if result.stdout.strip() else []
         # Strip sandbox root from output for readability
-        cleaned = [l.replace(str(resolved), ".") for l in lines[:max_results]]
+        cleaned = [line.replace(str(resolved), ".") for line in lines[:max_results]]
         return {"success": True, "matches": cleaned, "count": len(cleaned)}
     except subprocess.TimeoutExpired:
         return {"success": False, "error": "Search timed out"}
