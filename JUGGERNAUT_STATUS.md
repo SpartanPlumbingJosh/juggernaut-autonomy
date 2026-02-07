@@ -1,6 +1,6 @@
 # JUGGERNAUT - Master Reference Document
 
-> **Last Updated:** 2026-02-01
+> **Last Updated:** 2026-02-07
 > **Purpose:** Single source of truth for all Claude sessions working on JUGGERNAUT
 > **Update Instructions:** Any Claude session that makes significant progress should update this file and push to the repo
 
@@ -8,11 +8,17 @@
 
 ## 1. WHAT IS JUGGERNAUT
 
-JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** through self-operating task management and revenue generation. It progresses through five autonomy levels (L1-L5), from basic conversational interfaces to full organizational orchestration.
+JUGGERNAUT is a general-purpose autonomous AI platform that progresses through five autonomy levels (L1-L5) — from basic conversational interfaces to full organizational orchestration. It is a self-improving system where autonomous workers claim, execute, and verify tasks without human intervention, learning from each cycle to expand their capabilities.
 
-**Owner:** Josh Ferguson  
-**Primary Business:** Spartan Plumbing (used as both automation target and development testbed)  
+The platform is designed to be domain-agnostic: a single infrastructure that can manage development workflows, business operations, research pipelines, or any complex multi-agent coordination challenge. The current implementation runs on Railway (backend services), Vercel (dashboard), and Neon PostgreSQL (shared state).
+
+**Owner:** Josh Ferguson
 **Repository:** `SpartanPlumbingJosh/juggernaut-autonomy`
+
+### Core Principles
+- **Autonomy over dependency** — Every intervention should make workers more capable, not more reliant on humans
+- **Evidence-based completion** — Tasks require real deliverables (merged PRs, test results, deployed endpoints), not generic "done" markers
+- **Consolidation over sprawl** — Three-platform architecture (Railway/Vercel/Neon) beats scattered deployments
 
 ---
 
@@ -20,9 +26,9 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 
 ### Core Services (Railway)
 | Service | ID | URL | Purpose |
-|---------|-----|-----|---------|
+|---------|-----|-----|---------| 
 | juggernaut-engine | `9b7370c6-7764-4eb6-a64c-75cce1d23e06` | juggernaut-engine-production.up.railway.app | Main autonomy loop |
-| juggernaut-mcp | `ff009b38-e969-4be7-9930-cd7700062be6` | juggernaut-mcp-production.up.railway.app | MCP tools server |
+| juggernaut-mcp | `ff009b38-e969-4be7-9930-cd7700062be6` | juggernaut-mcp-production.up.railway.app | MCP tools server (68+ tools) |
 | juggernaut-watchdog | `52eb8b9f-6920-4a49-8522-7bc4415076a7` | — | Health monitoring |
 | juggernaut-puppeteer | `fcf41c38-5cc1-46ac-82f2-cf078b839786` | — | Browser automation |
 | juggernaut-dashboard-api | `18cb0f88-242b-4212-82d2-070fb2f1f621` | juggernaut-dashboard-api-production.up.railway.app | Dashboard data API |
@@ -34,7 +40,7 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ### Dashboard (Vercel)
 - **Project:** spartan-hq
 - **URL:** hq.spartan-plumbing.com
-- **Status:** Factory Floor visualization live but still being tuned (layout + polish)
+- **Status:** Factory Floor visualization live, layout + polish ongoing
 
 ### Workers
 | Worker | Type | Status | Capabilities |
@@ -48,22 +54,11 @@ JUGGERNAUT is an autonomous AI business system targeting **$100M revenue** throu
 ### Neural Chat System
 AI-powered chat interface for querying and controlling JUGGERNAUT systems.
 
-**Capabilities:**
-- **Real-time Data Access**: Queries live database for task counts, worker status, revenue metrics
-- **Tool Execution**: Can execute 68+ MCP tools including:
-  - `sql_query` - Database queries
-  - `github_*` - Repository operations (create branches, PRs, files)
-  - `railway_*` - Infrastructure management (deployments, logs)
-  - `war_room_*` - Slack communication
-  - `hq_execute` - Governance task creation
-- **Governance Task Fallback**: Creates follow-up tasks when tool execution fails
-- **Session Persistence**: Maintains conversation history across sessions
-
 **Architecture:**
 ```
-User → spartan-hq frontend → Brain API → OpenRouter (function calling)
-                                      → MCP Server (tool execution)
-                                      → PostgreSQL (state/history)
+User → Dashboard frontend → Brain API → OpenRouter (function calling)
+                                       → MCP Server (tool execution)
+                                       → PostgreSQL (state/history)
 ```
 
 **API Endpoints:**
@@ -75,125 +70,93 @@ User → spartan-hq frontend → Brain API → OpenRouter (function calling)
 | `/api/chat/sessions/{id}` | GET | Get session with messages |
 | `/api/chat/sessions/{id}/messages` | POST | Append message to session |
 
-**Response Format:**
-```json
-{
-  "response": "string",
-  "session_id": "uuid",
-  "tool_executions": [
-    {"tool": "sql_query", "success": true, "arguments": {...}, "result": {...}}
-  ],
-  "iterations": 2,
-  "input_tokens": 1500,
-  "output_tokens": 500
-}
-```
-
 ---
 
-## 3. AUTONOMY LEVELS - CURRENT STATUS
+## 3. AUTONOMY LEVELS
 
 ### Level 1: Conversational ✅ COMPLETE
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Conversational Interface | ✅ | Chat-driven via tasks/handlers |
-| Short-Term Context | ✅ | In-session context |
-| Basic Q&A | ✅ | |
-| Session Logging | ✅ | execution_logs + task evidence |
-| Simple Error Handling | ✅ | Partial - not uniform across all integrations |
+Basic chat-driven interface with session logging and error handling.
 
 ### Level 2: Reasoners ✅ COMPLETE
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Multi-Turn Memory | ✅ | Within task/workflow |
-| Chain-of-Thought Reasoning | ✅ | Planning + multi-step execution |
-| Suggests Actions | ✅ | |
-| References & Sourcing | ✅ | Research tasks cite sources; analysis now includes sql_used |
-| Uncertainty/Risk Warnings | ⚠️ Partial | |
-| Structured Outputs | ✅ | JSON evidence patterns |
+Multi-turn memory, chain-of-thought reasoning, structured JSON outputs, source citations.
 
 ### Level 3: Agents ✅ MOSTLY COMPLETE
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Goal/Task Acceptance | ✅ | governance_tasks + workflows |
-| Workflow Planning | ✅ | Multi-step orchestration |
-| Tool/API Execution | ✅ | DB, GitHub, web fetch, etc. |
-| Persistent Task Memory | ⚠️ Partial | Task state persists; long-term agent memory not standardized |
-| Error Recovery | ⚠️ Partial | Some retry/fallback; not uniform |
-| Dry-Run Mode | ⚠️ Partial | Concept exists; not integrated everywhere |
-| Human-in-the-Loop | ✅ | Approval gates exist |
-| Action Logging | ✅ | Full audit trail |
-| Permission/Scope Control | ⚠️ Partial | Some guardrails; no full RBAC |
+Goal/task acceptance, workflow planning, tool/API execution, approval gates, full audit trail.
+**Gaps:** Long-term agent memory not standardized, error recovery not uniform, no full RBAC.
 
 ### Level 4: Innovators ⚠️ IN PROGRESS
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Proactive Scanning | ⚠️ Partial | Scan concepts exist; not always-on with auto-task creation |
-| Experimentation | ⚠️ Partial | Some harness exists; no formal lifecycle |
-| Hypothesis Tracking | ❌ | Not implemented |
-| Self-Improvement | ❌ | No closed-loop policy changes |
-| Sandboxed Innovation | ⚠️ Partial | Needs explicit boundaries |
-| Rollback | ❌ | Requires transactionality |
-| Proposes New Automations | ⚠️ Partial | Suggestions exist; no approval workflow |
-| Impact Simulation | ❌ | Beyond basic dry-run |
+Proactive scanning and task generation working (hourly cycle). Some experimentation harness exists.
+**Gaps:** No hypothesis tracking, no closed-loop self-improvement, no rollback, no impact simulation.
 
-### Level 5: Organizations ❌ NOT YET
-| Requirement | Status | Notes |
-|-------------|--------|-------|
-| Goal Decomposition | ⚠️ Partial | Some exists; not org-wide |
-| Multi-Agent Orchestration | ⚠️ Partial | Workers exist; cross-dept is aspirational |
-| Resource Allocation | ⚠️ Partial | Basic scheduling; no budget optimization |
-| Cross-Team Conflict Mgmt | ❌ | |
-| Org-Wide Memory | ❌ | Needs durable knowledge base |
-| Advanced Access Control | ❌ | Needs RBAC + audit |
-| Automated Escalation | ⚠️ Partial | Some gates; escalation logic incomplete |
-| Resilience/Failover | ⚠️ Partial | Basic retries; no full HA |
-| Executive Reporting | ⚠️ Partial | Dashboards exist; traceability improving |
+### Level 5: Organizations ❌ TARGET
+Full multi-agent orchestration with goal decomposition, resource allocation, cross-team conflict management, org-wide memory, advanced access control, automated escalation, and executive reporting.
+
+**L5 Vision — What "Done" Looks Like:**
+- JUGGERNAUT receives a high-level objective (e.g., "build a customer portal")
+- ORCHESTRATOR decomposes it into atomic subtasks with dependency ordering
+- Workers claim and execute tasks autonomously using real tools (GitHub PRs, deployments, DB migrations)
+- VERCHAIN verification pipeline validates each completion (code review → tests → deploy → monitor)
+- Failed tasks auto-retry with different strategies or escalate with full context
+- System learns from outcomes: successful patterns get reinforced, failure patterns get flagged
+- Zero human intervention for standard workflows; humans approve only novel/high-risk decisions
 
 ---
 
-## 4. CURRENT PRIORITIES
+## 4. CURRENT STATE (2026-02-07)
 
-### Immediate (This Week)
-| Priority | Description | Owner | Status |
-|----------|-------------|-------|--------|
-| 1 | **Factory Floor Dashboard** - Visual command center (Factorio-style) | Windsurf | 🔄 In Progress (live; layout + polish ongoing) |
-| 2 | **Proactive Work Generation** - System creates its own tasks | Windsurf | ✅ Working (hourly generation + diagnostics) |
-| 3 | **Slack Notifications** - Alerts for completions/failures | Windsurf | Not Started |
+### What's Working
+- All 5 workers alive with active heartbeats (12-40s intervals)
+- Proactive task generation running on 2-hour cycle
+- Analysis tasks return real SQL-backed metrics
+- Zero errors in recent execution logs
+- Infrastructure healthy across all Railway services
 
-### Short-Term (Next 2-4 Weeks)
-| Priority | Description | Status |
-|----------|-------------|--------|
-| 4 | Verification for all action types (deploys, DB writes) | Not Started |
-| 5 | RBAC + scoped credentials per tool | Not Started |
-| 6 | Formal experiment lifecycle (hypothesis → test → measure → rollback) | Not Started |
+### What's Broken — The Hamster Wheel
+**Critical Issue:** AIHandler produces fake completions. Workers claim tasks, ask an LLM "what would you do?", save the text response as evidence, and mark done. No real work happens.
 
-### Medium-Term (L5 Target)
-- Org-wide memory store (auditable, permissioned, long-retention)
-- Cross-team conflict management
-- Full resilience/failover strategy
-- Multi-tenant support
+Evidence: Same 3 tasks repeat every 2 hours with identical fake results:
+| Task | "Evidence" | Reality |
+|------|-----------|---------|
+| "Research: Domain flip opportunities" | `{"executed": true, "scan_type": "domain"}` | Doesn't scan anything. Writes a stub JSON. |
+| "Review: Add tests for high-risk paths" | Returns generic worker stats | Doesn't add any tests. |
+| "Report: Weekly ops snapshot" | Returns worker stats | Same output as every other analysis task. |
+
+**953 "completed" tasks = 953 fake completions with zero actual work product.**
+
+### Root Cause
+AIHandler (`core/ai_handler.py`) lacks a tool executor. When a task requires real action (create a PR, run tests, deploy code), AIHandler calls an LLM for a text description of what it would do, then saves that description as "completion evidence." There is no `core/tool_executor.py` that actually invokes MCP tools.
 
 ---
 
-## 5. RECENT FIXES (Verified Working)
-| Date | Fix | Verification |
-|------|-----|--------------|
-| 2026-01-25 | **AnalysisHandler** - Analysis tasks now use real SQL queries instead of AIHandler hallucinations | ✅ Task `b8d9f44c` completed with real metrics (97.4% success rate from actual DB) |
-| 2026-01-25 | **PR Evidence Classification** - PRs correctly classified as `pr_created` until GitHub API confirms merge | Implemented; awaiting end-to-end test with code task |
-| 2026-01-26 | **Factory Floor (spartan-hq)** - PixiJS visualization integrated at `/factory-floor` with live data polling | Rendering verified; ongoing layout tuning |
-| 2026-01-26 | **Queue API mismatch (spartan-hq)** - `/api/dashboard/queue` now derives queue from `/public/dashboard/tasks?status=approved` | Fix merged locally; requires deploy to verify |
-| 2026-01-26 | **Worker status mapping (spartan-hq)** - Treat `status: active` as ONLINE; heartbeat optional | Fix merged locally; requires deploy to verify |
-| 2026-01-26 | **Pixi cleanup hardening (spartan-hq)** - stop ticker, clear stage, defensive destroy | Fix merged locally; reduces unmount crash risk |
-| 2026-01-26 | **Scheduler + proactive work generation** - Fixed scheduled execution/rescheduling, proactive_diverse handler wiring, dedupe (completed tasks no longer block), and added detailed diagnostics logging | Verified: Proactive generation working hourly; EXECUTOR claiming/completing; queue caught up |
-| 2026-01-31 | **Brain API Auth Headers (PR #276)** - Added support for `Authorization: Bearer` header, `x-api-key`, and `x-internal-api-secret` headers in addition to query parameter auth | ✅ Deployed and verified - Neural Chat now accepts auth via headers from frontend proxy |
-| 2026-02-01 | **System State Query Bugs (PR #277)** - Fixed `_get_system_state()` type casting errors: task counts returned as strings, heartbeat EXTRACT(EPOCH) parsing, and revenue query column mismatch | ✅ Deployed v1.3.2 - No more warnings in logs, system state endpoint working correctly |
+## 5. REMEDIATION PLAN
+
+### Priority 1: H-01 — AIHandler Real Execution (CRITICAL BLOCKER)
+Build `core/tool_executor.py` that bridges AIHandler to the MCP server's 68+ tools. When a task requires action, the executor actually performs it (creates branches, writes code, runs queries) instead of asking an LLM to describe what it would do.
+
+### Priority 2: H-02 — Budget & Cost Tracking
+Implement per-task token/cost tracking with configurable limits. Prevent runaway LLM spend.
+
+### Priority 3: H-03 — Credential Management
+Store API keys in Railway env vars, not hardcoded. Add scoped access per worker type.
+
+### Priority 4: H-04 — SQL Injection Prevention
+Replace all string-interpolated SQL with parameterized queries throughout the codebase.
+
+### Priority 5: H-05 — AnalysisHandler Differentiation
+Analysis tasks currently return identical worker stats regardless of the actual request. Make the handler read task requirements and generate task-specific analysis.
+
+### Priority 6: H-06 — Escalation Timeout
+Add timeout-based escalation so tasks stuck in approval queues auto-escalate after configurable delay.
+
+### Additional Findings (from 2026-02-07 codebase audit)
+- Dedup window (72h) not preventing repeating tasks — proactive scanner regenerates same tasks each cycle
+- ORCHESTRATOR was dead for 4+ days before heartbeat fix deployed
+- 5 critical bugs fixed in commit `f84ef37`: heartbeat registration, task assignment SQL, approval routing, completion evidence validation, error handling
 
 ---
 
 ## 6. DASHBOARD VISION
-**Current State:** Text-heavy, basic cards, "dopey as fuck"
-
+**Current State:** Text-heavy, basic cards
 **Target State:** Factorio-style visual command center
 
 ### Design References
@@ -204,15 +167,15 @@ User → spartan-hq frontend → Brain API → OpenRouter (function calling)
 - https://stock.adobe.com/1406443445
 
 ### Factory Floor Requirements
-1. **Worker Stations** - Physical locations on 2D floor plan (EXECUTOR, ORCHESTRATOR, ANALYST, STRATEGIST, WATCHDOG)
-2. **Task Flow** - Objects moving on conveyor belts between stations
-3. **Visual Claiming** - When worker claims task, item moves to that station
-4. **Completion Flow** - Completed tasks flow to "done" area
-5. **Failure Indication** - Stuck/failed tasks pile up and flash red
-6. **Heartbeat Pulse** - Stations visually pulse when worker is alive
-7. **Real-Time Data** - Pulls from `juggernaut-dashboard-api-production.up.railway.app/public/dashboard/*`
+1. **Worker Stations** — Physical locations on 2D floor plan (EXECUTOR, ORCHESTRATOR, ANALYST, STRATEGIST, WATCHDOG)
+2. **Task Flow** — Objects moving on conveyor belts between stations
+3. **Visual Claiming** — When worker claims task, item moves to that station
+4. **Completion Flow** — Completed tasks flow to "done" area
+5. **Failure Indication** — Stuck/failed tasks pile up and flash red
+6. **Heartbeat Pulse** — Stations visually pulse when worker is alive
+7. **Real-Time Data** — Pulls from `juggernaut-dashboard-api-production.up.railway.app/public/dashboard/*`
 
-### Tech Recommendations
+### Tech Stack
 - PixiJS for smooth 2D animation
 - React Flow for node-based visualization
 - D3.js for data-driven graphics
@@ -220,13 +183,13 @@ User → spartan-hq frontend → Brain API → OpenRouter (function calling)
 ---
 
 ## 7. KEY METRICS
-| Metric | Current Value | Target |
-|--------|---------------|--------|
-| Tasks Completed | 665 | — |
-| Tasks Failed | 11 | <5% failure rate |
-| Revenue | $0 | $100M |
-| Workers Active | 5/5 | 100% uptime |
-| Error Rate | 1.65% | <5% ✅ |
+| Metric | Current Value | Notes |
+|--------|---------------|-------|
+| Tasks "Completed" | 953 | All fake — AIHandler produces stub evidence |
+| Tasks Failed | ~11 | Low because nothing real is attempted |
+| Workers Active | 5/5 | All heartbeating |
+| Error Rate | <1% | Misleadingly low — errors only happen on real execution attempts |
+| Real Work Product | 0 | No actual PRs, deployments, or deliverables from autonomous workers |
 
 ---
 
@@ -296,10 +259,16 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 
 ---
 
-## 10. OPEN QUESTIONS
-- [ ] Resume Domain Flip experiment? (Requires ~$20 approval for domain purchase)
-- [ ] ServiceTitan integration for revenue tracking?
-- [ ] Voice interface (SARAH) priority?
+## 10. RECENT FIXES
+
+| Date | Fix | Status |
+|------|-----|--------|
+| 2026-02-07 | **5 Critical Bug Fixes (commit f84ef37)** — ORCHESTRATOR heartbeat registration, task assignment SQL, approval routing, completion evidence validation, error handling | ✅ Deployed, ORCHESTRATOR alive after 4+ days dead |
+| 2026-02-01 | **System State Query Bugs (PR #277)** — Fixed type casting errors in `_get_system_state()` | ✅ Deployed v1.3.2 |
+| 2026-01-31 | **Brain API Auth Headers (PR #276)** — Added Bearer/x-api-key/x-internal-api-secret support | ✅ Deployed |
+| 2026-01-26 | **Scheduler + Proactive Work Generation** — Fixed execution/rescheduling, handler wiring, dedupe, diagnostics | ✅ Verified hourly generation working |
+| 2026-01-26 | **Factory Floor (PixiJS)** — Visualization integrated at `/factory-floor` with live data | ✅ Rendering verified |
+| 2026-01-25 | **AnalysisHandler** — Analysis tasks now use real SQL queries | ✅ Verified with real DB metrics |
 
 ---
 
@@ -308,6 +277,6 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 |------|--------|-----|
 | 2026-01-25 | Initial document creation | Claude (Ops) |
 | 2026-01-25 | AnalysisHandler fix verified | Claude (Ops) |
-| 2026-01-26 | Added Factory Floor dashboard progress + spartan-hq fixes (queue, worker status, Pixi cleanup) | Windsurf |
-| 2026-01-26 | Added scheduler/proactive generation fixes status (ON CONFLICT fixes, rescheduling, proactive_diverse wiring, dedupe + diagnostics logging) + current state snapshot | Windsurf |
-| 2026-02-01 | Added PR #276 (Brain API auth headers) and PR #277 (system state query fixes) + updated metrics (665 completed, 1.65% error rate) | Claude (Ops) |
+| 2026-01-26 | Factory Floor + scheduler/proactive fixes | Windsurf |
+| 2026-02-01 | PR #276, #277 + metrics update | Claude (Ops) |
+| 2026-02-07 | **Major rewrite** — Stripped Spartan Plumbing references, reframed as general-purpose platform, added L5 vision, documented hamster wheel problem, added remediation plan (H-01 through H-06), updated metrics to current state (953 tasks, all fake), added codebase audit findings | Claude (Ops) |
