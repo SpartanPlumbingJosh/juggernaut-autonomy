@@ -186,7 +186,9 @@ class AIHandler(BaseHandler):
             result_obj = parsed.get("result", {})
         else:
             # Model returned prose instead of JSON — still may have done work via tools
-            success = len(resp.tool_calls_made) > 0
+            # Check if any tool calls actually succeeded, not just that calls were made
+            successful_calls = [tc for tc in resp.tool_calls_made if tc.get("result_success")]
+            success = len(successful_calls) > 0
             summary = resp.content[:600] if resp.content else "Task completed via tool calls"
             result_obj = {}
 

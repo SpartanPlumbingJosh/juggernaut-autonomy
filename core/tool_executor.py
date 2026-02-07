@@ -17,9 +17,11 @@ Tools available:
   - http_get: Fetch a URL
 """
 
+import ipaddress
 import json
 import logging
 import os
+import socket
 import subprocess
 import re
 import urllib.request
@@ -87,7 +89,10 @@ def _resolve_safe_path(file_path: str) -> Tuple[bool, str, str]:
         sandbox = Path(SANDBOX_ROOT).resolve()
         target = (sandbox / file_path).resolve() if not os.path.isabs(file_path) else Path(file_path).resolve()
 
-        if not str(target).startswith(str(sandbox)):
+        # Use proper Path containment check (not string prefix which can be tricked)
+        try:
+            target.relative_to(sandbox)
+        except ValueError:
             return False, "", f"Path escapes sandbox: {file_path} resolves outside {SANDBOX_ROOT}"
 
         for blocked in _BLOCKED_WRITE_PATHS:
@@ -174,6 +179,9 @@ def tool_patch_file(file_path: str, old_string: str, new_string: str) -> Dict[st
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             original = f.read()
 
+        if len(original.encode("utf-8")) > MAX_FILE_READ_BYTES:
+            return {"success": False, "error": f"File too large to patch (max {MAX_FILE_READ_BYTES} bytes)"}
+
         count = original.count(old_string)
         if count == 0:
             return {"success": False, "error": "old_string not found in file"}
@@ -181,6 +189,9 @@ def tool_patch_file(file_path: str, old_string: str, new_string: str) -> Dict[st
             return {"success": False, "error": f"old_string found {count} times — must be unique. Provide more context."}
 
         updated = original.replace(old_string, new_string, 1)
+
+        if len(updated.encode("utf-8")) > MAX_FILE_WRITE_BYTES:
+            return {"success": False, "error": f"Patched file exceeds write limit ({MAX_FILE_WRITE_BYTES} bytes)"}
 
         with open(resolved, "w", encoding="utf-8") as f:
             f.write(updated)
@@ -333,24 +344,56 @@ def tool_run_command(command: str, working_dir: str = "") -> Dict[str, Any]:
 
 def tool_execute_sql_readonly(query: str) -> Dict[str, Any]:
     """Execute a read-only SQL query."""
-    q = query.strip().upper()
-    # Block mutation statements
-    if any(q.startswith(kw) for kw in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE", "CREATE")):
-        return {"success": False, "error": "Only SELECT queries are allowed (read-only)"}
+    stripped = query.strip()
+
+    # Block stacked statements (semicolons)
+    if ";" in stripped:
+        return {"success": False, "error": "Multiple statements not allowed (no semicolons)"}
+
+    # Allowlist of safe statement starters
+    first_token = stripped.upper().split(None, 1)[0] if stripped else ""
+    if first_token not in ("SELECT", "WITH", "EXPLAIN"):
+        return {"success": False, "error": f"Only SELECT/WITH/EXPLAIN queries are allowed, got: {first_token}"}
 
     try:
         from core.database import query_db
-        result = query_db(query)
+        result = query_db(stripped)
         rows = result.get("rows", [])
         return {"success": True, "rows": rows[:100], "row_count": len(rows)}
     except Exception as e:
         return {"success": False, "error": f"SQL error: {e}"}
 
 
+def _is_private_ip(host: str) -> Tuple[bool, str]:
+    """Check if a hostname resolves to a private/loopback/link-local address (SSRF protection)."""
+    try:
+        addr_infos = socket.getaddrinfo(host, None)
+        for family, _, _, _, sockaddr in addr_infos:
+            ip_str = sockaddr[0]
+            ip = ipaddress.ip_address(ip_str)
+            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_unspecified:
+                return True, f"Blocked request to private/loopback address: {ip_str}"
+        return False, ""
+    except socket.gaierror as e:
+        return True, f"DNS resolution failed for {host}: {e}"
+
+
 def tool_http_get(url: str) -> Dict[str, Any]:
     """Fetch content from a URL."""
     if not url.startswith(("http://", "https://")):
         return {"success": False, "error": "URL must start with http:// or https://"}
+
+    # SSRF protection: resolve host and block private/loopback addresses
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        host = parsed.hostname or ""
+        if host:
+            is_private, reason = _is_private_ip(host)
+            if is_private:
+                return {"success": False, "error": reason}
+    except Exception as e:
+        return {"success": False, "error": f"URL validation failed: {e}"}
 
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Juggernaut-Engine/1.0"})

@@ -165,6 +165,8 @@ class AIExecutor:
                 raise RuntimeError(f"OpenRouter HTTP {e.code}: {error_body}") from e
             except urllib.error.URLError as e:
                 raise RuntimeError(f"OpenRouter connection error: {e}") from e
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"OpenRouter returned invalid JSON: {e}") from e
 
             choices = raw.get("choices") or []
             if not choices:
