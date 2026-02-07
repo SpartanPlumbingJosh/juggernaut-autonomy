@@ -557,7 +557,7 @@ PR_AUTO_MERGE_REPO_ALLOWLIST = {
 }
 MAX_TASKS_PER_LOOP = int(os.getenv("MAX_TASKS_PER_LOOP", "2"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
-SINGLE_WORKER_MODE = os.getenv("SINGLE_WORKER_MODE", "true").lower() == "true"
+SINGLE_WORKER_MODE = os.getenv("SINGLE_WORKER_MODE", "false").lower() == "true"
 PORT = int(os.getenv("PORT", "8000"))
 
 DEPLOY_VERSION = "1.3.2"
@@ -3035,20 +3035,17 @@ def execute_tool(tool_name: str, params: Dict, dry_run: bool = False) -> Tuple[b
 
 def _execute_slack_tool(tool_name: str, params: Dict) -> Dict:
     """Execute a Slack-related tool."""
-    # Placeholder - would integrate with Slack API
-    return {"status": "executed", "tool": tool_name, "channel": params.get("channel")}
+    return {"success": False, "error": "Not implemented — Slack tool integration pending", "tool": tool_name}
 
 
 def _execute_database_tool(tool_name: str, params: Dict) -> Dict:
     """Execute a database-related tool."""
-    # Placeholder - would execute safe database operations
-    return {"status": "executed", "tool": tool_name, "operation": params.get("operation")}
+    return {"success": False, "error": "Not implemented — use core.tool_executor.tool_execute_sql_readonly instead", "tool": tool_name}
 
 
 def _execute_http_tool(tool_name: str, params: Dict) -> Dict:
     """Execute an HTTP API tool."""
-    # Placeholder - would make HTTP requests
-    return {"status": "executed", "tool": tool_name, "url": params.get("url")}
+    return {"success": False, "error": "Not implemented — use core.tool_executor.tool_http_get instead", "tool": tool_name}
 
 
 # ============================================================

@@ -29,12 +29,10 @@
 ### H-03: check_cost_limit() Is Dead Code — Budget Never Enforced — FIXED
 - **Status:** FIXED — Wired `check_cost_limit()` into `execute_task()` before approval logic. Fixed fail-open behavior to fail-closed: budget check failure now blocks the task instead of allowing it. Tasks can specify `estimated_cost` in payload; defaults to $0.05/task.
 
-### H-07: Placeholder Tool Functions Are Dead Code
+### H-07: Placeholder Tool Functions Are Dead Code — FIXED
 - **Severity:** MEDIUM (downgraded from HIGH — dead code, not active bug)
-- **File:Line:** `main.py:3037-3052`
-- **Issue:** `_execute_slack_tool()`, `_execute_database_tool()`, `_execute_http_tool()` are placeholder functions that return `{"status": "executed"}` without doing anything. However, they are **never called anywhere** in the codebase.
-- **Impact:** No active impact. But if wired in later without implementation, they would silently claim success.
-- **Fix:** Either implement or delete. If kept as stubs, change return to `{"success": false, "error": "not implemented"}`.
+- **File:Line:** `main.py:3036-3048`
+- **Status:** FIXED — Changed all three placeholder functions (`_execute_slack_tool`, `_execute_database_tool`, `_execute_http_tool`) to return `{"success": false, "error": "not implemented"}` with pointers to the real tools in `core.tool_executor`.
 
 ---
 
@@ -90,7 +88,7 @@
 | H-01 | HIGH | ~~AIHandler can't execute real work~~ | **FIXED** (PR2) |
 | H-02 | HIGH | ~~Hardcoded Neon endpoint + password in 18+ files~~ | **FIXED** |
 | H-03 | HIGH | ~~check_cost_limit() never called~~ | **FIXED** |
-| H-07 | MEDIUM | Placeholder tool functions (dead code) | Open |
+| H-07 | MEDIUM | ~~Placeholder tool functions (dead code)~~ | **FIXED** |
 | M-01 | MEDIUM | SQL injection via f-strings | **MITIGATED** |
 | M-02 | MEDIUM | ~~Bare except: pass in orchestration~~ | **FIXED** |
 | M-03 | MEDIUM | ~~"Spartan Plumbing" hardcoded in idea gen~~ | **FIXED** |
@@ -98,7 +96,7 @@
 | M-05 | MEDIUM | ~~check_escalation_timeouts never called~~ | **FALSE POSITIVE** |
 | M-06 | MEDIUM | ~~18+ files duplicate DB connection code~~ | **FIXED** |
 | L-01 | LOW | main.py is 6100-line god file | Open |
-| L-02 | LOW | SINGLE_WORKER_MODE defaults to true | Open |
+| L-02 | LOW | ~~SINGLE_WORKER_MODE defaults to true~~ | **FIXED** |
 | L-05 | LOW | Research handler needs PERPLEXITY_API_KEY | Open |
 
 ---
