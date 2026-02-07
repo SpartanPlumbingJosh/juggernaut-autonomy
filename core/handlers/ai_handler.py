@@ -1,13 +1,21 @@
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from core.ai_executor import AIExecutor
+from core import tool_executor
 
 from .base import BaseHandler, HandlerResult
 
 logger = logging.getLogger(__name__)
+
+# Task types that get real tool access (vs. plan-only)
+_TOOL_ENABLED_TYPES = {
+    "code", "code_fix", "code_change", "code_implementation",
+    "debugging", "optimization", "workflow", "development",
+    "integration",
+}
 
 
 def _truthy_env(name: str, default: str = "") -> bool:
@@ -87,6 +95,14 @@ class AIHandler(BaseHandler):
         super().__init__(execute_sql, log_action)
         self.executor = AIExecutor()
 
+    def _should_use_tools(self, task_type: str) -> bool:
+        """Determine if this task type should get real tool access."""
+        if _truthy_env("AIHANDLER_PLAN_ONLY", "0"):
+            return False
+        if _truthy_env("AIHANDLER_TOOLS_DISABLED", "0"):
+            return False
+        return task_type in _TOOL_ENABLED_TYPES
+
     def execute(self, task: Dict[str, Any]) -> HandlerResult:
         self._execution_logs = []
         task_id = task.get("id")
@@ -96,13 +112,112 @@ class AIHandler(BaseHandler):
         description = task.get("description") or ""
         task_type = task.get("task_type") or ""
 
+        use_tools = self._should_use_tools(task_type)
+        plan_only = _truthy_env("AIHANDLER_PLAN_ONLY", "0")
+
+        mode = "tool-assisted" if use_tools else ("plan-only" if plan_only else "chat-only")
         self._log(
             "handler.ai.starting",
-            f"AI handling task_type='{task_type}' title='{title[:80]}'",
+            f"AI handling task_type='{task_type}' title='{title[:80]}' mode={mode}",
             task_id=task_id,
         )
 
-        plan_only = _truthy_env("AIHANDLER_PLAN_ONLY", "0")
+        if use_tools:
+            return self._execute_with_tools(task_id, task_type, title, description, payload)
+        else:
+            return self._execute_chat_only(task_id, task_type, title, description, payload, plan_only)
+
+    def _execute_with_tools(
+        self, task_id: str, task_type: str, title: str, description: str, payload: Dict[str, Any]
+    ) -> HandlerResult:
+        """Execute task using the agentic tool-calling loop."""
+
+        system = (
+            "You are JUGGERNAUT ENGINE, an autonomous execution agent with real tool access.\n"
+            "You have tools to read/write files, run shell commands, search code, and query the database.\n\n"
+            "IMPORTANT RULES:\n"
+            "- Use tools to actually perform the work, not just describe it.\n"
+            "- Read relevant files before making changes.\n"
+            "- Make targeted, minimal edits using patch_file rather than rewriting entire files.\n"
+            "- After making changes, verify them (e.g. read the file back, run tests).\n"
+            "- Never expose secrets, tokens, or passwords in your output.\n"
+            "- If you cannot complete the task, explain what's blocking you.\n\n"
+            "When you are done, return a final JSON message (no tool calls) with this schema:\n"
+            '{"success": boolean, "summary": "what you did (under 600 chars)", '
+            '"result": {"files_changed": [...], "commands_run": [...], ...}}\n'
+        )
+
+        user_content = json.dumps({
+            "task_type": task_type,
+            "title": title,
+            "description": description,
+            "payload": payload,
+        }, ensure_ascii=False)
+
+        messages: List[Dict[str, Any]] = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user_content},
+        ]
+
+        try:
+            resp = self.executor.chat_with_tools(
+                messages=messages,
+                tools=tool_executor.TOOL_DEFINITIONS,
+                tool_executor=tool_executor,
+            )
+        except Exception as e:
+            msg = str(e)
+            self._log("handler.ai.failed", f"AI tool loop failed: {msg[:200]}", level="error", task_id=task_id)
+            return HandlerResult(success=False, data={"executed": True}, error=msg, logs=self._execution_logs)
+
+        # Log tool usage summary
+        tool_summary = [f"{tc['name']}" for tc in resp.tool_calls_made]
+        self._log(
+            "handler.ai.tools_used",
+            f"Tool calls: {len(resp.tool_calls_made)} across {resp.iterations} iterations: {', '.join(tool_summary[:20])}",
+            task_id=task_id,
+        )
+
+        # Parse the final response
+        parsed = _extract_json_object(resp.content)
+        if isinstance(parsed, dict):
+            success = bool(parsed.get("success"))
+            summary = parsed.get("summary", "")
+            result_obj = parsed.get("result", {})
+        else:
+            # Model returned prose instead of JSON — still may have done work via tools
+            success = len(resp.tool_calls_made) > 0
+            summary = resp.content[:600] if resp.content else "Task completed via tool calls"
+            result_obj = {}
+
+        if not isinstance(summary, str):
+            summary = str(summary)
+        if not isinstance(result_obj, dict):
+            result_obj = {"value": result_obj}
+
+        data = {
+            "executed": True,
+            "summary": summary,
+            "result": result_obj,
+            "model": self.executor.model,
+            "tool_calls": resp.tool_calls_made,
+            "tool_iterations": resp.iterations,
+        }
+
+        self._log(
+            "handler.ai.complete",
+            f"AI completed success={success} tools_used={len(resp.tool_calls_made)}",
+            task_id=task_id,
+            output_data={"success": success, "tool_count": len(resp.tool_calls_made)},
+        )
+
+        return HandlerResult(success=success, data=data, error=None if success else summary, logs=self._execution_logs)
+
+    def _execute_chat_only(
+        self, task_id: str, task_type: str, title: str, description: str,
+        payload: Dict[str, Any], plan_only: bool
+    ) -> HandlerResult:
+        """Original chat-only execution (no tools). Used for planning/content/design tasks."""
 
         system = (
             "You are JUGGERNAUT ENGINE, an autonomous execution agent. "
