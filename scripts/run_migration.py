@@ -33,7 +33,7 @@ def run_migration(migration_file: str):
             print(f"  ❌ Error: {e}")
             return False
     
-    print(f"✅ Migration completed successfully")
+    print("✅ Migration completed successfully")
     return True
 
 

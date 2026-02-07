@@ -415,7 +415,7 @@ class AgentCoordinator:
             return 100.0
         
         avg_load = sum(loads) / len(loads)
-        variance = sum((l - avg_load) ** 2 for l in loads) / len(loads)
+        variance = sum((load - avg_load) ** 2 for load in loads) / len(loads)
         std_dev = variance ** 0.5
         
         # Score: 100 - (std_dev normalized to 0-100)

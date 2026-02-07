@@ -107,17 +107,17 @@ class BudgetTracker:
             Reason string or None if not exceeded
         """
         if self.steps_used >= self.max_steps:
-            return f"budget_exceeded_steps"
+            return "budget_exceeded_steps"
         
         if time.time() - self.start_time >= self.max_wall_clock:
-            return f"budget_exceeded_time"
+            return "budget_exceeded_time"
         
         for fingerprint, count in self.retries_by_fingerprint.items():
             if count >= self.max_retries_per_fingerprint:
-                return f"budget_exceeded_retries"
+                return "budget_exceeded_retries"
         
         if self.no_progress_steps >= self.max_no_progress_steps:
-            return f"no_progress"
+            return "no_progress"
         
         return None
     

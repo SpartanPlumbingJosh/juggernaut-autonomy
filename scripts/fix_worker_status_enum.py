@@ -27,7 +27,7 @@ def fix_worker_status():
         except Exception as e:
             error_msg = str(e)
             if "already exists" in error_msg or "duplicate" in error_msg:
-                print(f"⚠ Value already exists (skipping)")
+                print("⚠ Value already exists (skipping)")
             else:
                 print(f"✗ Error: {error_msg[:200]}")
     
