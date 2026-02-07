@@ -38,7 +38,7 @@ def fetch_recent_tasks(execute_sql: Callable[[str], Dict[str, Any]], limit: int 
     sql = f"""
         SELECT id, task_type, title, payload, created_at
         FROM governance_tasks
-        WHERE status IN ('pending', 'in_progress', 'assigned')
+        WHERE created_at > NOW() - INTERVAL '72 hours'
         ORDER BY created_at DESC
         LIMIT {int(limit)}
     """

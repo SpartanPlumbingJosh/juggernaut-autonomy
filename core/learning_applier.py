@@ -59,8 +59,9 @@ def apply_recent_learnings(
                 f"""
                 SELECT id
                 FROM governance_tasks
-                WHERE payload->>'dedupe_key' = '{key_escaped}'
-                  AND status IN ('pending', 'in_progress', 'assigned')
+                WHERE (payload->>'dedupe_key' = '{key_escaped}'
+                       OR title = '{title_escaped}')
+                  AND created_at > NOW() - INTERVAL '72 hours'
                 LIMIT 1
                 """
             )

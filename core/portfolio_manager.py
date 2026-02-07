@@ -294,7 +294,7 @@ def review_experiments_stub(
                        (SELECT SUM(net_amount) FROM revenue_events WHERE attribution->>'experiment_id' = e.id::text),
                        0
                    ) as revenue_generated,
-                   e.actual_cost, e.experiment_type, e.metadata, e.hypothesis
+                   COALESCE(e.budget_spent, 0) as actual_cost, e.experiment_type, e.metadata, e.hypothesis
             FROM experiments e
             WHERE e.status IN ('running', 'completed')
             ORDER BY e.updated_at DESC NULLS LAST, e.created_at DESC

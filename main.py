@@ -1552,8 +1552,7 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 SELECT id
                 FROM governance_tasks
                 WHERE payload->>'dedupe_key' = '{dedupe_key_escaped}'
-                  AND status IN ('pending', 'in_progress', 'assigned')
-                  AND created_at > NOW() - INTERVAL '24 hours'
+                  AND created_at > NOW() - INTERVAL '72 hours'
                 LIMIT 1
                 """
             )
@@ -1584,8 +1583,7 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
                 SELECT COUNT(*)::int as c
                 FROM governance_tasks
                 WHERE title = '{title_escaped}'
-                  AND status IN ('pending', 'in_progress', 'assigned')
-                  AND created_at > NOW() - INTERVAL '24 hours'
+                  AND created_at > NOW() - INTERVAL '72 hours'
                 """
             )
             c = int((title_cnt.get("rows") or [{}])[0].get("c") or 0)
@@ -5388,7 +5386,7 @@ def autonomy_loop():
             # These are logical workers handled by this engine, not separate processes
             # GAP-04: Fix stale heartbeats for specialist workers
             if ORCHESTRATION_AVAILABLE:
-                for specialist in ["ANALYST", "STRATEGIST", "EXECUTOR"]:
+                for specialist in ["ORCHESTRATOR", "ANALYST", "STRATEGIST", "EXECUTOR"]:
                     try:
                         update_worker_heartbeat(specialist)
                     except Exception as hb_err:

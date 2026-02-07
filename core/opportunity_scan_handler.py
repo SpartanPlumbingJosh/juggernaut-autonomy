@@ -239,7 +239,7 @@ def _create_diverse_tasks(execute_sql, log_action, config):
                 SELECT COUNT(*)::int as c
                 FROM governance_tasks
                 WHERE title = '{title_escaped}'
-                  AND created_at > NOW() - INTERVAL '24 hours'
+                  AND created_at > NOW() - INTERVAL '72 hours'
                 """
             )
             c = int((title_cnt.get("rows") or [{}])[0].get("c") or 0)
