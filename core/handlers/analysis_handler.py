@@ -195,8 +195,20 @@ class AnalysisHandler(BaseHandler):
                     ORDER BY count DESC
                 """
                 sql_used["experiment_status"] = sql
-                res = self.execute_sql(sql)
-                insights["experiments"] = res.get("rows", []) or []
+                try:
+                    res = self.execute_sql(sql)
+                    insights["experiments"] = res.get("rows", []) or []
+                except Exception as e:
+                    # Fallback to safe query if AI-generated SQL fails
+                    logger.warning(f"Experiment analysis SQL failed: {e}, using fallback")
+                    fallback_sql = f"""
+                        SELECT status, COUNT(*)::int as count
+                        FROM experiments
+                        WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                        GROUP BY status
+                    """
+                    res = self.execute_sql(fallback_sql)
+                    insights["experiments"] = res.get("rows", []) or []
             
             if wants_learning_analysis:
                 sql = f"""
@@ -212,8 +224,22 @@ class AnalysisHandler(BaseHandler):
                     LIMIT 10
                 """
                 sql_used["learning_patterns"] = sql
-                res = self.execute_sql(sql)
-                insights["learnings"] = res.get("rows", []) or []
+                try:
+                    res = self.execute_sql(sql)
+                    insights["learnings"] = res.get("rows", []) or []
+                except Exception as e:
+                    # Fallback to safe query if columns don't exist
+                    logger.warning(f"Learning analysis SQL failed: {e}, using fallback")
+                    fallback_sql = f"""
+                        SELECT category, COUNT(*)::int as count
+                        FROM learnings
+                        WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                        GROUP BY category
+                        ORDER BY count DESC
+                        LIMIT 10
+                    """
+                    res = self.execute_sql(fallback_sql)
+                    insights["learnings"] = res.get("rows", []) or []
 
             # Basic log volume + error rate (from execution_logs)
             sql = f"""
