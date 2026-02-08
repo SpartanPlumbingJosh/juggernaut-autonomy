@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and autonomous revenue system.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/plans - Create new revenue plan
+- POST /revenue/subscribe - Subscribe user to plan
+- GET /revenue/analytics - Get revenue metrics
 """
 
 import json
@@ -12,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.autonomous_revenue import AutonomousRevenueSystem
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +166,43 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_plan(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new revenue plan."""
+    try:
+        rev_system = AutonomousRevenueSystem(api_key="your_stripe_key")
+        plan = rev_system.create_plan(
+            name=body.get("name"),
+            price=body.get("price"),
+            interval=body.get("interval", "month"),
+            description=body.get("description", "")
+        )
+        return _make_response(201, plan)
+    except Exception as e:
+        return _error_response(500, f"Failed to create plan: {str(e)}")
+
+async def handle_subscribe_user(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Subscribe user to a plan."""
+    try:
+        rev_system = AutonomousRevenueSystem(api_key="your_stripe_key")
+        subscription = rev_system.subscribe_user(
+            plan_id=body.get("plan_id"),
+            email=body.get("email"),
+            payment_token=body.get("payment_token"),
+            metadata=body.get("metadata", {})
+        )
+        return _make_response(201, subscription)
+    except Exception as e:
+        return _error_response(500, f"Failed to subscribe user: {str(e)}")
+
+async def handle_revenue_analytics() -> Dict[str, Any]:
+    """Get revenue system metrics."""
+    try:
+        rev_system = AutonomousRevenueSystem(api_key="your_stripe_key")
+        metrics = rev_system.get_revenue_metrics()
+        return _make_response(200, metrics)
+    except Exception as e:
+        return _error_response(500, f"Failed to get metrics: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +272,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/plans
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "plans" and method == "POST":
+        return handle_create_plan(json.loads(body))
+
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_subscribe_user(json.loads(body))
+
+    # GET /revenue/analytics
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "analytics" and method == "GET":
+        return handle_revenue_analytics()
     
     return _error_response(404, "Not found")
 
