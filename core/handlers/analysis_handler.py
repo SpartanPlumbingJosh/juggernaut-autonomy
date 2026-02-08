@@ -64,68 +64,68 @@ class AnalysisHandler(BaseHandler):
                 wants_worker_perf = True
 
             if wants_error_analysis:
-                sql = """
+                sql = f"""
                     SELECT level, COUNT(*)::int as count,
                            COUNT(DISTINCT action) as distinct_actions
                     FROM execution_logs
-                    WHERE created_at >= NOW() - INTERVAL '$1 days'
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
                       AND level IN ('error','critical','warn')
                     GROUP BY level ORDER BY count DESC
                 """
                 sql_used["error_breakdown"] = sql
-                res = self.execute_sql(sql, [days_back])
+                res = self.execute_sql(sql)
                 insights["error_breakdown"] = res.get("rows", []) or []
 
-                sql = """
+                sql = f"""
                     SELECT action, COUNT(*)::int as count,
                            MAX(created_at) as last_seen
                     FROM execution_logs
-                    WHERE created_at >= NOW() - INTERVAL '$1 days'
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
                       AND level IN ('error','critical')
                     GROUP BY action ORDER BY count DESC LIMIT 10
                 """
                 sql_used["top_errors_by_action"] = sql
-                res = self.execute_sql(sql, [days_back])
+                res = self.execute_sql(sql)
                 insights["top_errors"] = res.get("rows", []) or []
 
             if wants_task_analysis:
-                sql = """
+                sql = f"""
                     SELECT status, COUNT(*)::int as count
                     FROM governance_tasks
-                    WHERE created_at >= NOW() - INTERVAL '$1 days'
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
                     GROUP BY status ORDER BY count DESC
                 """
                 sql_used["task_status_breakdown"] = sql
-                res = self.execute_sql(sql, [days_back])
+                res = self.execute_sql(sql)
                 insights["task_pipeline"] = res.get("rows", []) or []
 
-                sql = """
+                sql = f"""
                     SELECT task_type, COUNT(*)::int as count,
                            COUNT(*) FILTER (WHERE status = 'completed')::int as completed,
                            COUNT(*) FILTER (WHERE status = 'failed')::int as failed
                     FROM governance_tasks
-                    WHERE created_at >= NOW() - INTERVAL '$1 days'
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
                     GROUP BY task_type ORDER BY count DESC LIMIT 15
                 """
                 sql_used["task_type_breakdown"] = sql
-                res = self.execute_sql(sql, [days_back])
+                res = self.execute_sql(sql)
                 insights["task_types"] = res.get("rows", []) or []
 
             if wants_cost_analysis:
-                sql = """
+                sql = f"""
                     SELECT category,
                            SUM(amount_cents)::int as total_cents,
                            COUNT(*)::int as event_count
                     FROM cost_events
-                    WHERE created_at >= NOW() - INTERVAL '$1 days'
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
                     GROUP BY category ORDER BY total_cents DESC
                 """
                 sql_used["cost_by_category"] = sql
-                res = self.execute_sql(sql, [days_back])
+                res = self.execute_sql(sql)
                 insights["cost_breakdown"] = res.get("rows", []) or []
 
             if wants_worker_perf:
-                sql = """
+                sql = f"""
                     SELECT
                       assigned_worker as worker_id,
                       COUNT(*) FILTER (WHERE status = 'completed')::int as completed,
@@ -133,15 +133,15 @@ class AnalysisHandler(BaseHandler):
                       COUNT(*)::int as total
                     FROM governance_tasks
                     WHERE assigned_worker IS NOT NULL
-                      AND created_at >= NOW() - INTERVAL '$1 days'
+                      AND created_at >= NOW() - INTERVAL '{days_back} days'
                       AND status IN ('completed','failed')
                     GROUP BY assigned_worker
                     HAVING COUNT(*) > 0
                     ORDER BY total DESC
-                    LIMIT $2
+                    LIMIT {max_workers}
                 """
                 sql_used["worker_task_outcomes"] = sql
-                res = self.execute_sql(sql, [days_back, max_workers])
+                res = self.execute_sql(sql)
                 rows = res.get("rows", []) or []
 
                 workers: List[Dict[str, Any]] = []
@@ -164,15 +164,15 @@ class AnalysisHandler(BaseHandler):
                 insights["worker_performance"] = workers
 
             # Basic log volume + error rate (from execution_logs)
-            sql = """
+            sql = f"""
                 SELECT
                   COUNT(*)::int as total_logs,
                   COUNT(*) FILTER (WHERE level IN ('error','critical'))::int as error_logs
                 FROM execution_logs
-                WHERE created_at >= NOW() - INTERVAL '$1 days'
+                WHERE created_at >= NOW() - INTERVAL '{days_back} days'
             """
             sql_used["execution_log_error_rate"] = sql
-            res = self.execute_sql(sql, [days_back])
+            res = self.execute_sql(sql)
             row = (res.get("rows") or [{}])[0] or {}
             total_logs = _to_int(row.get("total_logs"))
             error_logs = _to_int(row.get("error_logs"))
