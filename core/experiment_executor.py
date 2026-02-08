@@ -118,7 +118,17 @@ EXPERIMENT_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
             "title": "Verify rollback capability",
             "task_type": "verification",
             "description": "Test that the system can successfully rollback changes when needed. Verify rollback mechanisms are functional.",
-            "priority": "high"
+            "priority": "high",
+            "payload": {
+                "queries": [
+                    "SELECT COUNT(*) as experiment_count FROM experiments WHERE rollback_executed = true LIMIT 1",
+                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'experiments' AND column_name = 'rollback_executed'"
+                ],
+                "assertions": [
+                    {"check": "row_count", "expected": 1},
+                    {"check": "row_count", "min": 1}
+                ]
+            }
         }
     ],
     "test": [
