@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Aider CLI defaults
-AIDER_MODEL = os.getenv("AIDER_MODEL", "openai/gpt-4o-mini")
+AIDER_MODEL = os.getenv("AIDER_MODEL", "deepseek/deepseek-chat")
 AIDER_EDIT_FORMAT = os.getenv("AIDER_EDIT_FORMAT", "diff")
 AIDER_TIMEOUT_SECONDS = int(os.getenv("AIDER_TIMEOUT_SECONDS", "300"))
 AIDER_MAX_RETRIES = int(os.getenv("AIDER_MAX_RETRIES", "2"))
