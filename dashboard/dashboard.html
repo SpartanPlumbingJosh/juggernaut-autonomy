@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Revenue Dashboard - $14M Target</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/moment"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        .dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .card { background: white; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); padding: 20px; }
+        .progress-card { grid-column: span 2; text-align: center; }
+        .progress-bar { height: 30px; background: #f0f0f0; border-radius: 15px; margin: 20px 0; }
+        .progress { height: 100%; border-radius: 15px; background: #4CAF50; }
+        h1, h2 { color: #333; }
+        .metric { font-size: 24px; font-weight: bold; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Revenue Dashboard - $14M Target</h1>
+    
+    <div class="dashboard">
+        <div class="card progress-card">
+            <h2>Progress to Target</h2>
+            <div class="metric">$<span id="current-revenue">0</span> / $14,000,000</div>
+            <div class="progress-bar">
+                <div class="progress" id="progress-bar" style="width: 0%"></div>
+            </div>
+            <div id="days-remaining">Calculating days remaining...</div>
+        </div>
+
+        <div class="card">
+            <h2>Cumulative Revenue</h2>
+            <canvas id="cumulativeChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>MRR Growth</h2>
+            <canvas id="mrrChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>CAC vs LTV</h2>
+            <canvas id="cacLtvChart"></canvas>
+        </div>
+
+        <div class="card">
+            <h2>Churn Rate</h2>
+            <canvas id="churnChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        // Fetch data every 30 seconds
+        async function fetchData() {
+            try {
+                const response = await fetch('/revenue/dashboard');
+                const data = await response.json();
+                updateDashboard(data);
+            } catch (error) {
+                console.error('Error fetching dashboard data:', error);
+            }
+        }
+
+        // Initialize charts
+        const cumulativeCtx = document.getElementById('cumulativeChart').getContext('2d');
+        const cumulativeChart = new Chart(cumulativeCtx, {
+            type: 'line',
+            data: { datasets: [{ data: [] }] },
+            options: { responsive: true }
+        });
+
+        const mrrCtx = document.getElementById('mrrChart').getContext('2d');
+        const mrrChart = new Chart(mrrCtx, {
+            type: 'bar',
+            data: { datasets: [{ data: [] }] },
+            options: { responsive: true }
+        });
+
+        const cacLtvCtx = document.getElementById('cacLtvChart').getContext('2d');
+        const cacLtvChart = new Chart(cacLtvCtx, {
+            type: 'bar',
+            data: { 
+                datasets: [
+                    { label: 'CAC', data: [], backgroundColor: 'rgba(255, 99, 132, 0.7)' },
+                    { label: 'LTV', data: [], backgroundColor: 'rgba(54, 162, 235, 0.7)' }
+                ] 
+            },
+            options: { responsive: true }
+        });
+
+        const churnCtx = document.getElementById('churnChart').getContext('2d');
+        const churnChart = new Chart(churnCtx, {
+            type: 'line',
+            data: { datasets: [{ data: [] }] },
+            options: { responsive: true }
+        });
+
+        // Update dashboard with new data
+        function updateDashboard(data) {
+            // Progress to target
+            const progress = data.progress;
+            const currentRevenue = (progress.total_revenue_cents / 100).toLocaleString('en-US');
+            document.getElementById('current-revenue').textContent = currentRevenue;
+            document.getElementById('progress-bar').style.width = `${progress.percent_complete}%`;
+            
+            // Calculate days remaining
+            const dailyGoal = (14000000 - (progress.total_revenue_cents / 100)) / 365;
+            document.getElementById('days-remaining').textContent = 
+                `At current pace: ${Math.ceil(dailyGoal)} days remaining to target`;
+
+            // Update charts
+            updateChart(cumulativeChart, data.cumulative_revenue, 'day', 'cumulative_revenue_cents');
+            updateChart(mrrChart, data.mrr_growth, 'month', 'mrr_cents');
+            updateDualChart(cacLtvChart, data.cac_ltv, 'month', 'cac_cents', 'ltv_cents');
+            updateChart(churnChart, data.churn_rates, 'month', 'churn_rate');
+        }
+
+        function updateChart(chart, data, labelKey, valueKey) {
+            chart.data.labels = data.map(item => item[labelKey]);
+            chart.data.datasets[0].data = data.map(item => item[valueKey] / 100);
+            chart.update();
+        }
+
+        function updateDualChart(chart, data, labelKey, valueKey1, valueKey2) {
+            chart.data.labels = data.map(item => item[labelKey]);
+            chart.data.datasets[0].data = data.map(item => item[valueKey1] / 100);
+            chart.data.datasets[1].data = data.map(item => item[valueKey2] / 100);
+            chart.update();
+        }
+
+        // Initial load
+        fetchData();
+        // Refresh every 30 seconds
+        setInterval(fetchData, 30000);
+    </script>
+</body>
+</html>

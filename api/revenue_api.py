@@ -232,6 +232,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # GET /revenue/dashboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "dashboard" and method == "GET":
+        return handle_dashboard_metrics()
+    
     return _error_response(404, "Not found")
 
 
