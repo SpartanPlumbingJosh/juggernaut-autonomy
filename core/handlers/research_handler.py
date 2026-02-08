@@ -533,13 +533,17 @@ class ResearchHandler(BaseHandler):
         if not url:
             return None
 
-        # Use single 'fetch' action that navigates and returns content in one call
-        # This avoids session state issues between separate navigate/get_text calls
-        result = self._puppeteer_action("fetch", {"url": url})
-        if not result or not result.get("success"):
+        # Navigate to URL
+        nav = self._puppeteer_action("navigate", {"url": url})
+        if not nav or not nav.get("success"):
             return None
 
-        return result.get("text") or result.get("content", "")
+        # Get page content (no selector = full HTML)
+        page = self._puppeteer_action("get_text", {})
+        if not page or not page.get("success"):
+            return None
+
+        return page.get("html", "")
 
 
     def _extract_domain_candidates_from_sources(
