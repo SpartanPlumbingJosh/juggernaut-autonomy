@@ -1,17 +1,26 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payments and expose revenue tracking data.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- POST /revenue/payments - Create new payment
+- POST /revenue/webhook - Stripe webhook handler
+- GET /revenue/summary - MTD/QTD/YTD totals 
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment_processor import PaymentProcessor
+
+logger = logging.getLogger(__name__)
+
+# Initialize payment processor
+payment_processor = PaymentProcessor(api_key="sk_test_...")  # Should be from config
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +41,53 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_payment_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new payment creation."""
+    try:
+        amount = int(body.get("amount", 0))
+        currency = str(body.get("currency", "usd")).lower()
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = payment_processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment creation failed"))
+            
+        return _make_response(200, {
+            "payment_intent": result["payment_intent"],
+            "client_secret": result["payment_intent"].get("client_secret")
+        })
+        
+    except Exception as e:
+        logger.error(f"Payment creation error: {str(e)}")
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_webhook(body: str, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        sig_header = headers.get("stripe-signature", "")
+        result = payment_processor.handle_webhook(
+            payload=body,
+            sig_header=sig_header,
+            webhook_secret="whsec_..."  # Should be from config
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        logger.error(f"Webhook error: {str(e)}")
+        return _error_response(500, f"Webhook processing error: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -210,7 +266,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -220,6 +276,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+        return handle_payment_creation(body_data)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing body or headers")
+        return handle_webhook(body, headers)
+        
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
