@@ -18,7 +18,20 @@ import logging
 from typing import Dict, Any
 
 from core.autonomy_loop import get_autonomy_loop
-from core.database import fetch_all
+from core.database import fetch_all, _db
+
+def _escape_sql_value(val: Any) -> str:
+    """Escape a value for SQL insertion."""
+    if val is None:
+        return "NULL"
+    elif isinstance(val, bool):
+        return "TRUE" if val else "FALSE"
+    elif isinstance(val, (int, float)):
+        return str(val)
+    elif isinstance(val, (dict, list)):
+        return _db._format_value(val)
+    else:
+        return _db._format_value(str(val))
 
 logger = logging.getLogger(__name__)
 
@@ -116,15 +129,10 @@ def handle_get_assignments(query_params: Dict[str, Any]) -> Dict[str, Any]:
         limit = int(query_params.get("limit", ["50"])[0])
         status = query_params.get("status", [None])[0]
         
-        # Build query
-        conditions = []
-        params = []
-        
+        # Build query with inlined values for Neon HTTP API
+        where_clause = "1=1"
         if status:
-            conditions.append("ta.status = %s")
-            params.append(status)
-        
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+            where_clause = f"ta.status = {_escape_sql_value(status)}"
         
         query = f"""
             SELECT 
@@ -145,11 +153,10 @@ def handle_get_assignments(query_params: Dict[str, Any]) -> Dict[str, Any]:
             LEFT JOIN workers w ON w.id = ta.worker_id
             WHERE {where_clause}
             ORDER BY ta.assigned_at DESC
-            LIMIT %s
+            LIMIT {limit}
         """
         
-        params.append(limit)
-        assignments = fetch_all(query, tuple(params))
+        assignments = fetch_all(query)
         
         return _make_response(200, {
             "success": True,
@@ -190,12 +197,12 @@ def handle_get_workers() -> Dict[str, Any]:
         
         # Get capabilities for each worker
         for worker in workers:
-            cap_query = """
+            cap_query = f"""
                 SELECT capability, proficiency
                 FROM worker_capabilities
-                WHERE worker_id = %s
+                WHERE worker_id = {_escape_sql_value(worker['id'])}
             """
-            capabilities = fetch_all(cap_query, (worker['id'],))
+            capabilities = fetch_all(cap_query)
             worker['capabilities'] = capabilities
         
         return _make_response(200, {

@@ -528,12 +528,13 @@ def public_logs(
 def public_stats(
     cache_seconds: int = 10,
 ) -> Dict[str, Any]:
-    """Get task statistics - no auth required."""
+    """Get comprehensive dashboard statistics - no auth required."""
     cache_key = "pub_stats"
     cached = _cache.get(cache_key)
     if cached is not None:
         return cached
 
+    # Tasks stats
     by_status_rows = query_db(
         "SELECT status::text as status, COUNT(*)::int as count FROM governance_tasks GROUP BY status"
     ).get("rows", [])
@@ -551,6 +552,80 @@ def public_stats(
         """
     ).get("rows", [])
 
+    # Revenue stats
+    revenue_summary = {"total": 0, "mtd": 0, "qtd": 0, "ytd": 0, "costs": 0, "profit": 0}
+    try:
+        summary_result = query_db("""
+            SELECT
+                COALESCE(SUM(gross_amount), 0) as total,
+                COALESCE(SUM(CASE WHEN date_trunc('month', occurred_at) = date_trunc('month', NOW()) THEN gross_amount ELSE 0 END), 0) as mtd,
+                COALESCE(SUM(CASE WHEN date_trunc('quarter', occurred_at) = date_trunc('quarter', NOW()) THEN gross_amount ELSE 0 END), 0) as qtd,
+                COALESCE(SUM(CASE WHEN date_trunc('year', occurred_at) = date_trunc('year', NOW()) THEN gross_amount ELSE 0 END), 0) as ytd
+            FROM revenue_events
+        """)
+        summary = (summary_result.get("rows", [{}])[0] or {})
+        cost_result = query_db("""
+            SELECT COALESCE(SUM(amount_cents), 0) / 100.0 as total_cost
+            FROM cost_events
+        """)
+        costs = (cost_result.get("rows", [{}])[0] or {})
+        total_revenue = _to_float(summary.get("total"), 0)
+        total_cost = _to_float(costs.get("total_cost"), 0)
+        revenue_summary = {
+            "total": total_revenue,
+            "mtd": _to_float(summary.get("mtd"), 0),
+            "qtd": _to_float(summary.get("qtd"), 0),
+            "ytd": _to_float(summary.get("ytd"), 0),
+            "costs": total_cost,
+            "profit": total_revenue - total_cost
+        }
+    except Exception:
+        pass  # Keep defaults if query fails
+
+    # Opportunities stats
+    opportunities_stats = {"pipelineValue": 0, "openCount": 0, "wonCount": 0, "winRate": 0}
+    try:
+        stats_result = query_db("""
+            SELECT 
+                COUNT(*) FILTER (WHERE status = 'open') as open_count,
+                COUNT(*) FILTER (WHERE status = 'won') as won_count,
+                COALESCE(SUM(estimated_value) FILTER (WHERE status = 'open'), 0) as pipeline_value
+            FROM opportunities
+        """)
+        stats = (stats_result.get("rows", [{}])[0] or {})
+        opportunities_stats = {
+            "pipelineValue": _to_float(stats.get("pipeline_value"), 0),
+            "openCount": _to_int(stats.get("open_count"), 0),
+            "wonCount": _to_int(stats.get("won_count"), 0),
+            "winRate": 0  # Simplified
+        }
+    except Exception:
+        pass
+
+    # Experiments stats
+    experiments_stats = {"total": 0, "running": 0, "completed": 0, "successRate": 0}
+    try:
+        exp_result = query_db("""
+            SELECT 
+                COUNT(*) as total,
+                COUNT(*) FILTER (WHERE status = 'running') as running,
+                COUNT(*) FILTER (WHERE status = 'completed') as completed,
+                COUNT(*) FILTER (WHERE status = 'success') as successful,
+                COUNT(*) FILTER (WHERE status IN ('completed', 'success', 'failed')) as finished
+            FROM experiments
+        """)
+        exp = (exp_result.get("rows", [{}])[0] or {})
+        finished = _to_int(exp.get("finished"), 0)
+        successful = _to_int(exp.get("successful"), 0)
+        experiments_stats = {
+            "total": _to_int(exp.get("total"), 0),
+            "running": _to_int(exp.get("running"), 0),
+            "completed": _to_int(exp.get("completed"), 0),
+            "successRate": round((successful / finished * 100) if finished > 0 else 0, 1)
+        }
+    except Exception:
+        pass
+
     result = {
         "success": True,
         "tasksByStatus": tasks_by_status,
@@ -563,6 +638,9 @@ def public_stats(
             }
             for r in recent
         ],
+        "revenue": revenue_summary,
+        "opportunities": opportunities_stats,
+        "experiments": experiments_stats,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     _cache.set(cache_key, result, int(cache_seconds))
