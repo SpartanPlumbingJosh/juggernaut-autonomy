@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +217,9 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Initialize payment processor
+    payment_processor = PaymentProcessor(log_action=lambda *args, **kwargs: None)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -232,6 +236,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            result = await payment_processor.handle_payment_webhook(payload)
+            return _make_response(200 if result.get("success") else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+            
     return _error_response(404, "Not found")
 
 
