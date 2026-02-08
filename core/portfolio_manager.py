@@ -1,12 +1,61 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+# Payment processor integration
+class PaymentProcessor:
+    """Handle payment processing and subscription management."""
+    
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]]):
+        self.execute_sql = execute_sql
+        
+    def create_customer(self, email: str, payment_method: str) -> Dict[str, Any]:
+        """Create a new customer in payment system."""
+        try:
+            res = self.execute_sql(f"""
+                INSERT INTO customers (email, payment_method, status)
+                VALUES ('{email}', '{payment_method}', 'active')
+                RETURNING id
+            """)
+            return {"success": True, "customer_id": res.get("rows", [{}])[0].get("id")}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+            
+    def create_subscription(self, customer_id: str, plan_id: str) -> Dict[str, Any]:
+        """Create a new subscription."""
+        try:
+            res = self.execute_sql(f"""
+                INSERT INTO subscriptions (customer_id, plan_id, status, start_date, end_date)
+                VALUES (
+                    '{customer_id}',
+                    '{plan_id}',
+                    'active',
+                    NOW(),
+                    NOW() + INTERVAL '1 month'
+                )
+                RETURNING id
+            """)
+            return {"success": True, "subscription_id": res.get("rows", [{}])[0].get("id")}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+            
+    def process_payment(self, customer_id: str, amount: float) -> Dict[str, Any]:
+        """Process a payment."""
+        try:
+            res = self.execute_sql(f"""
+                INSERT INTO payments (customer_id, amount, status)
+                VALUES ('{customer_id}', {amount}, 'completed')
+                RETURNING id
+            """)
+            return {"success": True, "payment_id": res.get("rows", [{}])[0].get("id")}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
 
 def generate_revenue_ideas(
