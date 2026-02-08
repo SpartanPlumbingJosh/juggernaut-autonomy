@@ -46,8 +46,8 @@ def test_repositories_api():
     except Exception as e:
         print(f"❌ Error: {e}")
     
-    # Test POST /api/repositories (add spartan-hq)
-    print("\n2. POST /api/repositories (add spartan-hq)")
+    # Test POST /api/repositories (add repo)
+    print("\n2. POST /api/repositories (add repo)")
     print("-" * 80)
     try:
         payload = {
