@@ -34,7 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals including failed payments and fraud metrics."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -47,8 +47,10 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         # Get revenue by period
         sql = f"""
         SELECT 
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            SUM(CASE WHEN event_type = 'revenue' AND status = 'success' THEN amount_cents ELSE 0 END) as total_revenue_cents,
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
+            SUM(CASE WHEN status = 'failed' THEN amount_cents ELSE 0 END) as failed_payments_cents,
+            COUNT(*) FILTER (WHERE fraud_score > 0.8) as fraud_count,
             SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as net_profit_cents,
             COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
