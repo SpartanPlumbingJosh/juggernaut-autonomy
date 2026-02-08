@@ -3015,6 +3015,53 @@ class CodeTaskExecutor:
         ]
         return meaningful[0] if meaningful else "generated_module"
 
+    def _infer_target_files(self, task_description: str, task_title: str) -> Optional[List[str]]:
+        """Infer target files from task description when not explicitly specified.
+        
+        Args:
+            task_description: Full task description
+            task_title: Task title
+            
+        Returns:
+            List of likely target files, or None if can't determine
+        """
+        text = (task_description + " " + task_title).lower()
+        
+        # Revenue/financial systems
+        if any(kw in text for kw in ["revenue", "financial", "payment", "billing"]):
+            return ["api/revenue_api.py", "core/portfolio_manager.py"]
+        
+        # Discovery/opportunity systems  
+        if any(kw in text for kw in ["discovery", "opportunity", "scanning"]):
+            return ["core/discovery.py", "core/opportunity_scanner.py"]
+        
+        # Task/goal management
+        if any(kw in text for kw in ["task", "goal", "workflow"]):
+            return ["core/autonomous_engine.py", "main.py"]
+        
+        # Database/schema changes
+        if any(kw in text for kw in ["database", "schema", "migration", "table"]):
+            return ["core/database.py"]
+        
+        # API/routes
+        if any(kw in text for kw in ["api", "endpoint", "route"]):
+            return ["api/revenue_api.py", "api/api_server.py"]
+        
+        # Brain/AI systems
+        if any(kw in text for kw in ["brain", "llm", "ai", "model"]):
+            return ["core/unified_brain.py", "core/ai_executor.py"]
+        
+        # Learning/improvement
+        if any(kw in text for kw in ["learning", "improvement", "optimization"]):
+            return ["core/learning.py", "core/learning_capture.py"]
+        
+        # Default to main autonomous engine for broad tasks
+        if any(kw in text for kw in ["autonomous", "platform", "system", "core"]):
+            return ["core/autonomous_engine.py"]
+        
+        # Can't determine - let Aider fail or use AIHandler
+        return None
+    
     def _try_aider(
         self,
         task_id: str,
