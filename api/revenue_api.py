@@ -210,6 +210,85 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_dashboard_metrics() -> Dict[str, Any]:
+    """Get all metrics for the real-time dashboard."""
+    try:
+        # Cumulative revenue vs timeline
+        cumulative_sql = """
+        SELECT 
+            DATE_TRUNC('day', recorded_at) as day,
+            SUM(amount_cents) OVER (ORDER BY DATE_TRUNC('day', recorded_at)) as cumulative_revenue_cents
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        ORDER BY day DESC
+        LIMIT 90
+        """
+        cumulative_result = await query_db(cumulative_sql)
+        
+        # MRR growth
+        mrr_sql = """
+        SELECT 
+            DATE_TRUNC('month', recorded_at) as month,
+            SUM(amount_cents) as mrr_cents
+        FROM revenue_events
+        WHERE event_type = 'revenue' 
+        AND metadata->>'recurring' = 'true'
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 12
+        """
+        mrr_result = await query_db(mrr_sql)
+        
+        # CAC vs LTV
+        cac_ltv_sql = """
+        SELECT 
+            DATE_TRUNC('month', recorded_at) as month,
+            SUM(CASE WHEN event_type = 'cost' AND source = 'acquisition' THEN amount_cents ELSE 0 END) as cac_cents,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as ltv_cents
+        FROM revenue_events
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 12
+        """
+        cac_ltv_result = await query_db(cac_ltv_sql)
+        
+        # Churn rate
+        churn_sql = """
+        SELECT 
+            DATE_TRUNC('month', churn_date) as month,
+            COUNT(*) as churned_customers,
+            COUNT(*)::float / NULLIF(LAG(COUNT(*)) OVER (ORDER BY DATE_TRUNC('month', churn_date)), 0) as churn_rate
+        FROM customer_churn
+        GROUP BY month
+        ORDER BY month DESC
+        LIMIT 12
+        """
+        churn_result = await query_db(churn_sql)
+        
+        # Milestone progress
+        target_cents = 1400000000  # $14M in cents
+        progress_sql = """
+        SELECT 
+            SUM(amount_cents) as total_revenue_cents,
+            (SUM(amount_cents)::float / %s) * 100 as percent_complete,
+            (%s - SUM(amount_cents)) as remaining_cents
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        """ % (target_cents, target_cents)
+        progress_result = await query_db(progress_sql)
+        
+        return _make_response(200, {
+            "cumulative_revenue": cumulative_result.get("rows", []),
+            "mrr_growth": mrr_result.get("rows", []),
+            "cac_ltv": cac_ltv_result.get("rows", []),
+            "churn_rates": churn_result.get("rows", []),
+            "progress": progress_result.get("rows", [{}])[0]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch dashboard metrics: {str(e)}")
+
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +310,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/dashboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "dashboard" and method == "GET":
+        return handle_dashboard_metrics()
     
     return _error_response(404, "Not found")
 
