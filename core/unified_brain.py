@@ -27,6 +27,7 @@ from .mcp_tool_schemas import get_tool_schemas
 from .retry import exponential_backoff, RateLimitError, APIConnectionError
 from .circuit_breaker import CircuitOpenError, get_circuit_breaker
 from .self_healing import get_self_healing_manager, FailureType, RecoveryStrategy
+from .ai_executor import _validate_model  # Block Anthropic/Claude models
 
 
 @dataclass
@@ -2010,8 +2011,11 @@ class BrainService:
             "X-Title": "Juggernaut Brain",
         }
 
+        # Block Anthropic/Claude models
+        validated_model = _validate_model(self.model)
+        
         payload = {
-            "model": self.model,
+            "model": validated_model,
             "messages": messages,
             "max_tokens": self.max_tokens,
         }
@@ -2090,8 +2094,11 @@ class BrainService:
             "X-Title": "Juggernaut Brain",
         }
 
+        # Block Anthropic/Claude models
+        validated_model = _validate_model(self.model)
+        
         payload = {
-            "model": self.model,
+            "model": validated_model,
             "messages": messages,
             "max_tokens": self.max_tokens,
             "stream": True,  # Enable streaming

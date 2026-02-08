@@ -32,6 +32,21 @@ MODEL_CODE = os.getenv("LLM_MODEL_CODE", "deepseek/deepseek-v3.2")
 MODEL_FALLBACK = os.getenv("LLM_MODEL_FALLBACK", "deepseek/deepseek-v3.1-terminus")
 
 
+# === ANTHROPIC MODEL BLOCKER ===
+BLOCKED_PROVIDERS = ['anthropic', 'claude']
+
+def _validate_model(model: str) -> str:
+    """Block Anthropic/Claude models. Redirect to free tier."""
+    model_lower = (model or "").lower()
+    for blocked in BLOCKED_PROVIDERS:
+        if blocked in model_lower:
+            logger.warning(
+                f"BLOCKED expensive model: {model} → redirecting to free tier"
+            )
+            return MODEL_FREE_PRIMARY
+    return model
+
+
 def select_model_for_task(task_type: str) -> str:
     tt = (task_type or "").strip().lower()
 
@@ -137,7 +152,7 @@ class AIExecutor:
         title: Optional[str] = None,
     ) -> None:
         self.api_key = (api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY") or "").strip()
-        self.model = model
+        self.model = _validate_model(model)  # Block Anthropic/Claude
         self.max_tokens = max_tokens
         self.timeout_seconds = timeout_seconds
         self.http_referer = http_referer or os.getenv("OPENROUTER_HTTP_REFERER") or "https://juggernaut-engine-production.up.railway.app"
@@ -182,10 +197,13 @@ class AIExecutor:
             token_cap = None
 
         input_preview = json.dumps(messages[-1:], ensure_ascii=False)[:2000] if messages else ""
-        gen = start_generation(name="ai_executor.chat", input_text=input_preview, model=self.model)
+        
+        # Block Anthropic/Claude models before API call
+        validated_model = _validate_model(self.model)
+        gen = start_generation(name="ai_executor.chat", input_text=input_preview, model=validated_model)
 
         payload = {
-            "model": self.model,
+            "model": validated_model,
             "messages": messages,
             "max_tokens": int(max_tokens) if max_tokens is not None else self.max_tokens,
         }
@@ -262,10 +280,13 @@ class AIExecutor:
         from core.tracing import start_generation
 
         input_preview = json.dumps(messages[-1:], ensure_ascii=False)[:2000] if messages else ""
+        
+        # Block Anthropic/Claude models before API call
+        validated_model = _validate_model(self.model)
         _trace_gen = start_generation(
             name="ai_executor.chat_with_tools",
             input_text=input_preview,
-            model=self.model,
+            model=validated_model,
             metadata={"max_iterations": max_iterations, "tool_count": len(tools)},
         )
 
@@ -294,7 +315,7 @@ class AIExecutor:
 
             # Build request payload
             payload = {
-                "model": self.model,
+                "model": validated_model,
                 "messages": conversation,
                 "max_tokens": int(max_tokens) if max_tokens is not None else self.max_tokens,
                 "tools": tools,

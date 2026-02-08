@@ -1,54 +1,67 @@
 # ==============================================================================
 # JUGGERNAUT LiteLLM Proxy Configuration
 # ==============================================================================
-# Multi-provider routing: OpenRouter (primary) → OpenAI (fallback)
-# Both share model_name "openrouter/auto" so LiteLLM fails over automatically.
-# Workers request "openrouter/auto" — no code changes needed.
+# Cost-safe model routing — NO Anthropic/Claude models allowed
+# All models route through OpenRouter with explicit model selection
 # ==============================================================================
 
 model_list:
-  # ── OpenRouter (primary — existing provider, smart routing) ──
-  - model_name: "openrouter/auto"
+  # ── Free tier (monitoring, scheduling, heartbeats) ──
+  - model_name: "google/gemini-2.0-flash-exp:free"
     litellm_params:
-      model: "openrouter/auto"
+      model: "openrouter/google/gemini-2.0-flash-exp:free"
       api_key: "os.environ/OPENROUTER_API_KEY"
       api_base: "https://openrouter.ai/api/v1"
       max_tokens: 8192
-    model_info:
-      description: "Primary — OpenRouter smart routing"
 
-  # ── OpenAI direct (fallback 1 — no markup) ──
+  - model_name: "meta-llama/llama-3.3-70b-instruct:free"
+    litellm_params:
+      model: "openrouter/meta-llama/llama-3.3-70b-instruct:free"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_base: "https://openrouter.ai/api/v1"
+      max_tokens: 8192
+
+  # ── Workhorse (research, analysis, code tasks) ──
+  - model_name: "deepseek/deepseek-v3.2"
+    litellm_params:
+      model: "openrouter/deepseek/deepseek-v3.2"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_base: "https://openrouter.ai/api/v1"
+      max_tokens: 8192
+
+  # ── Strategy (complex reasoning, planning) ──
+  - model_name: "moonshotai/kimi-k2.5"
+    litellm_params:
+      model: "openrouter/moonshotai/kimi-k2.5"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_base: "https://openrouter.ai/api/v1"
+      max_tokens: 8192
+
+  # ── Fallback ──
+  - model_name: "deepseek/deepseek-v3.1-terminus"
+    litellm_params:
+      model: "openrouter/deepseek/deepseek-v3.1-terminus"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_base: "https://openrouter.ai/api/v1"
+      max_tokens: 8192
+
+  # ── Legacy alias (anything still requesting openrouter/auto gets cheapest) ──
   - model_name: "openrouter/auto"
     litellm_params:
-      model: "openai/gpt-4o"
-      api_key: "os.environ/OPENAI_API_KEY"
+      model: "openrouter/google/gemini-2.0-flash-exp:free"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_base: "https://openrouter.ai/api/v1"
       max_tokens: 8192
-    model_info:
-      description: "Fallback 1 — OpenAI direct (no markup)"
-
-  - model_name: "openai/gpt-4o"
-    litellm_params:
-      model: "openai/gpt-4o"
-      api_key: "os.environ/OPENAI_API_KEY"
-      max_tokens: 8192
-
-  - model_name: "openai/gpt-4o-mini"
-    litellm_params:
-      model: "openai/gpt-4o-mini"
-      api_key: "os.environ/OPENAI_API_KEY"
-      max_tokens: 4096
 
 litellm_settings:
   num_retries: 2
   retry_after: 5
   request_timeout: 120
-  # Budget controls
-  max_budget: 50.0
+  max_budget: 10.0
   budget_duration: "1d"
   set_verbose: false
 
 general_settings:
-  # master_key: "os.environ/LITELLM_MASTER_KEY"  # Re-enable when adding auth
   health_check: true
   allow_routes_without_auth:
     - "/health"
