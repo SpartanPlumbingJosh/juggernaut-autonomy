@@ -71,3 +71,7 @@ litellm_settings:
 general_settings:
   master_key: "os.environ/LITELLM_MASTER_KEY"
   health_check: true
+  allow_routes_without_auth:
+    - "/health"
+    - "/health/liveliness"
+    - "/health/readiness"
