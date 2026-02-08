@@ -120,10 +120,15 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
         event_type = query_params.get("event_type", [""])[0] if isinstance(query_params.get("event_type"), list) else query_params.get("event_type", "")
+        service_id = query_params.get("service_id", [""])[0] if isinstance(query_params.get("service_id"), list) else query_params.get("service_id", "")
         
-        where_clause = ""
+        where_clauses = []
         if event_type:
-            where_clause = f"WHERE event_type = '{event_type}'"
+            where_clauses.append(f"event_type = '{event_type}'")
+        if service_id:
+            where_clauses.append(f"service_id = '{service_id}'")
+            
+        where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         
         sql = f"""
         SELECT 
@@ -135,7 +140,10 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
             source,
             metadata,
             recorded_at,
-            created_at
+            created_at,
+            status,
+            service_id,
+            error
         FROM revenue_events
         {where_clause}
         ORDER BY recorded_at DESC
