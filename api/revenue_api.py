@@ -8,10 +8,15 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+
+logger = logging.getLogger(__name__)
+payment_processor = PaymentProcessor()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,7 +120,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination and process new payments."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -151,6 +156,45 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         count_result = await query_db(count_sql)
         total = count_result.get("rows", [{}])[0].get("total", 0)
         
+        # Process new payment if POST request
+        if method == "POST":
+            try:
+                body_data = json.loads(body or "{}")
+                payment_result = await payment_processor.process_payment(
+                    amount=body_data.get("amount"),
+                    currency=body_data.get("currency", "USD"),
+                    payment_method=body_data.get("payment_method"),
+                    metadata=body_data.get("metadata")
+                )
+                
+                if payment_result.get("status") == "success":
+                    # Record successful payment
+                    await query_db(f"""
+                        INSERT INTO revenue_events (
+                            id, event_type, amount_cents, currency, 
+                            source, metadata, recorded_at
+                        ) VALUES (
+                            gen_random_uuid(),
+                            'revenue',
+                            {int(body_data.get("amount") * 100)},
+                            '{body_data.get("currency", "USD")}',
+                            '{body_data.get("payment_method")}',
+                            '{json.dumps(body_data.get("metadata") or {})}',
+                            NOW()
+                        )
+                    """)
+                
+                return _make_response(200, {
+                    "payment": payment_result,
+                    "transactions": transactions,
+                    "total": total,
+                    "limit": limit,
+                    "offset": offset
+                })
+            except Exception as e:
+                logger.error(f"Payment processing failed: {str(e)}")
+                return _error_response(500, f"Payment processing failed: {str(e)}")
+                
         return _make_response(200, {
             "transactions": transactions,
             "total": total,
