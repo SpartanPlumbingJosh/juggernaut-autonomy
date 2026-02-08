@@ -34,7 +34,10 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get real-time revenue dashboard data including MTD/QTD/YTD totals."""
+    try:
+        monitor = RevenueMonitor()
+        alerts = await monitor.run_checks()
     try:
         now = datetime.now(timezone.utc)
         
@@ -107,7 +110,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
-            }
+            },
+            "alerts": alerts
         })
         
     except Exception as e:

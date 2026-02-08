@@ -1,12 +1,79 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from monitoring.alerts import RevenueMonitor
+
+@dataclass
+class PortfolioOptimizer:
+    """Self-optimizing algorithm to maximize daily earnings"""
+    min_roi_target: float = 150.0  # 150% ROI minimum
+    max_allocation_budget: float = 5000.0  # $5000 per optimization cycle
+    
+    async def analyze_portfolio(self, execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze current portfolio performance"""
+        res = await execute_sql(f"""
+            SELECT 
+                e.id,
+                e.experiment_type,
+                e.budget_spent,
+                COALESCE(
+                    (SELECT SUM(net_amount) 
+                     FROM revenue_events 
+                     WHERE attribution->>'experiment_id' = e.id::text),
+                    0
+                ) as revenue_generated,
+                DATE_PART('day', NOW() - e.start_date) as days_running
+            FROM experiments e
+            WHERE e.status = 'running'
+            ORDER BY revenue_generated DESC
+        """)
+        return res.get("rows", [])
+    
+    async def optimize_budget_allocation(self, execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+        """Reallocate budgets to maximize ROI"""
+        portfolio = await self.analyze_portfolio(execute_sql)
+        if not portfolio:
+            return {"success": True, "adjusted": 0}
+        
+        allocations = []
+        for exp in portfolio:
+            days_running = exp.get("days_running", 1)
+            revenue = float(exp.get("revenue_generated", 0))
+            cost = float(exp.get("budget_spent", 0))
+            daily_roi = ((revenue - cost) / cost) / days_running if cost > 0 else 0
+            
+            if daily_roi * 100 >= self.min_roi_target:
+                # Increase budget for high performers
+                new_budget = min(cost * 2, self.max_allocation_budget / 2)
+                allocations.append({
+                    "experiment_id": exp["id"],
+                    "current_budget": cost,
+                    "new_budget": new_budget,
+                    "roi": daily_roi * 100
+                })
+        
+        # Apply new budgets
+        adjusted = 0
+        for alloc in allocations[:5]:  # Max 5 adjustments per cycle
+            try:
+                await execute_sql(f"""
+                    UPDATE experiments
+                    SET budget_limit = {alloc["new_budget"]},
+                        updated_at = NOW()
+                    WHERE id = '{alloc["experiment_id"]}'
+                """)
+                adjusted += 1
+            except Exception:
+                continue
+        
+        return {"success": True, "adjusted": adjusted, "allocations": allocations}
 
 
 def generate_revenue_ideas(
