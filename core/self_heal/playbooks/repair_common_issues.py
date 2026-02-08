@@ -485,18 +485,78 @@ class RepairCommonIssuesPlaybook(RepairPlaybook):
             if not error_patterns or error_patterns[0].get("count", 0) == 0:
                 return {"created_count": 0, "message": "No error patterns to create tasks for"}
             
+            import json
+            from uuid import uuid4
+            from datetime import datetime, timezone
+            
             created_tasks = []
             for pattern in error_patterns[0].get("patterns", [])[:3]:  # Max 3 tasks
+                task_id = str(uuid4())
+                error_msg = pattern.get("error_message", "Unknown error")
+                occurrence_count = pattern.get("occurrence_count", 0)
+                
                 insert_query = """
                     INSERT INTO governance_tasks (
-                        task_type,
-                        description,
-                        status,
-                        priority,
-                        metadata
-                    ) VALUES (
-                        'investigate_error',
-                        %s,
+                        id, task_type, title, description, priority, status,
+                        payload, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """
+                
+                title = f"Fix: {error_msg[:60]}"
+                description = f"Error pattern detected: occurred {occurrence_count} times in the last hour. Investigate root cause and implement fix."
+                payload = {
+                    "error_pattern": error_msg,
+                    "occurrence_count": occurrence_count,
+                    "auto_generated": True,
+                    "generated_by": "self_heal"
+                }
+                
+                now = datetime.now(timezone.utc)
+                params = (
+                    task_id, "code", title, description, "high", "pending",
+                    json.dumps(payload), now, now
+                )
+                
+                result = fetch_all(insert_query, params)
+                if result:
+                    created_tasks.append(result[0])
+            
+            self.record_action("create_fix_tasks", {
+                "created_count": len(created_tasks),
+                "task_ids": [t["id"] for t in created_tasks]
+            })
+            
+            self.repairs_attempted.append({
+                "repair_type": "create_fix_tasks",
+                "count": len(created_tasks)
+            })
+            
+            return {
+                "created_count": len(created_tasks),
+                "tasks": created_tasks
+            }
+        except Exception as e:
+            logger.exception(f"Error creating fix tasks: {e}")
+            return {"error": str(e), "created_count": 0}
+    
+    def _verify_repairs(self) -> dict:
+        """Verify that repairs were successful."""
+        try:
+            total_repairs = len(self.repairs_attempted)
+            successful_repairs = sum(1 for r in self.repairs_attempted if r.get("count", 0) > 0)
+            
+            verification_result = {
+                "total_repairs_attempted": total_repairs,
+                "successful_repairs": successful_repairs,
+                "success_rate": (successful_repairs / total_repairs * 100) if total_repairs > 0 else 0,
+                "repairs": self.repairs_attempted
+            }
+            
+            return verification_result
+        except Exception as e:
+            logger.exception(f"Error verifying repairs: {e}")
+            return {"error": str(e)}
                         'pending',
                         'high',
                         %s
