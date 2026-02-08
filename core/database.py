@@ -62,6 +62,10 @@ class Database:
     
     def query(self, sql: str) -> Dict[str, Any]:
         """Execute a SQL query and return results."""
+        # Guard against empty endpoint
+        if not self.endpoint:
+            raise RuntimeError("Database endpoint not configured — set DATABASE_URL environment variable")
+        
         headers = {
             "Content-Type": "application/json",
             "Neon-Connection-String": self.connection_string

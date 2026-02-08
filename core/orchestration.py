@@ -1958,6 +1958,39 @@ def orchestrator_assign_task(
     """
     assignment_time = datetime.now(timezone.utc).isoformat()
     
+    # STUCK TASK LOOP FIX: Check if task is already in_progress and recently assigned
+    try:
+        existing_check = _query(f"""
+            SELECT status, assigned_worker, updated_at
+            FROM governance_tasks
+            WHERE id = {_format_value(task_id)}
+        """)
+        if existing_check.get("rows"):
+            row = existing_check["rows"][0]
+            if row.get("status") == "in_progress":
+                # Check if it was recently assigned (within last 30 min)
+                updated_at = row.get("updated_at")
+                if updated_at:
+                    try:
+                        from datetime import datetime
+                        last_update = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
+                        minutes_since = (datetime.now(timezone.utc) - last_update).total_seconds() / 60
+                        if minutes_since < 30:
+                            logger.warning(
+                                "Task %s already in_progress (assigned %s, %.1f min ago), skipping re-delegation",
+                                task_id, row.get("assigned_worker"), minutes_since
+                            )
+                            return {
+                                "success": False,
+                                "task_id": task_id,
+                                "worker_id": target_worker_id,
+                                "error": f"Task already in_progress (assigned to {row.get('assigned_worker')}, {minutes_since:.1f} min ago)"
+                            }
+                    except Exception:
+                        pass
+    except Exception as e:
+        logger.warning("Failed to check existing task status: %s", e)
+    
     # HIGH-07: Acquire lock before task assignment to prevent conflicts
     if CONFLICT_MANAGER_AVAILABLE:
         try:

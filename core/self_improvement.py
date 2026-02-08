@@ -402,7 +402,36 @@ Recurring {matcher['category']} issue detected ({pattern.occurrence_count} occur
         Create a fix task in governance_tasks table.
         
         Returns task_id if successful.
+        Skips creation if an identical task already exists in pending/in_progress.
         """
+        # DEDUPE CHECK: Skip if identical fix task already exists
+        title = task_data.get("title", "")
+        check_sql = """
+        SELECT id FROM governance_tasks
+        WHERE title = $1
+          AND status IN ('pending', 'in_progress')
+          AND created_at > NOW() - INTERVAL '24 hours'
+        LIMIT 1
+        """
+        try:
+            existing = query_db(check_sql, [title])
+            if existing.get("rows"):
+                log_execution(
+                    worker_id="SELF_IMPROVEMENT",
+                    action="fix_task.duplicate_skipped",
+                    message=f"Skipped duplicate fix task: {title[:60]}",
+                    output_data={"existing_task_id": existing["rows"][0].get("id")}
+                )
+                return None
+        except Exception as e:
+            # Log but continue - dedupe failure shouldn't block task creation
+            log_execution(
+                worker_id="SELF_IMPROVEMENT",
+                action="fix_task.dedupe_check_error",
+                message=f"Dedupe check failed, proceeding with creation: {e}",
+                level="warning"
+            )
+        
         sql = """
         INSERT INTO governance_tasks (
             title, description, task_type, priority, status, metadata, created_at

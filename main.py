@@ -4133,55 +4133,180 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                 task_succeeded = False
 
         elif task.task_type == "code":
-            # H-01: Route through AIHandler for tool-assisted execution
-            _ai_tools_disabled = os.getenv("AIHANDLER_TOOLS_DISABLED", "0").strip().lower() in ("1", "true", "yes")
-            _ai_handled = False
+            # 1B FIX: Route through Aider FIRST for durable PR creation, AIHandler as fallback
+            _aider_disabled = os.getenv("AIDER_DISABLED", "0").strip().lower() in ("1", "true", "yes")
+            _code_executor_handled = False
 
-            if not _ai_tools_disabled:
+            # PRIMARY: Try Aider/legacy code executor first (creates real GitHub PRs)
+            if not _aider_disabled and CODE_TASK_AVAILABLE:
                 try:
-                    from core.handlers import get_handler as _get_handler
+                    _ensure_proactive_min_schema(execute_sql, log_action)
+                except Exception:
+                    pass
 
-                    _ai_task_dict = {
-                        "id": task.id,
-                        "task_type": original_task_type,
-                        "title": task.title,
-                        "description": task.description,
-                        "priority": task.priority,
-                        "payload": task.payload or {},
+                # Set task to awaiting_pr_merge BEFORE running executor
+                # This ensures the PR tracking system picks it up
+                tool_exec_id = None
+                code_start_time = time.time()
+                try:
+                    tool_params = {
+                        "task_title": task.title,
+                        "task_description": task.description[:500] if task.description else "",
+                        "auto_merge": False
                     }
-                    _ai_handler = _get_handler("code", execute_sql, log_action)
-                    if _ai_handler is not None:
-                        log_action(
-                            "task.aihandler_dispatch",
-                            f"Routing code task through AIHandler (tool-assisted) task_type='{original_task_type}'",
-                            level="info",
-                            task_id=task.id,
-                        )
-                        _ai_result = _ai_handler.execute(_ai_task_dict)
-                        result = _ai_result.to_dict()
-                        task_succeeded = bool(_ai_result.success)
-                        _ai_handled = True
+                    now = datetime.now(timezone.utc).isoformat()
+                    sql = f"""
+                        INSERT INTO tool_executions (
+                            tool_name, params, status, worker_id, task_id, started_at
+                        ) VALUES (
+                            {escape_value('code_task_executor')}, 
+                            {escape_value(tool_params)}, 
+                            'running', 
+                            {escape_value(WORKER_ID)},
+                            {escape_value(str(task.id))},
+                            {escape_value(now)}
+                        ) RETURNING id
+                    """
+                    tool_res = execute_sql(sql)
+                    if tool_res.get("rows"):
+                        tool_exec_id = tool_res["rows"][0].get("id")
+                except Exception:
+                    pass
 
-                        waiting = bool((_ai_result.data or {}).get("waiting_approval"))
-                        if waiting:
-                            update_task_status(task.id, "waiting_approval", _ai_result.data)
-                            return False, {"waiting_approval": True, **(_ai_result.data or {})}
+                # Transition task to awaiting_pr_merge BEFORE execution
+                # This is the durable path - Aider will create a PR
+                try:
+                    original_status = task.status
+                    flip_sql = f"""
+                        UPDATE governance_tasks
+                        SET status = {escape_value(TaskStatus.AWAITING_PR_MERGE.value)},
+                            updated_at = NOW()
+                        WHERE id = {escape_value(str(task.id))}
+                          AND assigned_worker = {escape_value(WORKER_ID)}
+                          AND status = 'in_progress'
+                        RETURNING id
+                    """
+                    flip_res = execute_sql(flip_sql)
 
-                        if task_succeeded:
-                            log_action("task.aihandler_complete",
-                                      f"AIHandler completed code task successfully",
-                                      task_id=task.id, output_data=result)
-                        else:
-                            log_action("task.aihandler_failed",
-                                      f"AIHandler failed: {(_ai_result.error or 'unknown')[:200]}",
-                                      level="error", task_id=task.id, error_data=result)
-                except Exception as ai_err:
-                    log_action("task.aihandler_exception",
-                              f"AIHandler exception, falling back to code executor: {str(ai_err)[:200]}",
+                    if not (flip_res.get("rows") or []):
+                        raise Exception("Failed to transition task to awaiting_pr_merge")
+
+                    code_result = execute_code_task(
+                        task_id=task.id,
+                        task_title=task.title,
+                        task_description=task.description or "",
+                        task_payload=task.payload or {},
+                        auto_merge=False
+                    )
+
+                    # Update tool execution record
+                    if tool_exec_id:
+                        try:
+                            code_duration_ms = int((time.time() - code_start_time) * 1000)
+                            complete_sql = f"""
+                                UPDATE tool_executions
+                                SET status = {escape_value('completed' if code_result.get('success') else 'failed')},
+                                    result = {escape_value(code_result)},
+                                    duration_ms = {code_duration_ms},
+                                    completed_at = NOW()
+                                WHERE id = {escape_value(tool_exec_id)}
+                            """
+                            execute_sql(complete_sql)
+                        except Exception:
+                            pass
+
+                    if code_result.get("success"):
+                        result = code_result
+                        task_succeeded = True
+                        _code_executor_handled = True
+                        log_action("code_task.success",
+                                  f"Code task completed via Aider - PR created",
+                                  task_id=task.id,
+                                  output_data=code_result)
+                        # Task is now awaiting_pr_merge - will be completed by PR monitor
+                        # Return early since we've delegated to the PR tracking system
+                        return True, code_result
+                    else:
+                        # Aider failed - transition back to in_progress for AIHandler fallback
+                        revert_sql = f"""
+                            UPDATE governance_tasks
+                            SET status = {escape_value(original_status)},
+                                updated_at = NOW()
+                            WHERE id = {escape_value(str(task.id))}
+                              AND assigned_worker = {escape_value(WORKER_ID)}
+                              AND status = '{TaskStatus.AWAITING_PR_MERGE.value}'
+                            RETURNING id
+                        """
+                        execute_sql(revert_sql)
+                        log_action("code_task.aider_failed",
+                                  f"Aider failed, falling back to AIHandler: {code_result.get('error', 'unknown')}",
+                                  level="warn", task_id=task.id)
+                except Exception as code_err:
+                    if tool_exec_id:
+                        try:
+                            fail_sql = f"""
+                                UPDATE tool_executions
+                                SET status = 'failed',
+                                    error = {escape_value(str(code_err))},
+                                    completed_at = NOW()
+                                WHERE id = {escape_value(tool_exec_id)}
+                            """
+                            execute_sql(fail_sql)
+                        except Exception:
+                            pass
+                    log_action("code_task.aider_exception",
+                              f"Aider exception, falling back to AIHandler: {str(code_err)[:200]}",
                               level="warn", task_id=task.id)
 
-            # Legacy code generation path (PR #185) — used when AIHANDLER_TOOLS_DISABLED=1 or AIHandler failed
-            if not _ai_handled and CODE_TASK_AVAILABLE:
+            # FALLBACK: AIHandler tool-assisted execution (for analysis/config tasks or if Aider failed)
+            if not _code_executor_handled:
+                _ai_tools_disabled = os.getenv("AIHANDLER_TOOLS_DISABLED", "0").strip().lower() in ("1", "true", "yes")
+                if not _ai_tools_disabled:
+                    try:
+                        from core.handlers import get_handler as _get_handler
+
+                        _ai_task_dict = {
+                            "id": task.id,
+                            "task_type": original_task_type,
+                            "title": task.title,
+                            "description": task.description,
+                            "priority": task.priority,
+                            "payload": task.payload or {},
+                        }
+                        _ai_handler = _get_handler("code", execute_sql, log_action)
+                        if _ai_handler is not None:
+                            log_action(
+                                "task.aihandler_fallback",
+                                f"Aider unavailable/failed, falling back to AIHandler tool-assisted",
+                                level="info",
+                                task_id=task.id,
+                            )
+                            _ai_result = _ai_handler.execute(_ai_task_dict)
+                            result = _ai_result.to_dict()
+                            task_succeeded = bool(_ai_result.success)
+
+                            waiting = bool((_ai_result.data or {}).get("waiting_approval"))
+                            if waiting:
+                                update_task_status(task.id, "waiting_approval", _ai_result.data)
+                                return False, {"waiting_approval": True, **(_ai_result.data or {})}
+
+                            if task_succeeded:
+                                log_action("task.aihandler_complete",
+                                          f"AIHandler completed code task (Aider fallback)",
+                                          task_id=task.id, output_data=result)
+                            else:
+                                log_action("task.aihandler_failed",
+                                          f"AIHandler fallback failed: {(_ai_result.error or 'unknown')[:200]}",
+                                          level="error", task_id=task.id, error_data=result)
+                    except Exception as ai_err:
+                        log_action("task.aihandler_exception",
+                                  f"AIHandler fallback also failed: {str(ai_err)[:200]}",
+                                  level="error", task_id=task.id)
+                        result = {"error": f"Both Aider and AIHandler failed: {str(ai_err)[:200]}"}
+                        task_succeeded = False
+                else:
+                    result = {"error": "Code task executor not available (Aider disabled and AIHandler disabled)"}
+                    task_succeeded = False
                 try:
                     _ensure_proactive_min_schema(execute_sql, log_action)
                 except Exception:
