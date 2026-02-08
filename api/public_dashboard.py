@@ -569,6 +569,135 @@ def public_stats(
     return result
 
 
+@router.get("/revenue/summary")
+def public_revenue_summary(
+    cache_seconds: int = 10,
+) -> Dict[str, Any]:
+    """Get revenue summary - no auth required."""
+    cache_key = "pub_revenue_summary"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Summary stats
+    summary_sql = """
+    SELECT
+        COALESCE(SUM(gross_amount), 0) as total,
+        COALESCE(SUM(CASE WHEN date_trunc('month', occurred_at) = date_trunc('month', NOW()) THEN gross_amount ELSE 0 END), 0) as mtd,
+        COALESCE(SUM(CASE WHEN date_trunc('quarter', occurred_at) = date_trunc('quarter', NOW()) THEN gross_amount ELSE 0 END), 0) as qtd,
+        COALESCE(SUM(CASE WHEN date_trunc('year', occurred_at) = date_trunc('year', NOW()) THEN gross_amount ELSE 0 END), 0) as ytd
+    FROM revenue_events
+    """
+
+    summary_result = query_db(summary_sql)
+    summary = (summary_result.get("rows", [{}])[0] or {})
+
+    # Cost summary
+    cost_sql = """
+    SELECT
+        COALESCE(SUM(amount_cents), 0) / 100.0 as total_cost,
+        COALESCE(SUM(CASE WHEN occurred_at >= date_trunc('month', NOW()) THEN amount_cents ELSE 0 END), 0) / 100.0 as mtd_cost
+    FROM cost_events
+    """
+
+    cost_result = query_db(cost_sql)
+    costs = (cost_result.get("rows", [{}])[0] or {})
+
+    total_revenue = _to_float(summary.get("total"), 0)
+    total_cost = _to_float(costs.get("total_cost"), 0)
+
+    result = {
+        "success": True,
+        "data": {
+            "total": total_revenue,
+            "mtd": _to_float(summary.get("mtd"), 0),
+            "qtd": _to_float(summary.get("qtd"), 0),
+            "ytd": _to_float(summary.get("ytd"), 0),
+            "costs": total_cost,
+            "profit": total_revenue - total_cost,
+            "mtdCosts": _to_float(costs.get("mtd_cost"), 0)
+        },
+        "timestamp": _iso(_utc_now())
+    }
+    _cache.set(cache_key, result, int(cache_seconds))
+    return result
+
+
+@router.get("/revenue")
+def public_revenue(
+    limit: int = Query(50, ge=1, le=200),
+    cache_seconds: int = 10,
+) -> Dict[str, Any]:
+    """Get revenue summary and recent transactions - no auth required."""
+    cache_key = f"pub_revenue:{limit}"
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Summary stats
+    summary_sql = """
+    SELECT
+        COALESCE(SUM(gross_amount), 0) as total,
+        COALESCE(SUM(CASE WHEN date_trunc('month', occurred_at) = date_trunc('month', NOW()) THEN gross_amount ELSE 0 END), 0) as mtd,
+        COALESCE(SUM(CASE WHEN date_trunc('quarter', occurred_at) = date_trunc('quarter', NOW()) THEN gross_amount ELSE 0 END), 0) as qtd,
+        COALESCE(SUM(CASE WHEN date_trunc('year', occurred_at) = date_trunc('year', NOW()) THEN gross_amount ELSE 0 END), 0) as ytd
+    FROM revenue_events
+    """
+
+    summary_result = query_db(summary_sql)
+    summary = (summary_result.get("rows", [{}])[0] or {})
+
+    # Cost summary
+    cost_sql = """
+    SELECT
+        COALESCE(SUM(amount_cents), 0) / 100.0 as total_cost,
+        COALESCE(SUM(CASE WHEN occurred_at >= date_trunc('month', NOW()) THEN amount_cents ELSE 0 END), 0) / 100.0 as mtd_cost
+    FROM cost_events
+    """
+
+    cost_result = query_db(cost_sql)
+    costs = (cost_result.get("rows", [{}])[0] or {})
+
+    # Recent transactions
+    safe_limit = min(int(limit), 200)
+    transactions_sql = f"""
+    SELECT
+        id,
+        occurred_at as date,
+        revenue_type as type,
+        source,
+        gross_amount as amount,
+        opportunity_id,
+        metadata
+    FROM revenue_events
+    ORDER BY occurred_at DESC
+    LIMIT {safe_limit}
+    """
+
+    transactions_result = query_db(transactions_sql)
+    transactions = transactions_result.get("rows", [])
+
+    total_revenue = _to_float(summary.get("total"), 0)
+    total_cost = _to_float(costs.get("total_cost"), 0)
+
+    result = {
+        "success": True,
+        "summary": {
+            "total": total_revenue,
+            "mtd": _to_float(summary.get("mtd"), 0),
+            "qtd": _to_float(summary.get("qtd"), 0),
+            "ytd": _to_float(summary.get("ytd"), 0),
+            "costs": total_cost,
+            "profit": total_revenue - total_cost,
+            "mtdCosts": _to_float(costs.get("mtd_cost"), 0)
+        },
+        "transactions": transactions,
+        "timestamp": _iso(_utc_now())
+    }
+    _cache.set(cache_key, result, int(cache_seconds))
+    return result
+
+
 @router.get("/tree")
 def public_tree(
     rootId: Optional[str] = None,
