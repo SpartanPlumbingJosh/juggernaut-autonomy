@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing automation to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/billing - Process recurring billing
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.automated_billing import AutomatedBilling
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +165,28 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription"""
+    try:
+        billing = AutomatedBilling(query_db, lambda *args, **kwargs: None)
+        result = await billing.create_subscription(
+            body["customer_id"],
+            body["plan_id"],
+            body["payment_method"]
+        )
+        return _make_response(200 if result["success"] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_recurring_billing() -> Dict[str, Any]:
+    """Process all due subscriptions"""
+    try:
+        billing = AutomatedBilling(query_db, lambda *args, **kwargs: None)
+        result = await billing.handle_recurring_billing()
+        return _make_response(200 if result["success"] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process billing: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -219,6 +244,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_create_subscription(body_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
+    
+    # POST /revenue/billing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "billing" and method == "POST":
+        return handle_recurring_billing()
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
