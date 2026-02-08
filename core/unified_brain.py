@@ -3050,6 +3050,16 @@ class CodeTaskExecutor:
             aider = AiderExecutor(log_action=self.log_action)
             target_files = task_payload.get("target_files") or task_payload.get("files")
             read_only_files = task_payload.get("read_only_files") or task_payload.get("context_files")
+            
+            # If no target files specified, infer from task description
+            if not target_files:
+                target_files = self._infer_target_files(task_description, task_title)
+                if target_files:
+                    self.log_action(
+                        "code_task.inferred_files",
+                        f"Auto-detected target files: {', '.join(target_files)}",
+                        task_id=task_id,
+                    )
 
             aider_result = aider.run(
                 repo=repo_full,
