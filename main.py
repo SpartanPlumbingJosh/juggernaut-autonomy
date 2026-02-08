@@ -863,7 +863,7 @@ def escape_value(value: Any) -> str:
         json_str = json.dumps(value, ensure_ascii=False, default=str)
         # Only escape single quotes for SQL and remove null bytes
         # Do NOT double-escape backslashes - json.dumps() already escapes correctly
-        escaped = json_str.replace("'", "''").replace("\x00", "")
+        escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
         return f"'{escaped}'"
     else:
         # String escaping: handle quotes, backslashes, null bytes
@@ -3480,13 +3480,57 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
             # Execute SQL query from payload
             sql_query = task.payload.get("sql") or task.payload.get("query")
             if not sql_query:
-                log_action(
-                    "task.error",
-                    "Database task missing 'sql' in payload",
-                    level="error",
-                    task_id=task.id,
-                )
-                result = {"error": "No SQL query provided in payload", "expected_fields": ["sql", "query"]}
+                # Fallback: generate a SQL statement from the task description/title.
+                try:
+                    from core.ai_executor import AIExecutor
+
+                    def _strip_code_fences(s: str) -> str:
+                        s = (s or "").strip()
+                        if s.startswith("```"):
+                            first_newline = s.find("\n")
+                            if first_newline != -1:
+                                s = s[first_newline + 1 :]
+                            if s.endswith("```"):
+                                s = s[:-3]
+                        return s.strip()
+
+                    prompt = (
+                        "Generate a single SQL statement for this database task. "
+                        "Output ONLY SQL (no markdown, no explanation). "
+                        "If multiple statements are required, output the most important single statement.\n\n"
+                        f"Task title: {task.title}\n"
+                        f"Task description: {task.description or ''}\n"
+                    )
+
+                    exec_ = AIExecutor(model=os.getenv("LLM_MODEL_WORKHORSE", "openrouter/auto"))
+                    resp = exec_.chat([{"role": "user", "content": prompt}], max_tokens=512)
+                    candidate = _strip_code_fences(resp.content)
+                    sql_query = candidate.strip()
+                    if sql_query:
+                        log_action(
+                            "task.database.sql_generated",
+                            "Generated SQL for database task from description",
+                            level="info",
+                            task_id=task.id,
+                            output_data={"sql_preview": sql_query[:200]},
+                        )
+                except Exception as gen_err:
+                    log_action(
+                        "task.error",
+                        f"Database task missing 'sql' and SQL generation failed: {gen_err}",
+                        level="error",
+                        task_id=task.id,
+                    )
+                    result = {
+                        "error": "No SQL query provided in payload and generation failed",
+                        "expected_fields": ["sql", "query"],
+                        "generation_error": str(gen_err),
+                    }
+                    task_succeeded = False
+
+            if not sql_query:
+                if 'result' not in locals():
+                    result = {"error": "No SQL query provided in payload", "expected_fields": ["sql", "query"]}
                 task_succeeded = False
             else:
                 sql_upper = sql_query.strip().upper()

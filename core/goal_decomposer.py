@@ -290,6 +290,8 @@ Generate a task breakdown following these rules:
 5. **Order tasks logically** - research before implementation, analysis before decisions
 6. **Keep tasks focused** - each should be completable in one work session
 
+7. **Database tasks must include SQL** - if task_type is "database", include payload.sql with the exact SQL to run (or payload.query)
+
 Output ONLY valid JSON in this exact format (no markdown, no explanation):
 {{
   "tasks": [
@@ -304,7 +306,7 @@ Output ONLY valid JSON in this exact format (no markdown, no explanation):
 }}
 
 Generate the task breakdown now:"""
-    
+
     def _parse_task_breakdown(self, content: str) -> List[Dict[str, Any]]:
         """Parse LLM response into task definitions.
         
@@ -370,7 +372,7 @@ Generate the task breakdown now:"""
         except Exception as e:
             logger.error(f"Unexpected error parsing task breakdown: {e}")
             return []
-    
+
     def _create_task(
         self,
         goal_id: str,

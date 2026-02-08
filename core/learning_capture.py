@@ -521,18 +521,18 @@ def save_learning_to_db(
     # Ensure details is properly JSON-serialized
     details_value = learning["details"]
     if isinstance(details_value, dict):
-        details_json = json.dumps(details_value)
+        details_json = json.dumps(details_value, ensure_ascii=False, default=str)
     elif isinstance(details_value, str):
         # Already a string, but verify it's valid JSON
         try:
-            json.loads(details_value)
-            details_json = details_value
+            parsed = json.loads(details_value)
+            details_json = json.dumps(parsed, ensure_ascii=False, default=str)
         except json.JSONDecodeError:
             # Not valid JSON, wrap it
-            details_json = json.dumps({"raw": details_value})
+            details_json = json.dumps({"raw": details_value}, ensure_ascii=False, default=str)
     else:
         # Convert to JSON
-        details_json = json.dumps({"value": str(details_value)})
+        details_json = json.dumps({"value": str(details_value)}, ensure_ascii=False, default=str)
     
     values = [
         escape_value_func(worker_id),

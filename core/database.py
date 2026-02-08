@@ -105,10 +105,12 @@ class Database:
         elif isinstance(v, (int, float)):
             return str(v)
         elif isinstance(v, (dict, list)):
-            json_str = json.dumps(v).replace("'", "''")
-            return f"'{json_str}'"
+            json_str = json.dumps(v, ensure_ascii=False, default=str)
+            escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
+            return f"'{escaped}'"
         else:
-            escaped = str(v).replace("'", "''")
+            s = str(v)
+            escaped = s.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
             return f"'{escaped}'"
 
 
@@ -140,10 +142,12 @@ def escape_sql_value(v: Any) -> str:
     elif isinstance(v, (int, float)):
         return str(v)
     elif isinstance(v, (dict, list)):
-        json_str = json.dumps(v).replace("'", "''")
-        return f"'{json_str}'"
+        json_str = json.dumps(v, ensure_ascii=False, default=str)
+        escaped = json_str.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
+        return f"'{escaped}'"
     else:
-        escaped = str(v).replace("'", "''")
+        s = str(v)
+        escaped = s.replace("\\", "\\\\").replace("'", "''").replace("\x00", "")
         return f"'{escaped}'"
 
 
