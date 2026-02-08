@@ -1,5 +1,6 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Payment tracking and reporting system.
+Includes Stripe integration and revenue recording endpoints.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
@@ -31,6 +32,35 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
+
+
+async def record_revenue_event(
+    experiment_id: str,
+    amount_cents: int,
+    currency: str,
+    source: str,
+    metadata: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Record a new revenue event."""
+    try:
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, experiment_id, event_type, amount_cents,
+                currency, source, metadata, recorded_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{experiment_id}',
+                'revenue',
+                {amount_cents},
+                '{currency}',
+                '{source}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW()
+            )
+        """)
+        return _make_response(201, {"status": "recorded"})
+    except Exception as e:
+        return _error_response(500, f"Failed to record revenue: {str(e)}")
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -228,6 +258,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
         return handle_revenue_transactions(query_params)
     
+    # POST /revenue/record
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "record" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return await record_revenue_event(
+                experiment_id=body_data.get("experiment_id"),  
+                amount_cents=body_data.get("amount_cents", 0),
+                currency=body_data.get("currency", "usd"),
+                source=body_data.get("source", "manual"),
+                metadata=body_data.get("metadata", {})
+            )
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
