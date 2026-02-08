@@ -29,6 +29,7 @@ class ErrorToTaskPipeline:
         # Thresholds for task creation
         self.error_threshold = int(os.getenv("ERROR_TASK_THRESHOLD", "5"))
         self.time_window_minutes = int(os.getenv("ERROR_WINDOW_MINUTES", "60"))
+        self.max_fix_retries = int(os.getenv("MAX_FIX_RETRIES", "2"))
     
     def scan_and_create_tasks(self) -> Dict[str, Any]:
         """Scan for error patterns and create code_fix tasks.
@@ -117,13 +118,17 @@ class ErrorToTaskPipeline:
             err_text = row.get("error_data_text", "")
             file_info = self._extract_file_info(row.get("message", ""), err_text)
 
-            # Always emit a pattern if it crosses the threshold.
-            # If we can't extract a file path, still create a code_fix task with
-            # file_path='unknown' so Aider can search by error message.
+            # SKIP if we can't extract a file path - Aider can't fix without it
+            if not file_info or not file_info.get("file_path"):
+                logger.info(
+                    f"Skipping error pattern (no file_path): {row.get('message', '')[:100]}"
+                )
+                continue
+
             patterns.append({
                 "error_message": row.get("message", ""),
-                "file_path": (file_info or {}).get("file_path") or "unknown",
-                "line_number": (file_info or {}).get("line_number"),
+                "file_path": file_info["file_path"],
+                "line_number": file_info.get("line_number"),
                 "occurrence_count": row.get("occurrence_count", 0),
                 "last_seen": row.get("last_seen"),
                 "first_seen": row.get("first_seen"),
@@ -196,6 +201,37 @@ class ErrorToTaskPipeline:
         Returns:
             Task ID if created successfully, None otherwise.
         """
+        # Check retry limit - prevent infinite Fix: loops
+        error_key = pattern["error_message"][:50]
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        
+        check_sql = f"""
+            SELECT COUNT(*) as count
+            FROM governance_tasks
+            WHERE title LIKE 'Fix:%'
+              AND title LIKE '%{error_key[:30]}%'
+              AND created_at >= '{cutoff.isoformat()}'
+        """
+        
+        result = self.execute_sql(check_sql)
+        existing_count = result.get("rows", [{}])[0].get("count", 0)
+        
+        if existing_count >= self.max_fix_retries:
+            logger.warning(
+                f"Fix retry limit reached ({existing_count}/{self.max_fix_retries}) for: {error_key}"
+            )
+            self.log_action(
+                "error_to_task.retry_limit",
+                f"Skipped Fix: task creation - retry limit reached",
+                level="warning",
+                output_data={
+                    "error_key": error_key,
+                    "existing_count": existing_count,
+                    "max_retries": self.max_fix_retries
+                }
+            )
+            return None
+        
         task_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         

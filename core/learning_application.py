@@ -565,10 +565,10 @@ def execute_learning_application_cycle(
         - learnings_failed: int
         - details: list of application results
     """
-    # Check if learning application is enabled
-    enabled = os.environ.get("ENABLE_LEARNING_APPLICATION", "true").lower()
+    # Check if learning cycles are enabled (default OFF to reduce noise)
+    enabled = os.environ.get("ENABLE_LEARNING_CYCLES", "false").lower()
     if enabled not in ("true", "1", "yes"):
-        logger.info("Learning application disabled via environment variable")
+        logger.debug("Learning application cycles disabled via ENABLE_LEARNING_CYCLES")
         return {
             "learnings_processed": 0,
             "learnings_applied": 0,

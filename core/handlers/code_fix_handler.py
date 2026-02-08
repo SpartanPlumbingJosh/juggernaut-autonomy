@@ -26,7 +26,7 @@ from .base import BaseHandler, HandlerResult
 logger = logging.getLogger(__name__)
 
 # Aider configuration
-AIDER_MODEL = os.getenv("AIDER_MODEL", "openai/gpt-4o-mini")
+AIDER_MODEL = os.getenv("AIDER_MODEL", "deepseek/deepseek-chat")
 AIDER_TIMEOUT = int(os.getenv("AIDER_TIMEOUT_SECONDS", "300"))
 WORKSPACE_DIR = os.getenv("AIDER_WORKSPACE", "/tmp/juggernaut-fixes")
 
