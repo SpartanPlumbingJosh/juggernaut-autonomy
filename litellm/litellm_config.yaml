@@ -1,20 +1,30 @@
 # ==============================================================================
 # JUGGERNAUT LiteLLM Proxy Configuration
 # ==============================================================================
-# Multi-provider routing: Anthropic (primary) → OpenAI (fallback) → OpenRouter (last resort)
-# All three share model_name "openrouter/auto" so LiteLLM load-balances/fails over.
+# Multi-provider routing: OpenRouter (primary) → Anthropic (fallback) → OpenAI (fallback)
+# All three share model_name "openrouter/auto" so LiteLLM fails over automatically.
 # Workers request "openrouter/auto" — no code changes needed.
 # ==============================================================================
 
 model_list:
-  # ── Anthropic direct (cheapest — no 5.5% OpenRouter markup) ──
+  # ── OpenRouter (primary — existing provider, smart routing) ──
+  - model_name: "openrouter/auto"
+    litellm_params:
+      model: "openrouter/auto"
+      api_key: "os.environ/OPENROUTER_API_KEY"
+      api_base: "https://openrouter.ai/api/v1"
+      max_tokens: 8192
+    model_info:
+      description: "Primary — OpenRouter smart routing"
+
+  # ── Anthropic direct (fallback 1 — no markup) ──
   - model_name: "openrouter/auto"
     litellm_params:
       model: "anthropic/claude-sonnet-4-20250514"
       api_key: "os.environ/ANTHROPIC_API_KEY"
       max_tokens: 8192
     model_info:
-      description: "Primary — Anthropic direct (no markup)"
+      description: "Fallback 1 — Anthropic direct (no markup)"
 
   - model_name: "anthropic/claude-sonnet-4-20250514"
     litellm_params:
@@ -28,14 +38,14 @@ model_list:
       api_key: "os.environ/ANTHROPIC_API_KEY"
       max_tokens: 4096
 
-  # ── OpenAI direct (fallback — no markup) ──
+  # ── OpenAI direct (fallback 2 — no markup) ──
   - model_name: "openrouter/auto"
     litellm_params:
       model: "openai/gpt-4o"
       api_key: "os.environ/OPENAI_API_KEY"
       max_tokens: 8192
     model_info:
-      description: "Fallback 1 — OpenAI direct (no markup)"
+      description: "Fallback 2 — OpenAI direct (no markup)"
 
   - model_name: "openai/gpt-4o"
     litellm_params:
@@ -48,16 +58,6 @@ model_list:
       model: "openai/gpt-4o-mini"
       api_key: "os.environ/OPENAI_API_KEY"
       max_tokens: 4096
-
-  # ── OpenRouter (last resort — 5.5% markup) ──
-  - model_name: "openrouter/auto"
-    litellm_params:
-      model: "openrouter/auto"
-      api_key: "os.environ/OPENROUTER_API_KEY"
-      api_base: "https://openrouter.ai/api/v1"
-      max_tokens: 8192
-    model_info:
-      description: "Fallback 2 — OpenRouter (last resort)"
 
 litellm_settings:
   num_retries: 2
