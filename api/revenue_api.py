@@ -3,8 +3,13 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/mrr - Monthly Recurring Revenue
+- GET /revenue/arr - Annual Recurring Revenue
+- GET /revenue/growth - Revenue growth rates
+- GET /revenue/projections - Revenue trajectory projections
+- GET /revenue/alerts - Revenue milestone alerts
 """
 
 import json
@@ -162,6 +167,187 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def calculate_mrr() -> Dict[str, Any]:
+    """Calculate Monthly Recurring Revenue."""
+    try:
+        sql = """
+        WITH recurring AS (
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) FILTER (WHERE event_type = 'revenue' AND metadata->>'recurring' = 'true') as mrr_cents
+            FROM revenue_events
+            GROUP BY DATE_TRUNC('month', recorded_at)
+            ORDER BY DATE_TRUNC('month', recorded_at) DESC
+            LIMIT 12
+        )
+        SELECT 
+            month,
+            mrr_cents,
+            LAG(mrr_cents) OVER (ORDER BY month) as previous_mrr_cents,
+            (mrr_cents - LAG(mrr_cents) OVER (ORDER BY month)) / NULLIF(LAG(mrr_cents) OVER (ORDER BY month), 0) as growth_rate
+        FROM recurring
+        ORDER BY month DESC
+        """
+        
+        result = await query_db(sql)
+        mrr_data = result.get("rows", [])
+        
+        return _make_response(200, {
+            "mrr": mrr_data,
+            "current_mrr_cents": mrr_data[0]["mrr_cents"] if mrr_data else 0
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate MRR: {str(e)}")
+
+
+async def calculate_arr() -> Dict[str, Any]:
+    """Calculate Annual Recurring Revenue."""
+    try:
+        sql = """
+        WITH recurring AS (
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) FILTER (WHERE event_type = 'revenue' AND metadata->>'recurring' = 'true') as mrr_cents
+            FROM revenue_events
+            GROUP BY DATE_TRUNC('month', recorded_at)
+            ORDER BY DATE_TRUNC('month', recorded_at) DESC
+            LIMIT 12
+        )
+        SELECT 
+            month,
+            mrr_cents * 12 as arr_cents,
+            LAG(mrr_cents) OVER (ORDER BY month) * 12 as previous_arr_cents,
+            (mrr_cents - LAG(mrr_cents) OVER (ORDER BY month)) / NULLIF(LAG(mrr_cents) OVER (ORDER BY month), 0) as growth_rate
+        FROM recurring
+        ORDER BY month DESC
+        """
+        
+        result = await query_db(sql)
+        arr_data = result.get("rows", [])
+        
+        return _make_response(200, {
+            "arr": arr_data,
+            "current_arr_cents": arr_data[0]["arr_cents"] if arr_data else 0
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate ARR: {str(e)}")
+
+
+async def calculate_growth_rates() -> Dict[str, Any]:
+    """Calculate revenue growth rates."""
+    try:
+        sql = """
+        WITH monthly_revenue AS (
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) FILTER (WHERE event_type = 'revenue') as revenue_cents
+            FROM revenue_events
+            GROUP BY DATE_TRUNC('month', recorded_at)
+            ORDER BY DATE_TRUNC('month', recorded_at) DESC
+            LIMIT 12
+        )
+        SELECT 
+            month,
+            revenue_cents,
+            LAG(revenue_cents) OVER (ORDER BY month) as previous_revenue_cents,
+            (revenue_cents - LAG(revenue_cents) OVER (ORDER BY month)) / NULLIF(LAG(revenue_cents) OVER (ORDER BY month), 0) as growth_rate
+        FROM monthly_revenue
+        ORDER BY month DESC
+        """
+        
+        result = await query_db(sql)
+        growth_data = result.get("rows", [])
+        
+        return _make_response(200, {
+            "growth_rates": growth_data,
+            "current_growth_rate": growth_data[0]["growth_rate"] if growth_data else 0
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate growth rates: {str(e)}")
+
+
+async def calculate_projections() -> Dict[str, Any]:
+    """Calculate revenue trajectory projections."""
+    try:
+        sql = """
+        WITH monthly_revenue AS (
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) FILTER (WHERE event_type = 'revenue') as revenue_cents
+            FROM revenue_events
+            GROUP BY DATE_TRUNC('month', recorded_at)
+            ORDER BY DATE_TRUNC('month', recorded_at) DESC
+            LIMIT 12
+        ),
+        growth_rates AS (
+            SELECT 
+                AVG((revenue_cents - LAG(revenue_cents) OVER (ORDER BY month)) / NULLIF(LAG(revenue_cents) OVER (ORDER BY month), 0)) as avg_growth_rate
+            FROM monthly_revenue
+        )
+        SELECT 
+            DATE_TRUNC('month', NOW() + INTERVAL '1 month' * series) as month,
+            POWER(1 + COALESCE(avg_growth_rate, 0), series) * (SELECT revenue_cents FROM monthly_revenue ORDER BY month DESC LIMIT 1) as projected_revenue_cents
+        FROM generate_series(0, 11) series
+        CROSS JOIN growth_rates
+        ORDER BY month
+        """
+        
+        result = await query_db(sql)
+        projections = result.get("rows", [])
+        
+        return _make_response(200, {
+            "projections": projections
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate projections: {str(e)}")
+
+
+async def check_milestone_alerts() -> Dict[str, Any]:
+    """Check revenue against quarterly milestones."""
+    try:
+        # $12M annual target = $3M quarterly milestones
+        QUARTERLY_TARGET_CENTS = 300000000
+        
+        sql = """
+        SELECT 
+            DATE_TRUNC('quarter', recorded_at) as quarter,
+            SUM(amount_cents) FILTER (WHERE event_type = 'revenue') as revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= DATE_TRUNC('quarter', NOW())
+        GROUP BY DATE_TRUNC('quarter', recorded_at)
+        ORDER BY quarter DESC
+        LIMIT 1
+        """
+        
+        result = await query_db(sql)
+        current_quarter = result.get("rows", [{}])[0]
+        
+        alert = None
+        if current_quarter:
+            revenue_cents = current_quarter.get("revenue_cents", 0)
+            if revenue_cents < QUARTERLY_TARGET_CENTS:
+                percent_complete = revenue_cents / QUARTERLY_TARGET_CENTS
+                alert = {
+                    "quarter": current_quarter["quarter"],
+                    "revenue_cents": revenue_cents,
+                    "target_cents": QUARTERLY_TARGET_CENTS,
+                    "percent_complete": percent_complete,
+                    "message": f"Revenue is {percent_complete:.1%} of quarterly target"
+                }
+        
+        return _make_response(200, {
+            "alert": alert,
+            "quarterly_target_cents": QUARTERLY_TARGET_CENTS
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to check milestone alerts: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +417,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/mrr
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "mrr" and method == "GET":
+        return await calculate_mrr()
+    
+    # GET /revenue/arr
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "arr" and method == "GET":
+        return await calculate_arr()
+    
+    # GET /revenue/growth
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "growth" and method == "GET":
+        return await calculate_growth_rates()
+    
+    # GET /revenue/projections
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "projections" and method == "GET":
+        return await calculate_projections()
+    
+    # GET /revenue/alerts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "alerts" and method == "GET":
+        return await check_milestone_alerts()
     
     return _error_response(404, "Not found")
 
