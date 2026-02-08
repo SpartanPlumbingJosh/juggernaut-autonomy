@@ -55,6 +55,7 @@ logger = logging.getLogger(__name__)
 EXPERIMENT_EXECUTOR_AVAILABLE = False
 LEARNING_APPLIER_AVAILABLE = False
 GOAL_TRACKER_AVAILABLE = False
+GOAL_DECOMPOSER_AVAILABLE = False
 EXECUTIVE_REPORTER_AVAILABLE = False
 L5_ORCHESTRATOR_AVAILABLE = False
 
@@ -69,6 +70,12 @@ try:
     GOAL_TRACKER_AVAILABLE = True
 except Exception:
     GOAL_TRACKER_AVAILABLE = False
+
+try:
+    from core.goal_decomposer import decompose_goals_cycle
+    GOAL_DECOMPOSER_AVAILABLE = True
+except Exception:
+    GOAL_DECOMPOSER_AVAILABLE = False
 
 try:
     from core.learning_applier import apply_recent_learnings
@@ -5035,6 +5042,31 @@ def autonomy_loop():
                               task_id=task_id)
         except Exception as orphan_err:
             log_error(f"Orphaned task handler failed: {orphan_err}")
+        
+        # L5-AUTONOMY: Goal decomposition - THE TASK GENERATOR
+        # Scans active goals and breaks them into executable subtasks
+        # Runs every 6 cycles (3 minutes with 30s loop interval) - frequent to keep queue filled
+        # THIS IS THE MISSING PIECE that makes JUGGERNAUT truly autonomous
+        if loop_count % 6 == 0:
+            if GOAL_DECOMPOSER_AVAILABLE:
+                try:
+                    decompose_result = decompose_goals_cycle(
+                        execute_sql=execute_sql,
+                        log_action=log_action
+                    )
+                    if decompose_result.get("tasks_created", 0) > 0:
+                        log_action(
+                            "goal_decomposer.tasks_generated",
+                            f"Generated {decompose_result['tasks_created']} tasks from {decompose_result['goals_processed']} goals",
+                            level="info",
+                            output_data=decompose_result
+                        )
+                except Exception as decompose_err:
+                    log_action(
+                        "goal_decomposer.error",
+                        f"Goal decomposition failed: {decompose_err}",
+                        level="warn"
+                    )
         
         # L4-AUTONOMY: Self-improvement check - detect failure patterns and create fix tasks
         # Runs every 10 cycles to avoid spam
