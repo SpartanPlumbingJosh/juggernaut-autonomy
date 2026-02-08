@@ -4307,9 +4307,28 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                                 return False, {"waiting_approval": True, **(_ai_result.data or {})}
 
                             if task_succeeded:
-                                log_action("task.aihandler_complete",
-                                          f"AIHandler completed code task (Aider fallback)",
-                                          task_id=task.id, output_data=result)
+                                # AIHandler doesn't create PRs - complete the task directly
+                                try:
+                                    complete_sql = f"""
+                                        UPDATE governance_tasks
+                                        SET status = 'completed',
+                                            result = {escape_value(result)},
+                                            completed_at = NOW(),
+                                            updated_at = NOW()
+                                        WHERE id = {escape_value(str(task.id))}
+                                          AND assigned_worker = {escape_value(WORKER_ID)}
+                                          AND status = 'in_progress'
+                                        RETURNING id
+                                    """
+                                    execute_sql(complete_sql)
+                                    log_action("task.aihandler_complete",
+                                              f"AIHandler completed code task (Aider fallback) - no PR created",
+                                              task_id=task.id, output_data=result)
+                                    return True, result
+                                except Exception as complete_err:
+                                    log_action("task.aihandler_complete_failed",
+                                              f"AIHandler succeeded but failed to mark complete: {complete_err}",
+                                              level="error", task_id=task.id)
                             else:
                                 log_action("task.aihandler_failed",
                                           f"AIHandler fallback failed: {(_ai_result.error or 'unknown')[:200]}",

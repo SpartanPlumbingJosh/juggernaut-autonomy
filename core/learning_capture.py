@@ -554,8 +554,10 @@ def save_learning_to_db(
         values.append(escape_value_func(goal_id))
 
     # Add evidence_task_ids as JSONB array containing just this task
+    # Convert to JSON string first, then escape, to ensure valid JSONB cast
     columns.append("evidence_task_ids")
-    values.append(f"{escape_value_func([task_id])}::jsonb")
+    evidence_json = json.dumps([task_id])
+    values.append(f"{escape_value_func(evidence_json)}::jsonb")
 
 
     sql = f"""
