@@ -14,7 +14,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile.litellm"
 
 [deploy]
-healthcheckPath = "/health"
+healthcheckPath = "/health/liveliness"
 healthcheckTimeout = 30
 restartPolicyType = "always"
 restartPolicyMaxRetries = 3

@@ -1,13 +1,55 @@
 # ==============================================================================
 # JUGGERNAUT LiteLLM Proxy Configuration
 # ==============================================================================
-# Currently: OpenRouter only (no extra API keys needed).
-# Later: Uncomment Anthropic/OpenAI sections + add their API keys to
-#         eliminate the 5.5% OpenRouter markup and get direct fallbacks.
+# Multi-provider routing: Anthropic (primary) → OpenAI (fallback) → OpenRouter (last resort)
+# All three share model_name "openrouter/auto" so LiteLLM load-balances/fails over.
+# Workers request "openrouter/auto" — no code changes needed.
 # ==============================================================================
 
 model_list:
-  # ── ACTIVE: OpenRouter (uses your existing OPENROUTER_API_KEY) ──
+  # ── Anthropic direct (cheapest — no 5.5% OpenRouter markup) ──
+  - model_name: "openrouter/auto"
+    litellm_params:
+      model: "anthropic/claude-sonnet-4-20250514"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+      max_tokens: 8192
+    model_info:
+      description: "Primary — Anthropic direct (no markup)"
+
+  - model_name: "anthropic/claude-sonnet-4-20250514"
+    litellm_params:
+      model: "anthropic/claude-sonnet-4-20250514"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+      max_tokens: 8192
+
+  - model_name: "anthropic/claude-3-haiku-20240307"
+    litellm_params:
+      model: "anthropic/claude-3-haiku-20240307"
+      api_key: "os.environ/ANTHROPIC_API_KEY"
+      max_tokens: 4096
+
+  # ── OpenAI direct (fallback — no markup) ──
+  - model_name: "openrouter/auto"
+    litellm_params:
+      model: "openai/gpt-4o"
+      api_key: "os.environ/OPENAI_API_KEY"
+      max_tokens: 8192
+    model_info:
+      description: "Fallback 1 — OpenAI direct (no markup)"
+
+  - model_name: "openai/gpt-4o"
+    litellm_params:
+      model: "openai/gpt-4o"
+      api_key: "os.environ/OPENAI_API_KEY"
+      max_tokens: 8192
+
+  - model_name: "openai/gpt-4o-mini"
+    litellm_params:
+      model: "openai/gpt-4o-mini"
+      api_key: "os.environ/OPENAI_API_KEY"
+      max_tokens: 4096
+
+  # ── OpenRouter (last resort — 5.5% markup) ──
   - model_name: "openrouter/auto"
     litellm_params:
       model: "openrouter/auto"
@@ -15,49 +57,7 @@ model_list:
       api_base: "https://openrouter.ai/api/v1"
       max_tokens: 8192
     model_info:
-      description: "Primary — OpenRouter smart routing (current provider)"
-
-  # ── DORMANT: Uncomment these + set ANTHROPIC_API_KEY to activate ──
-  # - model_name: "openrouter/auto"
-  #   litellm_params:
-  #     model: "anthropic/claude-sonnet-4-20250514"
-  #     api_key: "os.environ/ANTHROPIC_API_KEY"
-  #     max_tokens: 8192
-  #   model_info:
-  #     description: "Anthropic direct (no markup) — add ANTHROPIC_API_KEY to enable"
-  #
-  # - model_name: "anthropic/claude-sonnet-4-20250514"
-  #   litellm_params:
-  #     model: "anthropic/claude-sonnet-4-20250514"
-  #     api_key: "os.environ/ANTHROPIC_API_KEY"
-  #     max_tokens: 8192
-  #
-  # - model_name: "anthropic/claude-3-haiku-20240307"
-  #   litellm_params:
-  #     model: "anthropic/claude-3-haiku-20240307"
-  #     api_key: "os.environ/ANTHROPIC_API_KEY"
-  #     max_tokens: 4096
-
-  # ── DORMANT: Uncomment these + set OPENAI_API_KEY to activate ──
-  # - model_name: "openrouter/auto"
-  #   litellm_params:
-  #     model: "openai/gpt-4o"
-  #     api_key: "os.environ/OPENAI_API_KEY"
-  #     max_tokens: 8192
-  #   model_info:
-  #     description: "OpenAI direct (no markup) — add OPENAI_API_KEY to enable"
-  #
-  # - model_name: "openai/gpt-4o"
-  #   litellm_params:
-  #     model: "openai/gpt-4o"
-  #     api_key: "os.environ/OPENAI_API_KEY"
-  #     max_tokens: 8192
-  #
-  # - model_name: "openai/gpt-4o-mini"
-  #   litellm_params:
-  #     model: "openai/gpt-4o-mini"
-  #     api_key: "os.environ/OPENAI_API_KEY"
-  #     max_tokens: 4096
+      description: "Fallback 2 — OpenRouter (last resort)"
 
 litellm_settings:
   num_retries: 2
@@ -69,7 +69,7 @@ litellm_settings:
   set_verbose: false
 
 general_settings:
-  master_key: "os.environ/LITELLM_MASTER_KEY"
+  # master_key: "os.environ/LITELLM_MASTER_KEY"  # Re-enable when adding auth
   health_check: true
   allow_routes_without_auth:
     - "/health"
