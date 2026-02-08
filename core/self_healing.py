@@ -69,9 +69,9 @@ class SelfHealingManager:
         self.recovery_attempts: Dict[str, int] = {}
         self.successful_recoveries: Dict[str, int] = {}
         self.model_fallback_chain: List[str] = [
-            "openai/gpt-5.1",
-            "anthropic/claude-sonnet-4.5",
             "google/gemini-2.5-flash",
+            "anthropic/claude-3-haiku",
+            "openai/gpt-4o-mini",
             "openrouter/auto",
         ]
         

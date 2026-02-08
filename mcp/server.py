@@ -909,11 +909,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         
         # AI (OpenRouter)
         elif name == "ai_chat":
+            if _truthy_env("LLM_DISABLED", "0") or _truthy_env("LLM_EMERGENCY_STOP", "0"):
+                return [TextContent(type="text", text=json.dumps({"error": "LLM disabled"}))]
             if not OPENROUTER_API_KEY:
                 return [TextContent(type="text", text=json.dumps({"error": "OpenRouter not configured"}))]
             async with aiohttp.ClientSession() as session:
+                default_model = (os.environ.get("LLM_MODEL") or os.environ.get("OPENROUTER_MODEL") or "openrouter/auto")
                 payload = {
-                    "model": arguments.get("model") or "openrouter/auto",
+                    "model": arguments.get("model") or default_model,
                     "messages": arguments.get("messages"),
                     "max_tokens": arguments.get("max_tokens", 4096),
                 }
@@ -926,11 +929,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
         elif name == "ai_complete":
+            if _truthy_env("LLM_DISABLED", "0") or _truthy_env("LLM_EMERGENCY_STOP", "0"):
+                return [TextContent(type="text", text=json.dumps({"error": "LLM disabled"}))]
             if not OPENROUTER_API_KEY:
                 return [TextContent(type="text", text=json.dumps({"error": "OpenRouter not configured"}))]
             async with aiohttp.ClientSession() as session:
+                default_model = (os.environ.get("LLM_MODEL") or os.environ.get("OPENROUTER_MODEL") or "openrouter/auto")
                 payload = {
-                    "model": arguments.get("model") or "openrouter/auto",
+                    "model": arguments.get("model") or default_model,
                     "messages": [{"role": "user", "content": arguments.get("prompt")}],
                     "max_tokens": arguments.get("max_tokens", 4096),
                 }

@@ -898,14 +898,6 @@ def log_action(
         The UUID of the created log entry, or None if logging failed
     """
     now = datetime.now(timezone.utc).isoformat()
-
-    def _coerce_jsonb(value: Any) -> Any:
-        if value is None:
-            return None
-        if isinstance(value, (dict, list)):
-            return value
-        # Scalar values must be wrapped so JSONB columns don't reject them
-        return {"value": str(value)}
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
     vals = [escape_value(WORKER_ID), escape_value(action), escape_value(message), 
@@ -916,13 +908,13 @@ def log_action(
         vals.append(escape_value(task_id))
     if input_data:
         cols.append("input_data")
-        vals.append(escape_value(sanitize_payload(_coerce_jsonb(input_data))))
+        vals.append(escape_value(sanitize_payload(input_data)))
     if output_data:
         cols.append("output_data")
-        vals.append(escape_value(sanitize_payload(_coerce_jsonb(output_data))))
+        vals.append(escape_value(sanitize_payload(output_data)))
     if error_data:
         cols.append("error_data")
-        vals.append(escape_value(sanitize_payload(_coerce_jsonb(error_data))))
+        vals.append(escape_value(sanitize_payload(error_data)))
     if duration_ms is not None:
         cols.append("duration_ms")
         vals.append(str(duration_ms))
@@ -6466,10 +6458,24 @@ if __name__ == "__main__":
         print("L5 Orchestrator: NOT AVAILABLE")
     
     # Run the autonomy loop (blocks forever)
-    try:
-        autonomy_loop()
-    except KeyboardInterrupt:
-        print("\nInterrupted. Shutting down...")
+    while True:
+        try:
+            autonomy_loop()
+            break
+        except KeyboardInterrupt:
+            print("\nInterrupted. Shutting down...")
+            break
+        except Exception as e:
+            try:
+                log_action(
+                    "engine.fatal",
+                    f"Autonomy loop crashed: {e}",
+                    level="error",
+                    error_data={"error": str(e), "traceback": traceback.format_exc()[:2000]},
+                )
+            except Exception:
+                pass
+            time.sleep(5)
     
     # Stop L5 orchestrator on shutdown
     if l5_orchestrator:

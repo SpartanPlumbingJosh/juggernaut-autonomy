@@ -1,8 +1,11 @@
 import json
 import logging
 import os
+import threading
+import time
 import urllib.error
 import urllib.request
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +22,42 @@ DEFAULT_TIMEOUT_SECONDS = int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
 DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
 DEFAULT_MAX_PRICE_COMPLETION = os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", "2")
 DEFAULT_MAX_TOOL_ITERATIONS = int(os.getenv("OPENROUTER_MAX_TOOL_ITERATIONS", "15"))
+
+
+_LLM_CALL_LOCK = threading.Lock()
+_LLM_CALL_TIMES = deque(maxlen=10000)
+
+
+def _truthy_env(name: str, default: str = "0") -> bool:
+    return (os.getenv(name, default) or "").strip().lower() in ("1", "true", "yes", "y", "on")
+
+
+def _using_openrouter_endpoint() -> bool:
+    return "openrouter.ai" in (OPENROUTER_ENDPOINT or "").lower()
+
+
+def _enforce_llm_limits() -> None:
+    if _truthy_env("LLM_DISABLED", "0") or _truthy_env("LLM_EMERGENCY_STOP", "0"):
+        raise RuntimeError("LLM execution disabled via LLM_DISABLED/LLM_EMERGENCY_STOP")
+
+    safe_mode = _truthy_env("LLM_SAFE_MODE", "0")
+    rpm_raw = os.getenv("LLM_MAX_REQUESTS_PER_MINUTE", "10" if safe_mode else "60")
+    try:
+        rpm = int(rpm_raw)
+    except (TypeError, ValueError):
+        rpm = 60
+
+    if rpm <= 0:
+        return
+
+    now = time.time()
+    cutoff = now - 60.0
+    with _LLM_CALL_LOCK:
+        while _LLM_CALL_TIMES and _LLM_CALL_TIMES[0] < cutoff:
+            _LLM_CALL_TIMES.popleft()
+        if len(_LLM_CALL_TIMES) >= rpm:
+            raise RuntimeError(f"LLM rate limit exceeded ({rpm}/min) — refusing to call provider")
+        _LLM_CALL_TIMES.append(now)
 
 
 @dataclass
@@ -73,6 +112,17 @@ class AIExecutor:
     def chat(self, messages: List[Dict[str, str]], max_tokens: Optional[int] = None) -> AIResponse:
         from core.tracing import start_generation
 
+        _enforce_llm_limits()
+
+        safe_mode = _truthy_env("LLM_SAFE_MODE", "0")
+        if safe_mode:
+            try:
+                token_cap = int(os.getenv("LLM_MAX_TOKENS_CAP", "800"))
+            except (TypeError, ValueError):
+                token_cap = 800
+        else:
+            token_cap = None
+
         input_preview = json.dumps(messages[-1:], ensure_ascii=False)[:2000] if messages else ""
         gen = start_generation(name="ai_executor.chat", input_text=input_preview, model=self.model)
 
@@ -82,10 +132,12 @@ class AIExecutor:
             "max_tokens": int(max_tokens) if max_tokens is not None else self.max_tokens,
         }
 
-        # Don't send provider field - causes "Extra inputs are not permitted" error with Anthropic
-        # provider = self._provider_routing()
-        # if provider is not None:
-        #     payload["provider"] = provider
+        if token_cap is not None:
+            payload["max_tokens"] = max(1, min(int(payload["max_tokens"]), int(token_cap)))
+
+        provider = self._provider_routing()
+        if provider is not None and _using_openrouter_endpoint():
+            payload["provider"] = provider
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -159,6 +211,22 @@ class AIExecutor:
             metadata={"max_iterations": max_iterations, "tool_count": len(tools)},
         )
 
+        _enforce_llm_limits()
+
+        safe_mode = _truthy_env("LLM_SAFE_MODE", "0")
+        if safe_mode:
+            try:
+                token_cap = int(os.getenv("LLM_MAX_TOKENS_CAP", "800"))
+            except (TypeError, ValueError):
+                token_cap = 800
+            try:
+                iter_cap = int(os.getenv("LLM_MAX_TOOL_ITERATIONS_CAP", "5"))
+            except (TypeError, ValueError):
+                iter_cap = 5
+            max_iterations = max(1, min(int(max_iterations), int(iter_cap)))
+        else:
+            token_cap = None
+
         all_tool_calls = []
         iteration = 0
         conversation = list(messages)  # mutable copy
@@ -175,10 +243,12 @@ class AIExecutor:
                 "tool_choice": "auto",
             }
 
-            # Don't send provider field - causes "Extra inputs are not permitted" error with Anthropic
-            # provider = self._provider_routing()
-            # if provider is not None:
-            #     payload["provider"] = provider
+            if token_cap is not None:
+                payload["max_tokens"] = max(1, min(int(payload["max_tokens"]), int(token_cap)))
+
+            provider = self._provider_routing()
+            if provider is not None and _using_openrouter_endpoint():
+                payload["provider"] = provider
 
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
@@ -189,6 +259,7 @@ class AIExecutor:
             )
 
             try:
+                _enforce_llm_limits()
                 with urllib.request.urlopen(req, timeout=self.timeout_seconds) as response:
                     raw = json.loads(response.read().decode("utf-8"))
             except urllib.error.HTTPError as e:
