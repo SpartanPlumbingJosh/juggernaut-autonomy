@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import payment_processor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/create
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount_cents = int(body_data.get("amount_cents", 0))
+            metadata = body_data.get("metadata", {})
+            return payment_processor.create_payment_intent(amount_cents, metadata)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        sig_header = query_params.get("stripe-signature", "")
+        return payment_processor.handle_webhook(body or "", sig_header)
+    
+    # GET /payment/receipt
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "receipt" and method == "GET":
+        payment_intent_id = query_params.get("payment_intent_id", "")
+        return payment_processor.generate_receipt(payment_intent_id)
     
     return _error_response(404, "Not found")
 
