@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_gateways import get_gateway
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments/webhook/{gateway}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "webhook" and method == "POST":
+        gateway_name = query_params.get("gateway", [""])[0]
+        gateway = get_gateway(gateway_name)
+        if not gateway:
+            return _error_response(400, "Invalid payment gateway")
+            
+        signature = headers.get("Stripe-Signature") or headers.get("Paypal-Signature")
+        return gateway.handle_webhook(json.loads(body), signature)
     
     return _error_response(404, "Not found")
 
