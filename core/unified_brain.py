@@ -3014,7 +3014,7 @@ class CodeTaskExecutor:
             and w not in ("create", "add", "implement", "build", "the", "for", "with")
         ]
         return meaningful[0] if meaningful else "generated_module"
-
+    
     def _infer_target_files(self, task_description: str, task_title: str) -> Optional[List[str]]:
         """Infer target files from task description when not explicitly specified.
         
@@ -3118,9 +3118,11 @@ class CodeTaskExecutor:
             )
 
             if not aider_result.success:
+                _out = (aider_result.aider_output or "").strip()
+                output_tail = _out[-500:] if _out else "(no output)"
                 self.log_action(
                     "code_task.aider_failed",
-                    f"Aider failed: {aider_result.error}",
+                    f"Aider failed: {aider_result.error} | Output: {output_tail}",
                     level="error",
                     task_id=task_id,
                 )

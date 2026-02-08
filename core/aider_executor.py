@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Aider CLI defaults
-AIDER_MODEL = os.getenv("AIDER_MODEL", "deepseek/deepseek-chat")
+AIDER_MODEL = os.getenv("AIDER_MODEL", "openrouter/deepseek/deepseek-chat")
 AIDER_EDIT_FORMAT = os.getenv("AIDER_EDIT_FORMAT", "diff")
 AIDER_TIMEOUT_SECONDS = int(os.getenv("AIDER_TIMEOUT_SECONDS", "300"))
 AIDER_MAX_RETRIES = int(os.getenv("AIDER_MAX_RETRIES", "2"))
@@ -192,26 +192,17 @@ class AiderExecutor:
         """Build environment variables for Aider subprocess."""
         env = os.environ.copy()
 
-        # Aider uses these env vars for LLM access
-        # If LiteLLM proxy is configured, point Aider at it
-        llm_base = (os.getenv("LLM_API_BASE") or "").strip()
-        llm_key = (os.getenv("LLM_API_KEY") or "").strip()
+        openrouter_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        if openrouter_key:
+            env["OPENROUTER_API_KEY"] = openrouter_key
 
-        if llm_base:
-            # LiteLLM proxy mode — set as OpenAI-compatible endpoint
-            env["OPENAI_API_BASE"] = llm_base
-            env["OPENAI_API_KEY"] = llm_key or "not-needed"
-        else:
-            # Direct provider keys
-            openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
-            openrouter_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
+        openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
+        if openai_key:
+            env["OPENAI_API_KEY"] = openai_key
 
-            if openai_key:
-                env["OPENAI_API_KEY"] = openai_key
-            if openrouter_key and not openai_key:
-                # Fall back to OpenRouter via OpenAI-compatible endpoint
-                env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
-                env["OPENAI_API_KEY"] = openrouter_key
+        env.pop("LLM_API_BASE", None)
+        env.pop("LLM_API_KEY", None)
+        env.pop("OPENAI_API_BASE", None)
 
         return env
 
@@ -306,9 +297,11 @@ class AiderExecutor:
 
             if not files_changed and not commit_hashes:
                 # Aider ran but made no changes
+                _out = aider_output.strip()
+                output_preview = _out[-1000:] if _out else "(no output)"
                 self.log(
                     "aider.no_changes",
-                    f"Aider completed but made no changes. Exit code: {result.returncode}",
+                    f"Aider completed but made no changes. Exit code: {result.returncode}. Output: {output_preview}",
                     level="warning",
                     task_id=task_id,
                 )
