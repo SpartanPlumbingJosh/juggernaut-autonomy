@@ -27,9 +27,9 @@ DEFAULT_MAX_TOOL_ITERATIONS = int(os.getenv("OPENROUTER_MAX_TOOL_ITERATIONS", "1
 MODEL_FREE_PRIMARY = os.getenv("LLM_MODEL_FREE_PRIMARY", "google/gemini-2.0-flash-exp:free")
 MODEL_FREE_SECONDARY = os.getenv("LLM_MODEL_FREE_SECONDARY", "meta-llama/llama-3.3-70b-instruct:free")
 MODEL_WORKHORSE = os.getenv("LLM_MODEL_WORKHORSE", "deepseek/deepseek-v3.2")
-MODEL_STRATEGY = os.getenv("LLM_MODEL_STRATEGY", "moonshotai/kimi-k2.5-instruct")
+MODEL_STRATEGY = os.getenv("LLM_MODEL_STRATEGY", "moonshotai/kimi-k2.5")
 MODEL_CODE = os.getenv("LLM_MODEL_CODE", "deepseek/deepseek-v3.2")
-MODEL_FALLBACK = os.getenv("LLM_MODEL_FALLBACK", "deepseek/deepseek-v3.1")
+MODEL_FALLBACK = os.getenv("LLM_MODEL_FALLBACK", "deepseek/deepseek-v3.1-terminus")
 
 
 def select_model_for_task(task_type: str) -> str:
