@@ -116,6 +116,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
+    """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -231,6 +232,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            from core.onboarding import OnboardingManager
+            body_data = json.loads(body or "{}")
+            manager = OnboardingManager()
+            result = await manager.onboard_user(
+                email=body_data.get("email"),
+                plan=body_data.get("plan", "basic")
+            )
+            return _make_response(200 if result.get("success") else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Onboarding failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
