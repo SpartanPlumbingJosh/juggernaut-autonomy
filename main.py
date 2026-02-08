@@ -903,6 +903,11 @@ def log_action(
     Returns:
         The UUID of the created log entry, or None if logging failed
     """
+    level = (level or "info").strip().lower()
+    if level == "warning":
+        level = "warn"
+    if level not in ("info", "warn", "error"):
+        level = "info"
     now = datetime.now(timezone.utc).isoformat()
     
     cols = ["worker_id", "action", "message", "level", "source", "created_at"]
@@ -4263,7 +4268,7 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                             fail_sql = f"""
                                 UPDATE tool_executions
                                 SET status = 'failed',
-                                    error = {escape_value(str(code_err))},
+                                    error_message = {escape_value(str(code_err))},
                                     completed_at = NOW()
                                 WHERE id = {escape_value(tool_exec_id)}
                             """
