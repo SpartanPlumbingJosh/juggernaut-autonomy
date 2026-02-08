@@ -34,9 +34,20 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals and acquisition metrics."""
     try:
         now = datetime.now(timezone.utc)
+        
+        # Get acquisition metrics
+        acquisition_sql = """
+        SELECT 
+            COUNT(*) FILTER (WHERE event_type = 'visit') as visits,
+            COUNT(*) FILTER (WHERE event_type = 'conversion') as conversions
+        FROM funnel_events
+        WHERE created_at >= NOW() - INTERVAL '30 days'
+        """
+        acquisition_result = await query_db(acquisition_sql)
+        acquisition = acquisition_result.get("rows", [{}])[0]
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -107,6 +118,13 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
+            },
+            "acquisition": {
+                "visits": acquisition.get("visits") or 0,
+                "conversions": acquisition.get("conversions") or 0,
+                "conversion_rate": (
+                    (float(acquisition.get("conversions") or 0) / float(acquisition.get("visits") or 1)) * 100
+                ) if acquisition.get("visits") else 0
             }
         })
         
