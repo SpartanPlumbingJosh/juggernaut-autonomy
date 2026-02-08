@@ -524,18 +524,93 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "http_get",
-            "description": "Fetch content from a URL via HTTP GET.",
+            "name": "web_search",
+            "description": "Search the web using AI-powered search. Returns search results with citations. Use this for research tasks, finding current information, or gathering data about businesses, markets, or technologies.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "url": {"type": "string", "description": "URL to fetch"},
+                    "query": {"type": "string", "description": "The search query to execute"},
+                    "detailed": {"type": "boolean", "description": "If true, returns more detailed results (uses more tokens)", "default": False},
                 },
-                "required": ["url"],
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_email",
+            "description": "Send an email to a recipient. Use this for outreach, notifications, or communication tasks. The email will be sent from the system's configured email address.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient email address"},
+                    "subject": {"type": "string", "description": "Email subject line"},
+                    "body": {"type": "string", "description": "Email body content (can be plain text or HTML)"},
+                    "from_address": {"type": "string", "description": "Optional: override the from address (must be configured in system)"},
+                },
+                "required": ["to", "subject", "body"],
             },
         },
     },
 ]
+
+
+def tool_web_search(query: str, detailed: bool = False) -> Dict[str, Any]:
+    """Execute web search via MCP server's Perplexity integration."""
+    import json
+    import urllib.request
+    import urllib.error
+    
+    # Get MCP server URL from environment
+    mcp_url = os.getenv("MCP_SERVER_URL", "")
+    if not mcp_url:
+        # Fallback: construct from Railway internal URL pattern
+        mcp_url = "http://juggernaut-mcp.railway.internal:8080"
+    
+    try:
+        req = urllib.request.Request(
+            f"{mcp_url.rstrip('/')}/tools/web_search",
+            data=json.dumps({"query": query, "detailed": detailed}).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode())
+            return {"success": True, "result": result}
+    except urllib.error.HTTPError as e:
+        return {"success": False, "error": f"MCP server error: {e.code}"}
+    except Exception as e:
+        return {"success": False, "error": f"Search failed: {e}"}
+
+
+def tool_send_email(to: str, subject: str, body: str, from_address: str = None) -> Dict[str, Any]:
+    """Send email via MCP server's email integration."""
+    import json
+    import urllib.request
+    
+    mcp_url = os.getenv("MCP_SERVER_URL", "http://juggernaut-mcp.railway.internal:8080")
+    
+    payload = {
+        "to": to,
+        "subject": subject,
+        "body": body
+    }
+    if from_address:
+        payload["from"] = from_address
+    
+    try:
+        req = urllib.request.Request(
+            f"{mcp_url.rstrip('/')}/tools/send_email",
+            data=json.dumps(payload).encode(),
+            headers={"Content-Type": "application/json"},
+            method="POST"
+        )
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read().decode())
+            return {"success": True, "result": result}
+    except Exception as e:
+        return {"success": False, "error": f"Email send failed: {e}"}
 
 
 # Map tool names to their implementation functions
@@ -548,6 +623,8 @@ _TOOL_FUNCTIONS: Dict[str, Callable[..., Dict[str, Any]]] = {
     "run_command": tool_run_command,
     "execute_sql_readonly": tool_execute_sql_readonly,
     "http_get": tool_http_get,
+    "web_search": tool_web_search,
+    "send_email": tool_send_email,
 }
 
 

@@ -296,6 +296,25 @@ class AIHandler(BaseHandler):
         if plan_only:
             success = False
 
+        # 1D FIX: Reject tool-enabled tasks that ran in chat-only mode
+        # These should have used tools, not just returned JSON
+        if task_type in _TOOL_ENABLED_TYPES and not plan_only:
+            logger.warning(
+                "Tool-enabled task '%s' ran in chat-only mode without real tool execution. "
+                "This is likely a fake completion. Marking as failed.",
+                task_type
+            )
+            success = False
+            summary = f"Task type '{task_type}' requires tool execution but ran in chat-only mode. "
+            summary += "This task must use real tools (file operations, commands, etc.) to complete. "
+            summary += "Re-run with AIHANDLER_TOOLS_DISABLED=0 or investigate why tools weren't used."
+            result_obj = {
+                "error": "chat_only_for_tool_task",
+                "required_mode": "tool_assisted",
+                "actual_mode": "chat_only",
+                "hint": "Set AIHANDLER_TOOLS_DISABLED=0 to enable tool execution"
+            }
+
         data = {
             "executed": True,
             "summary": summary,
