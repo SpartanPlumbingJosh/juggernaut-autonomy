@@ -1972,7 +1972,6 @@ def orchestrator_assign_task(
                 updated_at = row.get("updated_at")
                 if updated_at:
                     try:
-                        from datetime import datetime
                         last_update = datetime.fromisoformat(updated_at.replace("Z", "+00:00"))
                         minutes_since = (datetime.now(timezone.utc) - last_update).total_seconds() / 60
                         if minutes_since < 30:
