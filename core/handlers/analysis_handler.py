@@ -33,8 +33,45 @@ class AnalysisHandler(BaseHandler):
         title = task.get("title") or ""
         description = task.get("description") or ""
 
-        days_back = _to_int(payload.get("days_back"), 30)
-        max_workers = _to_int(payload.get("max_workers"), 20)
+        # Extract parameters
+        payload = task.get("payload", {})
+        days_back = payload.get("days_back", 7)
+        max_workers = payload.get("max_workers", 10)
+
+        # Determine what to analyze based on task title/description
+        title = (task.get("title") or "").lower()
+        description = (task.get("description") or "").lower()
+        combined_text = f"{title}\n{description}".lower()
+        category = (payload.get("category") or payload.get("dedupe_key") or "").lower()
+
+        # Enhanced pattern matching for more specific analysis
+        wants_worker_perf = any(k in combined_text or k in category for k in
+            ["worker", "performance", "success rate", "comparison", "compare", "throughput", "efficiency"])
+        wants_error_analysis = any(k in combined_text or k in category for k in
+            ["error", "failure", "spike", "incident", "alert", "bug", "crash", "exception"])
+        wants_task_analysis = any(k in combined_text or k in category for k in
+            ["task", "pipeline", "queue", "backlog", "completion", "pending"])
+        wants_cost_analysis = any(k in combined_text or k in category for k in
+            ["cost", "budget", "spend", "expense", "revenue", "roi"])
+        wants_experiment_analysis = any(k in combined_text or k in category for k in
+            ["experiment", "iteration", "hypothesis", "test"])
+        wants_learning_analysis = any(k in combined_text or k in category for k in
+            ["learning", "pattern", "insight", "discovery"])
+
+        # Extract specific timeframe if mentioned
+        if "last hour" in combined_text or "1 hour" in combined_text:
+            days_back = 0.042  # ~1 hour in days
+        elif "last day" in combined_text or "24 hour" in combined_text or "1 day" in combined_text:
+            days_back = 1
+        elif "last week" in combined_text or "7 day" in combined_text:
+            days_back = 7
+        elif "last month" in combined_text or "30 day" in combined_text:
+            days_back = 30
+
+        # If nothing matched, default to worker perf + error rate
+        if not any([wants_worker_perf, wants_error_analysis, wants_task_analysis, wants_cost_analysis, wants_experiment_analysis, wants_learning_analysis]):
+            wants_worker_perf = True
+            wants_error_analysis = True
 
         self._log(
             "handler.analysis.starting",
@@ -45,23 +82,6 @@ class AnalysisHandler(BaseHandler):
         try:
             insights: Dict[str, Any] = {}
             sql_used: Dict[str, str] = {}
-
-            # M-04: Dispatch analysis type based on task content
-            combined_text = f"{title}\n{description}".lower()
-            category = (payload.get("category") or payload.get("dedupe_key") or "").lower()
-
-            wants_worker_perf = any(k in combined_text or k in category for k in
-                ["worker", "performance", "success rate", "comparison", "compare"])
-            wants_error_analysis = any(k in combined_text or k in category for k in
-                ["error", "failure", "spike", "incident", "alert"])
-            wants_task_analysis = any(k in combined_text or k in category for k in
-                ["task", "pipeline", "queue", "backlog", "throughput"])
-            wants_cost_analysis = any(k in combined_text or k in category for k in
-                ["cost", "budget", "spend", "expense"])
-
-            # If nothing matched, default to worker perf + error rate
-            if not any([wants_worker_perf, wants_error_analysis, wants_task_analysis, wants_cost_analysis]):
-                wants_worker_perf = True
 
             if wants_error_analysis:
                 sql = f"""

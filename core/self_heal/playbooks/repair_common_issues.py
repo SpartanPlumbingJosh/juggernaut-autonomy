@@ -557,64 +557,6 @@ class RepairCommonIssuesPlaybook(RepairPlaybook):
         except Exception as e:
             logger.exception(f"Error verifying repairs: {e}")
             return {"error": str(e)}
-                        'pending',
-                        'high',
-                        %s
-                    )
-                    RETURNING id
-                """
-                
-                description = f"Investigate repeated error: {pattern.get('message', 'Unknown')[:100]}"
-                metadata = {
-                    "error_message": pattern.get('message'),
-                    "occurrence_count": pattern.get('occurrence_count'),
-                    "last_seen": str(pattern.get('last_seen')),
-                    "created_by": "self_heal_system"
-                }
-                
-                result = fetch_all(insert_query, (description, str(metadata)))
-                if result:
-                    created_tasks.append(result[0])
-            
-            self.record_action("create_fix_tasks", {
-                "count": len(created_tasks),
-                "task_ids": [t.get('id') for t in created_tasks]
-            })
-            
-            self.repairs_attempted.append({
-                "repair_type": "create_fix_tasks",
-                "count": len(created_tasks)
-            })
-            
-            return {
-                "created_count": len(created_tasks),
-                "tasks": created_tasks
-            }
-        except Exception as e:
-            logger.exception(f"Error creating fix tasks: {e}")
-            return {"error": str(e)}
-    
-    def _verify_repairs(self) -> dict:
-        """Verify that repairs were successful."""
-        try:
-            verification = {
-                "repairs_attempted": len(self.repairs_attempted),
-                "repairs": self.repairs_attempted,
-                "success": True
-            }
-            
-            # Check if blocked tasks were reduced
-            blocked_query = """
-                SELECT COUNT(*) as count
-                FROM governance_tasks
-                WHERE status = 'blocked'
-                AND created_at < NOW() - INTERVAL '1 hour'
-            """
-            blocked_result = fetch_all(blocked_query)
-            current_blocked = blocked_result[0].get('count', 0) if blocked_result else 0
-            
-            verification["current_blocked_tasks"] = current_blocked
-            
             # Check if stuck tasks were reduced
             stuck_query = """
                 SELECT COUNT(*) as count
