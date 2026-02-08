@@ -854,7 +854,7 @@ def escape_value(value: Any) -> str:
         return str(value)
     elif isinstance(value, (dict, list)):
         # JSON serialization - json.dumps() handles escaping properly
-        json_str = json.dumps(value, ensure_ascii=False)
+        json_str = json.dumps(value, ensure_ascii=False, default=str)
         # Only escape single quotes for SQL and remove null bytes
         # Do NOT double-escape backslashes - json.dumps() already escapes correctly
         escaped = json_str.replace("'", "''").replace("\x00", "")
