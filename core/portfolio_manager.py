@@ -15,6 +15,7 @@ def generate_revenue_ideas(
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with automated onboarding"""
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
@@ -62,6 +63,7 @@ def generate_revenue_ideas(
             pass
 
         try:
+            # Insert the idea
             execute_sql(
                 f"""
                 INSERT INTO revenue_ideas (
@@ -74,7 +76,8 @@ def generate_revenue_ideas(
                     reported_revenue, reported_timeline,
                     capabilities_required,
                     tags,
-                    constraints
+                    constraints,
+                    onboarding_status
                 ) VALUES (
                     gen_random_uuid(),
                     '{title_esc}',
@@ -94,12 +97,34 @@ def generate_revenue_ideas(
                     {f"'{reported_timeline_esc}'" if reported_timeline_esc else "NULL"},
                     '{capabilities_required_json}'::jsonb,
                     '{tags_json}'::jsonb,
-                    '{constraints_json}'::jsonb
+                    '{constraints_json}'::jsonb,
+                    'pending'
                 )
                 """
             )
+            
+            # Start automated onboarding
+            execute_sql(
+                f"""
+                INSERT INTO onboarding_tasks (
+                    id, idea_id, status, created_at, updated_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    (SELECT id FROM revenue_ideas WHERE title = '{title_esc}' LIMIT 1),
+                    'pending',
+                    NOW(),
+                    NOW()
+                )
+                """
+            )
+            
             created += 1
-        except Exception:
+        except Exception as e:
+            log_action(
+                "idea.creation_failed",
+                f"Failed to create idea: {str(e)}",
+                level="error"
+            )
             continue
 
     try:
