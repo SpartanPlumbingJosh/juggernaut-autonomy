@@ -3881,11 +3881,10 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
             assertions = task.payload.get("assertions", [])
             
             # TYPE SAFETY: Handle string input by wrapping in list
-            if isinstance(verification_queries, str):
-                verification_queries = [verification_queries]
-            
-            if verification_sql:
-                verification_queries = [verification_sql]
+            if isinstance(verification_sql, str) and verification_sql.strip():
+                # If sql is a string, wrap it in a list for uniform processing
+                if not verification_queries:
+                    verification_queries = [verification_sql]
             
             if not verification_queries:
                 result = {"error": "Verification task missing 'queries' or 'sql' in payload"}

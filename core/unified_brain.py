@@ -1944,9 +1944,11 @@ class BrainService:
             "max_tokens": self.max_tokens,
         }
 
-        provider = _provider_routing()
-        if provider is not None:
-            payload["provider"] = provider
+        # Don't send provider field when using Anthropic models - causes "Extra inputs not permitted" error
+        # OpenRouter handles routing automatically based on model name
+        # provider = _provider_routing()
+        # if provider is not None:
+        #     payload["provider"] = provider
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -2015,9 +2017,11 @@ class BrainService:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        provider = _provider_routing()
-        if provider is not None:
-            payload["provider"] = provider
+        # Don't send provider field when using Anthropic models - causes "Extra inputs not permitted" error
+        # OpenRouter handles routing automatically based on model name
+        # provider = _provider_routing()
+        # if provider is not None:
+        #     payload["provider"] = provider
 
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -2091,9 +2095,11 @@ class BrainService:
             "stream": True,  # Enable streaming
         }
 
-        provider = _provider_routing()
-        if provider is not None:
-            payload["provider"] = provider
+        # Don't send provider field when using Anthropic models - causes "Extra inputs not permitted" error
+        # OpenRouter handles routing automatically based on model name
+        # provider = _provider_routing()
+        # if provider is not None:
+        #     payload["provider"] = provider
 
         if tools:
             payload["tools"] = tools
