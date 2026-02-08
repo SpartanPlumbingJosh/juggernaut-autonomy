@@ -1,31 +1,13 @@
 # ==============================================================================
 # JUGGERNAUT LiteLLM Proxy Configuration
 # ==============================================================================
-# Unified LLM routing with automatic fallbacks.
-# Direct API keys eliminate OpenRouter's 5.5% markup.
-# Set env vars: ANTHROPIC_API_KEY, OPENAI_API_KEY, OPENROUTER_API_KEY
+# Currently: OpenRouter only (no extra API keys needed).
+# Later: Uncomment Anthropic/OpenAI sections + add their API keys to
+#         eliminate the 5.5% OpenRouter markup and get direct fallbacks.
 # ==============================================================================
 
 model_list:
-  # ── Primary: Claude 3.5 Sonnet via Anthropic direct ──
-  - model_name: "openrouter/auto"
-    litellm_params:
-      model: "anthropic/claude-sonnet-4-20250514"
-      api_key: "os.environ/ANTHROPIC_API_KEY"
-      max_tokens: 8192
-    model_info:
-      description: "Primary model — Anthropic direct (no markup)"
-
-  # ── Fallback 1: GPT-4o via OpenAI direct ──
-  - model_name: "openrouter/auto"
-    litellm_params:
-      model: "openai/gpt-4o"
-      api_key: "os.environ/OPENAI_API_KEY"
-      max_tokens: 8192
-    model_info:
-      description: "Fallback 1 — OpenAI direct (no markup)"
-
-  # ── Fallback 2: OpenRouter as last resort ──
+  # ── ACTIVE: OpenRouter (uses your existing OPENROUTER_API_KEY) ──
   - model_name: "openrouter/auto"
     litellm_params:
       model: "openrouter/auto"
@@ -33,61 +15,59 @@ model_list:
       api_base: "https://openrouter.ai/api/v1"
       max_tokens: 8192
     model_info:
-      description: "Fallback 2 — OpenRouter (5.5% markup, use as last resort)"
+      description: "Primary — OpenRouter smart routing (current provider)"
 
-  # ── Explicit Claude models ──
-  - model_name: "anthropic/claude-sonnet-4-20250514"
-    litellm_params:
-      model: "anthropic/claude-sonnet-4-20250514"
-      api_key: "os.environ/ANTHROPIC_API_KEY"
-      max_tokens: 8192
+  # ── DORMANT: Uncomment these + set ANTHROPIC_API_KEY to activate ──
+  # - model_name: "openrouter/auto"
+  #   litellm_params:
+  #     model: "anthropic/claude-sonnet-4-20250514"
+  #     api_key: "os.environ/ANTHROPIC_API_KEY"
+  #     max_tokens: 8192
+  #   model_info:
+  #     description: "Anthropic direct (no markup) — add ANTHROPIC_API_KEY to enable"
+  #
+  # - model_name: "anthropic/claude-sonnet-4-20250514"
+  #   litellm_params:
+  #     model: "anthropic/claude-sonnet-4-20250514"
+  #     api_key: "os.environ/ANTHROPIC_API_KEY"
+  #     max_tokens: 8192
+  #
+  # - model_name: "anthropic/claude-3-haiku-20240307"
+  #   litellm_params:
+  #     model: "anthropic/claude-3-haiku-20240307"
+  #     api_key: "os.environ/ANTHROPIC_API_KEY"
+  #     max_tokens: 4096
 
-  - model_name: "anthropic/claude-3-haiku-20240307"
-    litellm_params:
-      model: "anthropic/claude-3-haiku-20240307"
-      api_key: "os.environ/ANTHROPIC_API_KEY"
-      max_tokens: 4096
-
-  # ── Explicit OpenAI models ──
-  - model_name: "openai/gpt-4o"
-    litellm_params:
-      model: "openai/gpt-4o"
-      api_key: "os.environ/OPENAI_API_KEY"
-      max_tokens: 8192
-
-  - model_name: "openai/gpt-4o-mini"
-    litellm_params:
-      model: "openai/gpt-4o-mini"
-      api_key: "os.environ/OPENAI_API_KEY"
-      max_tokens: 4096
+  # ── DORMANT: Uncomment these + set OPENAI_API_KEY to activate ──
+  # - model_name: "openrouter/auto"
+  #   litellm_params:
+  #     model: "openai/gpt-4o"
+  #     api_key: "os.environ/OPENAI_API_KEY"
+  #     max_tokens: 8192
+  #   model_info:
+  #     description: "OpenAI direct (no markup) — add OPENAI_API_KEY to enable"
+  #
+  # - model_name: "openai/gpt-4o"
+  #   litellm_params:
+  #     model: "openai/gpt-4o"
+  #     api_key: "os.environ/OPENAI_API_KEY"
+  #     max_tokens: 8192
+  #
+  # - model_name: "openai/gpt-4o-mini"
+  #   litellm_params:
+  #     model: "openai/gpt-4o-mini"
+  #     api_key: "os.environ/OPENAI_API_KEY"
+  #     max_tokens: 4096
 
 litellm_settings:
-  # Retry failed requests on next model in the list
   num_retries: 2
   retry_after: 5
-  # Timeout per request
   request_timeout: 120
-  # Enable fallbacks — if primary fails, try next model with same name
-  fallbacks:
-    - openrouter/auto:
-        - openrouter/auto
   # Budget controls
   max_budget: 50.0
   budget_duration: "1d"
-  # Logging
   set_verbose: false
 
-router_settings:
-  # Route to the fastest healthy model
-  routing_strategy: "latency-based-routing"
-  # Number of seconds to cache model health
-  model_group_retry_policy:
-    openrouter/auto:
-      timeout_retries: 2
-      num_retries: 2
-
 general_settings:
-  # Master key for proxy auth
   master_key: "os.environ/LITELLM_MASTER_KEY"
-  # Health check
   health_check: true
