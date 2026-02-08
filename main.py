@@ -5306,17 +5306,32 @@ def autonomy_loop():
                             sched_result = {"error": "revenue discovery modules not available"}
                             sched_success = False
                     elif sched_task_type == "critical_monitoring":
-                        from core.critical_monitoring import check_critical_issues
-                        sched_result = check_critical_issues(execute_sql, log_action)
-                        sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        try:
+                            from core.critical_monitoring import check_critical_issues
+                            sched_result = check_critical_issues(execute_sql, log_action)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        except Exception as e:
+                            sched_result = {"error": str(e), "traceback": traceback.format_exc()[:500]}
+                            sched_success = False
+                            log_action("scheduled.critical_monitoring.error", f"Critical monitoring failed: {e}", level="error", error_data=sched_result)
                     elif sched_task_type == "error_scanning":
-                        from core.error_to_task import scan_errors_and_create_tasks
-                        sched_result = scan_errors_and_create_tasks(execute_sql, log_action)
-                        sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        try:
+                            from core.error_to_task import scan_errors_and_create_tasks
+                            sched_result = scan_errors_and_create_tasks(execute_sql, log_action)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        except Exception as e:
+                            sched_result = {"error": str(e), "traceback": traceback.format_exc()[:500]}
+                            sched_success = False
+                            log_action("scheduled.error_scanning.error", f"Error scanning failed: {e}", level="error", error_data=sched_result)
                     elif sched_task_type == "stale_task_reset":
-                        from core.stale_task_reset import reset_stale_tasks
-                        sched_result = reset_stale_tasks(execute_sql, log_action, stale_threshold_minutes=30)
-                        sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        try:
+                            from core.stale_task_reset import reset_stale_tasks
+                            sched_result = reset_stale_tasks(execute_sql, log_action, stale_threshold_minutes=30)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        except Exception as e:
+                            sched_result = {"error": str(e), "traceback": traceback.format_exc()[:500]}
+                            sched_success = False
+                            log_action("scheduled.stale_task_reset.error", f"Stale task reset failed: {e}", level="error", error_data=sched_result)
                     else:
                         sched_result = {"skipped": True, "reason": f"No handler for task_type: {sched_task_type}"}
                         sched_success = True
