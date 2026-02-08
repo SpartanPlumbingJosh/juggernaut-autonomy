@@ -1,7 +1,10 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core business operations including payments and subscriptions.
 
 Endpoints:
+- POST /revenue/checkout - Create payment intent
+- POST /revenue/webhook - Handle payment webhooks
+- GET /revenue/subscriptions - Get user subscriptions
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
@@ -12,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from auth.auth_service import auth_service
+from payment.payment_service import payment_service
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,6 +225,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_checkout(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(body or "", query_params.get("stripe-signature", ""))
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
@@ -233,6 +246,48 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
         return handle_revenue_charts(query_params)
     
     return _error_response(404, "Not found")
+
+def handle_checkout(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment intent for checkout."""
+    try:
+        amount = int(data.get("amount", 0))
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        metadata = data.get("metadata", {})
+        payment_intent = payment_service.create_payment_intent(
+            amount=amount,
+            metadata=metadata
+        )
+        return _make_response(200, payment_intent)
+    except Exception as e:
+        return _error_response(500, str(e))
+
+def handle_webhook(payload: str, sig_header: str) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        result = payment_service.handle_webhook(payload, sig_header)
+        
+        if result["status"] == "success":
+            # Record successful payment in revenue_events
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, 
+                    source, metadata, recorded_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {result['amount']},
+                    'usd',
+                    'stripe',
+                    '{json.dumps(result['metadata'])}'::jsonb,
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(400, str(e))
 
 
 __all__ = ["route_request"]
