@@ -276,6 +276,61 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_revenue_events(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Automatically track revenue events from subscriptions."""
+    try:
+        # Get active subscriptions
+        res = execute_sql("""
+            SELECT id, customer_id, plan_id, payment_method
+            FROM subscriptions
+            WHERE status = 'active'
+            AND end_date > NOW()
+        """)
+        subscriptions = res.get("rows", []) or []
+        
+        tracked = 0
+        for sub in subscriptions:
+            try:
+                # Record monthly recurring revenue
+                execute_sql(f"""
+                    INSERT INTO revenue_events (
+                        id, event_type, amount_cents, currency,
+                        source, metadata, recorded_at, created_at
+                    ) VALUES (
+                        gen_random_uuid(),
+                        'revenue',
+                        9900,  -- $99/month
+                        'USD',
+                        'subscription',
+                        '{json.dumps({
+                            "subscription_id": sub["id"],
+                            "customer_id": sub["customer_id"],
+                            "plan_id": sub["plan_id"]
+                        })}'::jsonb,
+                        NOW(),
+                        NOW()
+                    )
+                """)
+                tracked += 1
+            except Exception:
+                continue
+        
+        log_action(
+            "revenue.tracked",
+            f"Tracked {tracked} subscription revenue events",
+            level="info",
+            output_data={"tracked": tracked}
+        )
+        
+        return {"success": True, "tracked": tracked}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
