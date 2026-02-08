@@ -28,15 +28,9 @@ FAILURE_THRESHOLD_MINUTES = int(
 )
 MAX_CONSECUTIVE_FAILURES = 3
 
-# Database configuration
-NEON_HTTP_ENDPOINT = os.environ.get(
-    "NEON_HTTP_ENDPOINT",
-    "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-)
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# Database configuration — from environment only (no hardcoded credentials)
+NEON_HTTP_ENDPOINT = os.environ.get("NEON_HTTP_ENDPOINT", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 logger = logging.getLogger(__name__)
 

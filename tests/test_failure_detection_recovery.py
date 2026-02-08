@@ -50,12 +50,7 @@ class DatabaseHelper:
     
     def __init__(self):
         """Initialize database helper."""
-        self.connection_string = os.environ.get(
-            'DATABASE_URL',
-            'postgresql://neondb_owner:npg_OYkCRU4aze2l@'
-            'ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/'
-            'neondb?sslmode=require'
-        )
+        self.connection_string = os.environ.get('DATABASE_URL', '')
     
     def execute_query(self, query: str, params: Optional[List[Any]] = None) -> Dict[str, Any]:
         """Execute SQL query via HTTP API.

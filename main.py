@@ -2134,8 +2134,29 @@ def update_task_status(task_id: str, status: str, result_data: Dict = None):
                 else:
                     evidence_text = f"Task executed: {json.dumps(result_data, default=str)[:600]}"
 
+    # H-01 follow-up: AIHandler tool-assisted tasks that do analysis/queries (not code
+    # generation) should complete without a merged PR.  The handler sets
+    # execution_mode="tool_assisted" and pr_required=False in result_data.
+    _aihandler_no_pr = False
+    if isinstance(result_data, dict):
+        _exec_mode = result_data.get("execution_mode") or (
+            result_data.get("data", {}).get("execution_mode") if isinstance(result_data.get("data"), dict) else None
+        )
+        _pr_req = result_data.get("pr_required") if result_data.get("pr_required") is not None else (
+            result_data.get("data", {}).get("pr_required") if isinstance(result_data.get("data"), dict) else None
+        )
+        if _exec_mode == "tool_assisted" and _pr_req is False:
+            _aihandler_no_pr = True
+            log_action(
+                "task.pr_gate_bypass",
+                f"AIHandler tool-assisted task {task_id} bypassing PR gate (analysis/query, no files changed)",
+                level="info",
+                task_id=task_id,
+                output_data={"execution_mode": _exec_mode, "pr_required": _pr_req},
+            )
+
     # STRICT COMPLETION: code/github tasks can only be marked completed when PR is merged.
-    if status == "completed" and is_code_task:
+    if status == "completed" and is_code_task and not _aihandler_no_pr:
         evidence_json_type = None
         if isinstance(evidence_json, dict):
             evidence_json_type = evidence_json.get("type") or evidence_json.get("verification_type")

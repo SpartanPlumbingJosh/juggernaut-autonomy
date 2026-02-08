@@ -5,9 +5,10 @@ import os
 import sys
 import uvicorn
 
-# Set required environment variable if not provided
+# Require DASHBOARD_API_SECRET from environment (no hardcoded fallback)
 if not os.getenv("DASHBOARD_API_SECRET"):
-    os.environ["DASHBOARD_API_SECRET"] = "spartan-dashboard-secret-2025"
+    print("ERROR: DASHBOARD_API_SECRET environment variable is not set.")
+    sys.exit(1)
 
 print("=== Starting Spartan HQ Dashboard API ===")
 print("Database: Neon PostgreSQL")

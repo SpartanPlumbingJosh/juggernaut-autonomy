@@ -197,6 +197,10 @@ class AIHandler(BaseHandler):
         if not isinstance(result_obj, dict):
             result_obj = {"value": result_obj}
 
+        # Determine if this was a code-generation task (files changed) vs analysis/query
+        files_changed = result_obj.get("files_changed") if isinstance(result_obj, dict) else None
+        has_file_changes = bool(files_changed and len(files_changed) > 0)
+
         data = {
             "executed": True,
             "summary": summary,
@@ -204,6 +208,8 @@ class AIHandler(BaseHandler):
             "model": self.executor.model,
             "tool_calls": resp.tool_calls_made,
             "tool_iterations": resp.iterations,
+            "execution_mode": "tool_assisted",
+            "pr_required": has_file_changes,
         }
 
         self._log(

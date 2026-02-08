@@ -29,12 +29,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Database configuration
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-NEON_CONNECTION_STRING = (
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@"
-    "ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
+# Database configuration — from environment only (no hardcoded credentials)
+NEON_ENDPOINT = os.environ.get("NEON_HTTP_ENDPOINT", "")
+NEON_CONNECTION_STRING = os.environ.get("DATABASE_URL", "")
 
 
 def execute_sql(query: str) -> Dict[str, Any]:

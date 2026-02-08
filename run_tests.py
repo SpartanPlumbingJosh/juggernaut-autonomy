@@ -33,11 +33,8 @@ logger = logging.getLogger(__name__)
 # CONSTANTS
 # =============================================================================
 
-DATABASE_URL = os.environ.get(
-    "DATABASE_URL",
-    "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
-)
-NEON_HTTP_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+NEON_HTTP_ENDPOINT = os.environ.get("NEON_HTTP_ENDPOINT", "")
 
 LEVEL_MARKERS = {
     "L1": "l1",

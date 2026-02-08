@@ -8,9 +8,9 @@ import time
 import hmac
 import hashlib
 
-# Configuration
-API_BASE = "http://localhost:8000"
-API_SECRET = "spartan-dashboard-secret-2025"
+# Configuration — from environment only (no hardcoded secrets)
+API_BASE = os.environ.get("API_BASE", "http://localhost:8000")
+API_SECRET = os.environ.get("DASHBOARD_API_SECRET", "")
 USER_ID = "test_user"
 
 def generate_api_key():

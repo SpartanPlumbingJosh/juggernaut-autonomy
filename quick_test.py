@@ -1,9 +1,10 @@
+import os
 import urllib.request
 import json
 import sys
 
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
-DATABASE_URL = "postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/neondb?sslmode=require"
+NEON_ENDPOINT = os.environ.get("NEON_HTTP_ENDPOINT", "")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
 
 def test():
     try:
