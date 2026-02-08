@@ -162,6 +162,20 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_trading_monitor() -> Dict[str, Any]:
+    """Get trading engine monitoring data."""
+    try:
+        from core.trading_engine import TradingEngine
+        engine = TradingEngine(query_db, lambda *args, **kwargs: None)
+        monitor_data = engine.monitor_engine()
+        
+        if not monitor_data.get("success"):
+            return _error_response(500, "Failed to get monitoring data")
+            
+        return _make_response(200, monitor_data["stats"])
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch monitoring data: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +245,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/monitor
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitor" and method == "GET":
+        return handle_trading_monitor()
     
     return _error_response(404, "Not found")
 
