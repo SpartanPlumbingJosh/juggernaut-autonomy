@@ -253,12 +253,10 @@ class AiderExecutor:
                 "aider",
                 "--model", model,
                 "--edit-format", AIDER_EDIT_FORMAT,
-                "--yes-always",
+                "--yes",
                 "--no-auto-lint",
                 "--no-auto-test",
                 "--no-suggest-shell-commands",
-                "--no-pretty",
-                "--no-stream",
                 "--message", task_description,
             ]
 
@@ -420,12 +418,10 @@ class AiderExecutor:
                 "aider",
                 "--model", model,
                 "--edit-format", AIDER_EDIT_FORMAT,
-                "--yes-always",
+                "--yes",
                 "--no-auto-lint",
                 "--no-auto-test",
                 "--no-suggest-shell-commands",
-                "--no-pretty",
-                "--no-stream",
                 "--message", prompt,
             ]
 
