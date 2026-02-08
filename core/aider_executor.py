@@ -257,6 +257,7 @@ class AiderExecutor:
                 "--no-auto-lint",
                 "--no-auto-test",
                 "--no-suggest-shell-commands",
+                "--no-check-update",
                 "--message", task_description,
             ]
 
@@ -422,6 +423,7 @@ class AiderExecutor:
                 "--no-auto-lint",
                 "--no-auto-test",
                 "--no-suggest-shell-commands",
+                "--no-check-update",
                 "--message", prompt,
             ]
 
