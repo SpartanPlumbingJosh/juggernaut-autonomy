@@ -162,6 +162,57 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_new_transaction(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a new revenue transaction."""
+    try:
+        required_fields = ["amount_cents", "currency", "source", "event_type"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Validate event type
+        if body["event_type"] not in ["revenue", "cost"]:
+            return _error_response(400, "Invalid event_type, must be 'revenue' or 'cost'")
+
+        # Insert transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["event_type"]}',
+            {int(body["amount_cents"])},
+            '{body["currency"]}',
+            '{body["source"]}',
+            '{json.dumps(body.get("metadata", {}))}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        transaction_id = result.get("rows", [{}])[0].get("id")
+        
+        if not transaction_id:
+            return _error_response(500, "Failed to create transaction")
+
+        return _make_response(201, {
+            "transaction_id": transaction_id,
+            "status": "created"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process transaction: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +282,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return handle_new_transaction(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
