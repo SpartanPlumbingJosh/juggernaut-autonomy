@@ -521,25 +521,22 @@ def save_learning_to_db(
     # Ensure details is properly JSON-serialized
     details_value = learning["details"]
     if isinstance(details_value, dict):
-        details_json = json.dumps(details_value, ensure_ascii=False, default=str)
+        details_obj: Any = details_value
     elif isinstance(details_value, str):
-        # Already a string, but verify it's valid JSON
         try:
             parsed = json.loads(details_value)
-            details_json = json.dumps(parsed, ensure_ascii=False, default=str)
+            details_obj = parsed
         except json.JSONDecodeError:
-            # Not valid JSON, wrap it
-            details_json = json.dumps({"raw": details_value}, ensure_ascii=False, default=str)
+            details_obj = {"raw": details_value}
     else:
-        # Convert to JSON
-        details_json = json.dumps({"value": str(details_value)}, ensure_ascii=False, default=str)
+        details_obj = {"value": str(details_value)}
     
     values = [
         escape_value_func(worker_id),
         escape_value_func(task_id),
         escape_value_func(learning["category"]),
         escape_value_func(learning["summary"]),
-        escape_value_func(details_json),
+        f"{escape_value_func(details_obj)}::jsonb",
         str(learning["confidence"]),
         "0",  # applied_count starts at 0
         "FALSE",  # is_validated starts as false
@@ -556,8 +553,7 @@ def save_learning_to_db(
     # Add evidence_task_ids as JSONB array containing just this task
     # Convert to JSON string first, then escape, to ensure valid JSONB cast
     columns.append("evidence_task_ids")
-    evidence_json = json.dumps([task_id])
-    values.append(f"{escape_value_func(evidence_json)}::jsonb")
+    values.append(f"{escape_value_func([task_id])}::jsonb")
 
 
     sql = f"""
