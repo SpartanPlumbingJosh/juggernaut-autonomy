@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Literal
 
 from core.idea_generator import IdeaGenerator
+
+# Configuration
+MAX_DAILY_EXPERIMENTS = 3  # Safety limit
+MIN_BUDGET = 5.0           # Minimum experiment budget
+MAX_BUDGET = 100.0         # Maximum experiment budget
+MOCK_MODE = False          # Set True for testing without real transactions
+
+# Runtime state
+_last_run_time = 0
+_failure_count = 0
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
@@ -188,6 +199,25 @@ def start_experiments_from_top_ideas(
     min_score: float = 60.0,
     budget: float = 20.0,
 ) -> Dict[str, Any]:
+    """Start new experiments from top-scoring ideas with safety checks and mock mode support."""
+    global _last_run_time, _failure_count
+    
+    # Rate limiting
+    current_time = time.time()
+    if current_time - _last_run_time < 3600:  # 1 hour cooldown
+        return {"success": False, "error": "Rate limited - too frequent execution"}
+    
+    # Validate inputs
+    budget = max(MIN_BUDGET, min(MAX_BUDGET, float(budget)))
+    max_new = min(MAX_DAILY_EXPERIMENTS, int(max_new))
+    
+    if _failure_count > 3:
+        log_action(
+            "portfolio.safety_triggered",
+            "Too many failures - entering safe mode",
+            level="error"
+        )
+        return {"success": False, "error": "Safety limit reached - too many failures"}
     try:
         res = execute_sql(
             f"""
@@ -228,12 +258,22 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
-        create_res = create_experiment_from_idea(
-            execute_sql=execute_sql,
-            log_action=log_action,
-            idea=idea,
-            budget=budget,
-        )
+        try:
+            if MOCK_MODE:
+                log_action(
+                    "portfolio.mock_mode",
+                    f"Would create experiment for idea {idea_id} (mock mode)",
+                    level="info",
+                    output_data={"idea": idea, "budget": budget}
+                )
+                create_res = {"success": True, "experiment_id": f"mock-exp-{idea_id[:8]}"}
+            else:
+                create_res = create_experiment_from_idea(
+                    execute_sql=execute_sql,
+                    log_action=log_action,
+                    idea=idea,
+                    budget=budget,
+                )
         if not create_res.get("success"):
             failures.append({"idea_id": idea_id, "error": str(create_res.get("error") or "unknown")[:200]})
             continue
@@ -276,7 +316,41 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def review_experiments(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    max_retries: int = 3,
+) -> Dict[str, Any]:
+    """Review running experiments with self-healing mechanisms."""
+    global _failure_count
+    
+    retry_count = 0
+    last_error = None
+    
+    while retry_count < max_retries:
+        try:
+            result = _review_experiments_internal(execute_sql, log_action)
+            _failure_count = max(0, _failure_count - 1)  # Decay failure count
+            return result
+        except Exception as e:
+            retry_count += 1
+            _failure_count += 1
+            last_error = str(e)
+            log_action(
+                "portfolio.review_failed",
+                f"Experiment review failed (attempt {retry_count}/{max_retries})",
+                level="error",
+                error_data={"error": last_error}
+            )
+            time.sleep(5 * retry_count)  # Exponential backoff
+    
+    return {
+        "success": False,
+        "error": f"Failed after {max_retries} attempts: {last_error}",
+        "failure_count": _failure_count
+    }
+
+def _review_experiments_internal(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
@@ -403,9 +477,26 @@ def review_experiments_stub(
     except Exception:
         pass
 
-    return {
-        "success": True,
+    # Perform system health check
+    health_status = {
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "failure_count": _failure_count,
+        "mock_mode": MOCK_MODE,
+        "rate_limited": (time.time() - _last_run_time) < 3600,
+        "status": "healthy" if _failure_count == 0 else "degraded"
+    }
+    
+    if _failure_count > 0:
+        log_action(
+            "portfolio.health_check",
+            f"System health check: {health_status['status']}",
+            level="warning",
+            output_data=health_status
+        )
+    
+    return {
+        "success": True,
+        **health_status
     }
