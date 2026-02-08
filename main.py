@@ -5325,8 +5325,8 @@ def autonomy_loop():
                             log_action("scheduled.error_scanning.error", f"Error scanning failed: {e}", level="error", error_data=sched_result)
                     elif sched_task_type == "stale_task_reset":
                         try:
-                            from core.stale_task_reset import reset_stale_tasks
-                            sched_result = reset_stale_tasks(execute_sql, log_action, stale_threshold_minutes=30)
+                            from core.stale_task_reset import reset_stale_tasks as do_reset_stale_tasks
+                            sched_result = do_reset_stale_tasks(execute_sql, log_action, stale_threshold_minutes=30)
                             sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
                         except Exception as e:
                             sched_result = {"error": str(e), "traceback": traceback.format_exc()[:500]}

@@ -96,12 +96,11 @@ class CriticalMonitor:
     def _check_workers(self) -> Optional[Dict[str, Any]]:
         """Check if workers are online and healthy."""
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(minutes=self.worker_offline_threshold)
-            
+            # Use SQL to do the datetime comparison, not Python
             result = self.execute_sql(f"""
                 SELECT 
                     COUNT(*) as total,
-                    COUNT(*) FILTER (WHERE last_heartbeat >= '{cutoff.isoformat()}') as online
+                    COUNT(*) FILTER (WHERE last_heartbeat >= NOW() - INTERVAL '{self.worker_offline_threshold} minutes') as online
                 FROM worker_registry
             """)
             
