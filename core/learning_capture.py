@@ -518,12 +518,28 @@ def save_learning_to_db(
     if source is None:
         source = f"task_execution:{learning.get('details', {}).get('task_type', 'unknown')}"
 
+    # Ensure details is properly JSON-serialized
+    details_value = learning["details"]
+    if isinstance(details_value, dict):
+        details_json = json.dumps(details_value)
+    elif isinstance(details_value, str):
+        # Already a string, but verify it's valid JSON
+        try:
+            json.loads(details_value)
+            details_json = details_value
+        except json.JSONDecodeError:
+            # Not valid JSON, wrap it
+            details_json = json.dumps({"raw": details_value})
+    else:
+        # Convert to JSON
+        details_json = json.dumps({"value": str(details_value)})
+    
     values = [
         escape_value_func(worker_id),
         escape_value_func(task_id),
         escape_value_func(learning["category"]),
         escape_value_func(learning["summary"]),
-        escape_value_func(learning["details"]),
+        escape_value_func(details_json),
         str(learning["confidence"]),
         "0",  # applied_count starts at 0
         "FALSE",  # is_validated starts as false
