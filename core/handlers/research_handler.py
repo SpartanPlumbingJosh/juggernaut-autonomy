@@ -747,8 +747,28 @@ class ResearchHandler(BaseHandler):
                     '{now}'
                 )
             """
-            self.execute_sql(insert_sql)
-            return finding_id
+
+            try:
+                self.execute_sql(insert_sql)
+                return finding_id
+            except Exception:
+                insert_sql_fallback = f"""
+                    INSERT INTO {RESEARCH_FINDINGS_TABLE} 
+                    (id, task_id, topic, query, summary, sources, findings, confidence_score, created_at)
+                    VALUES (
+                        '{finding_id}',
+                        {f"'{escaped_task_id}'" if task_id else 'NULL'},
+                        '{escaped_topic}',
+                        '{escaped_query}',
+                        '{escaped_summary}',
+                        '{escaped_sources}'::jsonb,
+                        '{escaped_findings}'::jsonb,
+                        {findings.get('confidence', 0)},
+                        '{now}'
+                    )
+                """
+                self.execute_sql(insert_sql_fallback)
+                return finding_id
             
         except Exception as save_error:
             self._log(

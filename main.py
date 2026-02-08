@@ -2418,7 +2418,7 @@ def claim_task(task_id: str) -> bool:
     now = datetime.now(timezone.utc).isoformat()
     sql = f"""
         UPDATE governance_tasks 
-        SET assigned_worker = {escape_value(WORKER_ID)}, 
+        SET assigned_worker = COALESCE(assigned_worker, {escape_value(WORKER_ID)}), 
             status = 'in_progress',
             started_at = COALESCE(started_at, {escape_value(now)})
         WHERE id = {escape_value(task_id)}

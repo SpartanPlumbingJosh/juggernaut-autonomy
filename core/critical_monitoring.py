@@ -114,6 +114,14 @@ class CriticalMonitor:
             
             total = rows[0].get("total", 0)
             online = rows[0].get("online", 0)
+            try:
+                total = int(total or 0)
+            except (TypeError, ValueError):
+                total = 0
+            try:
+                online = int(online or 0)
+            except (TypeError, ValueError):
+                online = 0
             
             if total == 0:
                 return {
@@ -166,6 +174,10 @@ class CriticalMonitor:
                 return None
             
             error_count = rows[0].get("error_count", 0)
+            try:
+                error_count = int(error_count or 0)
+            except (TypeError, ValueError):
+                error_count = 0
             
             if error_count >= self.error_rate_threshold:
                 return {
@@ -199,6 +211,14 @@ class CriticalMonitor:
             
             blocked = rows[0].get("blocked", 0)
             stuck = rows[0].get("stuck_in_progress", 0)
+            try:
+                blocked = int(blocked or 0)
+            except (TypeError, ValueError):
+                blocked = 0
+            try:
+                stuck = int(stuck or 0)
+            except (TypeError, ValueError):
+                stuck = 0
             total_stuck = blocked + stuck
             
             if total_stuck >= self.stuck_task_threshold:
@@ -235,6 +255,14 @@ class CriticalMonitor:
             
             completed = rows[0].get("completed", 0)
             failed = rows[0].get("failed", 0)
+            try:
+                completed = int(completed or 0)
+            except (TypeError, ValueError):
+                completed = 0
+            try:
+                failed = int(failed or 0)
+            except (TypeError, ValueError):
+                failed = 0
             total = completed + failed
             
             if total == 0:
