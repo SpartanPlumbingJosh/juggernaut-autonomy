@@ -5075,6 +5075,46 @@ def autonomy_loop():
                     level="warn"
                 )
         
+        # L4-CRITICAL: Critical monitoring - detect database failures, worker crashes, high error rates
+        # Runs every 10 cycles (every 5 minutes with 30s loop interval)
+        if loop_count % 10 == 0:
+            try:
+                from core.critical_monitoring import check_critical_issues
+                critical_result = check_critical_issues(execute_sql, log_action)
+                if critical_result.get("critical_issues", 0) > 0:
+                    log_action(
+                        "critical_monitor.issues_detected",
+                        f"CRITICAL: {critical_result['critical_issues']} issues detected",
+                        level="critical",
+                        output_data=critical_result
+                    )
+            except Exception as critical_err:
+                log_action(
+                    "critical_monitor.error",
+                    f"Critical monitoring failed: {critical_err}",
+                    level="error"
+                )
+        
+        # L4-SELF-FIX: Error scanning - detect recurring errors and create code_fix tasks
+        # Runs every 30 cycles (every 15 minutes with 30s loop interval)
+        if loop_count % 30 == 0:
+            try:
+                from core.error_to_task import scan_errors_and_create_tasks
+                scan_result = scan_errors_and_create_tasks(execute_sql, log_action)
+                if scan_result.get("tasks_created", 0) > 0:
+                    log_action(
+                        "error_scan.tasks_created",
+                        f"Created {scan_result['tasks_created']} code_fix tasks from {scan_result.get('patterns_found', 0)} error patterns",
+                        level="info",
+                        output_data=scan_result
+                    )
+            except Exception as scan_err:
+                log_action(
+                    "error_scan.error",
+                    f"Error scanning failed: {scan_err}",
+                    level="warn"
+                )
+        
         # L5-HEALTH: System health monitoring - check workers, tasks, revenue pipeline
         # Runs every 20 cycles to monitor system health
         if loop_count % 20 == 0:

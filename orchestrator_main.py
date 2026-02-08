@@ -629,6 +629,7 @@ def main() -> int:
     _last_garbage_collect = current_time
     _last_critical_monitor = current_time
     _last_error_scan = current_time
+    _last_stale_task_reset = current_time
 
     # Initial health check
     logger.info("Running initial health check...")

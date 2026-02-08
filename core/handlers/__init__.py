@@ -53,7 +53,6 @@ _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
     "design": AIHandler,
     # Code-related task types (map to AIHandler for now)
     "code": AIHandler,
-    "code_fix": AIHandler,
     "code_change": AIHandler,
     "code_implementation": AIHandler,
     "debugging": AIHandler,
