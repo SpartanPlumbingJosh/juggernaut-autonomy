@@ -71,6 +71,7 @@ ESCALATION_CHECK_INTERVAL_SECONDS: int = 60
 GARBAGE_COLLECT_INTERVAL_SECONDS: int = 3600  # Run GC every hour
 CRITICAL_MONITOR_INTERVAL_SECONDS: int = 300  # Run critical checks every 5 minutes
 ERROR_SCAN_INTERVAL_SECONDS: int = 900  # Run error scanning every 15 minutes
+STALE_TASK_RESET_INTERVAL_SECONDS: int = 600  # Run stale task reset every 10 minutes
 
 # Thresholds
 MIN_AGENT_HEALTH_SCORE: float = 0.3
@@ -90,6 +91,7 @@ _last_escalation_check: float = 0.0
 _last_garbage_collect: float = 0.0
 _last_critical_monitor: float = 0.0
 _last_error_scan: float = 0.0
+_last_stale_task_reset: float = 0.0
 _cycle_count: int = 0
 
 
@@ -473,7 +475,7 @@ def run_orchestration_cycle() -> None:
     global _last_health_check, _last_memory_sync
     global _last_failure_check, _last_escalation_check
     global _last_garbage_collect, _last_critical_monitor
-    global _last_error_scan, _cycle_count
+    global _last_error_scan, _last_stale_task_reset, _cycle_count
 
     current_time = time.time()
     _cycle_count += 1
@@ -575,6 +577,23 @@ def run_orchestration_cycle() -> None:
         except Exception as e:
             logger.error("Error scanning failed: %s", str(e))
 
+    # Step 10: Stale task reset (periodic - every 10 minutes)
+    if current_time - _last_stale_task_reset >= STALE_TASK_RESET_INTERVAL_SECONDS:
+        try:
+            from core.stale_task_reset import reset_stale_tasks
+            from core.database import execute_sql
+            
+            reset_result = reset_stale_tasks(execute_sql, log_coordination_event, stale_threshold_minutes=30)
+            _last_stale_task_reset = current_time
+            
+            if reset_result.get("reset_count", 0) > 0:
+                logger.warning(
+                    "Stale task reset: Reset %d tasks stuck in_progress for 30+ minutes",
+                    reset_result["reset_count"]
+                )
+        except Exception as e:
+            logger.error("Stale task reset failed: %s", str(e))
+
     logger.info("=== Orchestration cycle %d complete ===", _cycle_count)
 
 
@@ -587,7 +606,7 @@ def main() -> int:
     """
     global _running, _last_health_check, _last_failure_check
     global _last_escalation_check, _last_memory_sync, _last_garbage_collect
-    global _last_critical_monitor, _last_error_scan
+    global _last_critical_monitor, _last_error_scan, _last_stale_task_reset
 
     # Register signal handlers
     signal.signal(signal.SIGINT, _signal_handler)
