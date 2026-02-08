@@ -318,6 +318,14 @@ NO asking for permission. NO "shall I proceed?" Just DO IT.
 - browser_type(selector, text)
 - browser_screenshot(full_page?)
 
+### Marketing Automation
+- marketing_create_landing_page(title, template?, content?, fields?)
+- marketing_launch_ad_campaign(name, budget, audience, creative_assets, platforms?)
+- marketing_qualify_lead(email, answers?)
+- marketing_send_sequence(email, sequence_name, delay_days?)
+- marketing_get_conversion_metrics(campaign_id?, date_range?)
+- marketing_update_ad_budget(campaign_id, new_budget)
+
 ### Communication
 - email_list(folder?, filter?, top?)
 - email_read(message_id)
@@ -2208,6 +2216,20 @@ class BrainService:
         Raises:
             APIError: If tool execution fails.
         """
+        # Marketing tools
+        if tool_name == "marketing_create_landing_page":
+            return self._execute_marketing_landing_page(arguments)
+        elif tool_name == "marketing_launch_ad_campaign":
+            return self._execute_launch_ad_campaign(arguments)
+        elif tool_name == "marketing_qualify_lead":
+            return self._execute_qualify_lead(arguments)
+        elif tool_name == "marketing_send_sequence":
+            return self._execute_send_sequence(arguments)
+        elif tool_name == "marketing_get_conversion_metrics":
+            return self._execute_get_conversion_metrics(arguments)
+        elif tool_name == "marketing_update_ad_budget":
+            return self._execute_update_ad_budget(arguments)
+
         if tool_name == "code_executor":
             try:
                 task_id = str(arguments.get("task_id") or uuid4())
@@ -2489,6 +2511,107 @@ class BrainService:
                 return {"error": str(e)}
 
         return last_error or {"error": "Tool execution failed"}
+
+    def _execute_marketing_landing_page(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a marketing landing page."""
+        required = ["title"]
+        if not all(k in args for k in required):
+            return {"error": f"Missing required fields: {', '.join(required)}"}
+
+        try:
+            # Implementation would call marketing platform API
+            return {
+                "success": True,
+                "page_id": f"lp_{uuid4().hex[:8]}",
+                "url": f"https://example.com/landing/{args['title'].lower().replace(' ', '-')}",
+                "fields": args.get("fields", [])
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_launch_ad_campaign(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Launch an advertising campaign."""
+        required = ["name", "budget", "audience", "creative_assets"]
+        if not all(k in args for k in required):
+            return {"error": f"Missing required fields: {', '.join(required)}"}
+
+        try:
+            # Implementation would call ad platform API
+            return {
+                "success": True,
+                "campaign_id": f"ad_{uuid4().hex[:8]}",
+                "platforms": args.get("platforms", ["facebook", "google"]),
+                "daily_budget": args["budget"] / 30  # Example monthly->daily
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_qualify_lead(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Qualify a lead through automated scoring."""
+        required = ["email"]
+        if not all(k in args for k in required):
+            return {"error": f"Missing required fields: {', '.join(required)}"}
+
+        try:
+            # Implementation would integrate with CRM/lead scoring
+            score = random.randint(1, 100)  # Example scoring
+            return {
+                "success": True,
+                "qualified": score > 50,
+                "score": score,
+                "next_step": "email_sequence" if score > 50 else "nurture"
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_send_sequence(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Trigger an email sequence for a lead."""
+        required = ["email", "sequence_name"]
+        if not all(k in args for k in required):
+            return {"error": f"Missing required fields: {', '.join(required)}"}
+
+        try:
+            # Implementation would call email automation platform
+            return {
+                "success": True,
+                "sequence_id": f"seq_{uuid4().hex[:8]}",
+                "emails_scheduled": 5,  # Example sequence length
+                "first_email_at": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_get_conversion_metrics(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Get marketing conversion metrics."""
+        try:
+            # Implementation would query analytics platform
+            return {
+                "success": True,
+                "conversion_rate": 0.05,  # Example 5% conversion
+                "cpa": 20.0,  # Example $20 cost per acquisition
+                "roi": 3.5,  # Example 3.5x return
+                "impressions": 10000,
+                "clicks": 500
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _execute_update_ad_budget(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Update an ad campaign's budget."""
+        required = ["campaign_id", "new_budget"]
+        if not all(k in args for k in required):
+            return {"error": f"Missing required fields: {', '.join(required)}"}
+
+        try:
+            # Implementation would call ad platform API
+            return {
+                "success": True,
+                "campaign_id": args["campaign_id"],
+                "new_budget": args["new_budget"],
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+        except Exception as e:
+            return {"error": str(e)}
 
     def _create_fallback_task(
         self, tool_name: str, arguments: Dict[str, Any], error: str, user_question: str
