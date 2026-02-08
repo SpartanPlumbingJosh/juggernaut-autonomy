@@ -546,7 +546,7 @@ def progress_single_experiment(
                 SELECT COUNT(*) as retry_count
                 FROM execution_logs
                 WHERE action = 'experiment.task_reset'
-                AND metadata::text LIKE '%{task_id}%'
+                AND output_data::text LIKE '%{task_id}%'
             """
             result = execute_sql(retry_count_sql)
             retry_count = (result.get("rows", [{}])[0] or {}).get("retry_count", 0)

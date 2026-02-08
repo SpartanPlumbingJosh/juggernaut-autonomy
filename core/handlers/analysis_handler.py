@@ -188,7 +188,7 @@ class AnalysisHandler(BaseHandler):
                     SELECT 
                         status,
                         COUNT(*)::int as count,
-                        AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/86400)::float as avg_duration_days
+                        AVG(EXTRACT(EPOCH FROM (concluded_at - created_at))/86400)::float as avg_duration_days
                     FROM experiments
                     WHERE created_at >= NOW() - INTERVAL '{days_back} days'
                     GROUP BY status
