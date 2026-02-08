@@ -182,6 +182,38 @@ class AnalysisHandler(BaseHandler):
                     )
 
                 insights["worker_performance"] = workers
+            
+            if wants_experiment_analysis:
+                sql = f"""
+                    SELECT 
+                        status,
+                        COUNT(*)::int as count,
+                        AVG(EXTRACT(EPOCH FROM (completed_at - created_at))/86400)::float as avg_duration_days
+                    FROM experiments
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                    GROUP BY status
+                    ORDER BY count DESC
+                """
+                sql_used["experiment_status"] = sql
+                res = self.execute_sql(sql)
+                insights["experiments"] = res.get("rows", []) or []
+            
+            if wants_learning_analysis:
+                sql = f"""
+                    SELECT 
+                        category,
+                        COUNT(*)::int as count,
+                        AVG(confidence_score)::float as avg_confidence,
+                        SUM(applied_count)::int as total_applications
+                    FROM learnings
+                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                    GROUP BY category
+                    ORDER BY count DESC
+                    LIMIT 10
+                """
+                sql_used["learning_patterns"] = sql
+                res = self.execute_sql(sql)
+                insights["learnings"] = res.get("rows", []) or []
 
             # Basic log volume + error rate (from execution_logs)
             sql = f"""
@@ -233,6 +265,18 @@ class AnalysisHandler(BaseHandler):
                     f"Execution logs (last {days_back}d): total={el.get('total_logs')} "
                     f"errors={el.get('error_logs')} error_rate={el.get('error_rate_percent')}%"
                 )
+            
+            # Add experiment summary if analyzed
+            exp = insights.get("experiments") or []
+            if isinstance(exp, list) and exp:
+                exp_summary = ", ".join([f"{e.get('status')}={e.get('count')}" for e in exp[:3]])
+                summary_parts.append(f"Experiments: {exp_summary}")
+            
+            # Add learning summary if analyzed
+            learn = insights.get("learnings") or []
+            if isinstance(learn, list) and learn:
+                total_learnings = sum(l.get('count', 0) for l in learn)
+                summary_parts.append(f"Learnings: {total_learnings} patterns captured")
 
             summary = " | ".join([p for p in summary_parts if p])
             if not summary:
