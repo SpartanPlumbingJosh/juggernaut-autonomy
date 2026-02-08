@@ -734,7 +734,7 @@ class ResearchHandler(BaseHandler):
             
             insert_sql = f"""
                 INSERT INTO {RESEARCH_FINDINGS_TABLE} 
-                (id, task_id, topic, query, summary, sources, findings, confidence_score, created_at)
+                (id, task_id, topic, query, summary, sources, findings, confidence, created_at)
                 VALUES (
                     '{finding_id}',
                     {f"'{escaped_task_id}'" if task_id else 'NULL'},
