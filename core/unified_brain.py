@@ -318,6 +318,14 @@ NO asking for permission. NO "shall I proceed?" Just DO IT.
 - browser_type(selector, text)
 - browser_screenshot(full_page?)
 
+### Marketing Automation
+- marketing_create_landing_page(title, template?, content?, fields?)
+- marketing_launch_ad_campaign(name, budget, audience, creative_assets, platforms?)
+- marketing_qualify_lead(email, answers?)
+- marketing_send_sequence(email, sequence_name, delay_days?)
+- marketing_get_conversion_metrics(campaign_id?, date_range?)
+- marketing_update_ad_budget(campaign_id, new_budget)
+
 ### Communication
 - email_list(folder?, filter?, top?)
 - email_read(message_id)
@@ -2208,6 +2216,20 @@ class BrainService:
         Raises:
             APIError: If tool execution fails.
         """
+        # Marketing tools
+        if tool_name == "marketing_create_landing_page":
+            return self._execute_marketing_landing_page(arguments)
+        elif tool_name == "marketing_launch_ad_campaign":
+            return self._execute_launch_ad_campaign(arguments)
+        elif tool_name == "marketing_qualify_lead":
+            return self._execute_qualify_lead(arguments)
+        elif tool_name == "marketing_send_sequence":
+            return self._execute_send_sequence(arguments)
+        elif tool_name == "marketing_get_conversion_metrics":
+            return self._execute_get_conversion_metrics(arguments)
+        elif tool_name == "marketing_update_ad_budget":
+            return self._execute_update_ad_budget(arguments)
+
         if tool_name == "code_executor":
             try:
                 task_id = str(arguments.get("task_id") or uuid4())
