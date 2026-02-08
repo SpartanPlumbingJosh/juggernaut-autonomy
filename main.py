@@ -545,10 +545,10 @@ if not DATABASE_URL:
     print("FATAL: DATABASE_URL environment variable is required")
     sys.exit(1)
 
-WORKER_ID = os.getenv("WORKER_ID", "autonomy-engine-1")
+WORKER_ID = os.getenv("WORKER_ID", "EXECUTOR")
 # All logical workers that run inside this single process.
 # Tasks assigned to any of these are local and must be picked up here.
-ALL_LOGICAL_WORKERS = ("EXECUTOR", "ANALYST", "STRATEGIST", "WATCHDOG", "ORCHESTRATOR", WORKER_ID)
+ALL_LOGICAL_WORKERS = ("EXECUTOR", "ANALYST", "STRATEGIST", "WATCHDOG", "ORCHESTRATOR")
 _LOGICAL_WORKER_SQL = ", ".join(f"''{w}''" if "'" in w else f"'{w}'" for w in ALL_LOGICAL_WORKERS)
 LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL", "30"))
 
