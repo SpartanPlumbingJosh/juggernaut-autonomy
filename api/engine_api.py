@@ -186,10 +186,10 @@ def handle_get_workers() -> Dict[str, Any]:
                 w.started_at,
                 COUNT(DISTINCT wc.capability) as capability_count,
                 COUNT(DISTINCT ta.id) FILTER (WHERE ta.status IN ('assigned', 'running')) as active_tasks
-            FROM workers w
-            LEFT JOIN worker_capabilities wc ON wc.worker_id = w.id
-            LEFT JOIN task_assignments ta ON ta.worker_id = w.id
-            GROUP BY w.id
+            FROM worker_registry w
+            LEFT JOIN worker_capabilities wc ON wc.worker_id = w.worker_id
+            LEFT JOIN task_assignments ta ON ta.worker_id = w.worker_id
+            GROUP BY w.worker_id
             ORDER BY w.last_heartbeat DESC
         """
         

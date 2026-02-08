@@ -137,12 +137,25 @@ class AnalysisHandler(BaseHandler):
                            SUM(amount_cents)::int as total_cents,
                            COUNT(*)::int as event_count
                     FROM cost_events
-                    WHERE created_at >= NOW() - INTERVAL '{days_back} days'
+                    WHERE recorded_at >= NOW() - INTERVAL '{days_back} days'
                     GROUP BY category ORDER BY total_cents DESC
                 """
                 sql_used["cost_by_category"] = sql
-                res = self.execute_sql(sql)
-                insights["cost_breakdown"] = res.get("rows", []) or []
+                try:
+                    res = self.execute_sql(sql)
+                    insights["cost_breakdown"] = res.get("rows", []) or []
+                except Exception as e:
+                    # Fallback to safe query if column doesn't exist
+                    logger.warning(f"Cost analysis SQL failed: {e}, using fallback")
+                    fallback_sql = f"""
+                        SELECT category, COUNT(*)::int as event_count
+                        FROM cost_events
+                        WHERE recorded_at >= NOW() - INTERVAL '{days_back} days'
+                        GROUP BY category
+                        ORDER BY event_count DESC
+                    """
+                    res = self.execute_sql(fallback_sql)
+                    insights["cost_breakdown"] = res.get("rows", []) or []
 
             if wants_worker_perf:
                 sql = f"""
@@ -215,7 +228,7 @@ class AnalysisHandler(BaseHandler):
                     SELECT 
                         category,
                         COUNT(*)::int as count,
-                        AVG(confidence_score)::float as avg_confidence,
+                        AVG(confidence)::float as avg_confidence,
                         SUM(applied_count)::int as total_applications
                     FROM learnings
                     WHERE created_at >= NOW() - INTERVAL '{days_back} days'

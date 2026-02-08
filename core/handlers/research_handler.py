@@ -695,10 +695,16 @@ class ResearchHandler(BaseHandler):
         # Extract topic from query (first 200 chars, cleaned)
         topic = (query or "Research")[:200].strip()
         
+        # Extract summary and sources from findings
+        summary = findings.get("summary", "")[:1000] if findings.get("summary") else ""
+        sources = findings.get("sources", [])
+        
         # Escape values for SQL
         escaped_query = query.replace("'", "''")
         escaped_topic = topic.replace("'", "''")
+        escaped_summary = summary.replace("'", "''")
         escaped_findings = json.dumps(findings).replace("'", "''")
+        escaped_sources = json.dumps(sources).replace("'", "''")
         escaped_task_id = task_id if task_id else "NULL"
         
         try:
@@ -728,12 +734,14 @@ class ResearchHandler(BaseHandler):
             
             insert_sql = f"""
                 INSERT INTO {RESEARCH_FINDINGS_TABLE} 
-                (id, task_id, topic, query, findings, confidence_score, created_at)
+                (id, task_id, topic, query, summary, sources, findings, confidence_score, created_at)
                 VALUES (
                     '{finding_id}',
                     {f"'{escaped_task_id}'" if task_id else 'NULL'},
                     '{escaped_topic}',
                     '{escaped_query}',
+                    '{escaped_summary}',
+                    '{escaped_sources}'::jsonb,
                     '{escaped_findings}'::jsonb,
                     {findings.get('confidence', 0)},
                     '{now}'
