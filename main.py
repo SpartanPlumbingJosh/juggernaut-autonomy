@@ -5387,11 +5387,19 @@ def autonomy_loop():
                     if ORCHESTRATION_AVAILABLE and not SINGLE_WORKER_MODE:
                         delegated, target_worker_id, delegate_result = delegate_to_worker(task)
                         if delegated:
-                            # BUG FIX: Check for self-delegation - if target is ourselves, execute locally
-                            if target_worker_id == WORKER_ID or target_worker_id in (WORKER_ID.upper(), WORKER_ID.lower()):
+                            # BUG FIX: Check if target is a logical worker in this process
+                            # All logical workers (ANALYST, STRATEGIST, EXECUTOR, etc.) run in the same process
+                            # So delegation to them should execute locally, not wait for another process
+                            is_local_worker = (
+                                target_worker_id == WORKER_ID or 
+                                target_worker_id in (WORKER_ID.upper(), WORKER_ID.lower()) or
+                                target_worker_id in ALL_LOGICAL_WORKERS
+                            )
+                            
+                            if is_local_worker:
                                 log_action(
-                                    "orchestrator.self_delegation",
-                                    f"Self-delegation detected ({target_worker_id} == {WORKER_ID}), executing locally",
+                                    "orchestrator.local_delegation",
+                                    f"Task delegated to logical worker {target_worker_id} (same process), executing locally",
                                     level="info",
                                     task_id=task.id,
                                     output_data=delegate_result
@@ -5400,10 +5408,10 @@ def autonomy_loop():
                             else:
                                 log_decision(
                                     "orchestrator.delegated",
-                                    f"Task delegated to {target_worker_id}",
+                                    f"Task delegated to external worker {target_worker_id}",
                                     f"ORCHESTRATOR routing: {delegate_result.get('message', 'capability_match')}"
                                 )
-                                # Task is now assigned to specialized worker - don't execute locally
+                                # Task is now assigned to external worker - don't execute locally
                                 task_executed = True
                                 break
                         else:
