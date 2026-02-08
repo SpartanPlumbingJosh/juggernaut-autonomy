@@ -1180,3 +1180,86 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+"""
+Production-grade monitoring and alerting system.
+Tracks system health, performance metrics, and triggers alerts.
+"""
+
+import time
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+import logging
+import psutil
+import requests
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class SystemMetrics:
+    cpu_usage: float
+    memory_usage: float
+    disk_usage: float
+    network_io: Dict[str, float]
+    process_count: int
+    uptime: float
+
+class Monitor:
+    def __init__(self, alert_webhook: Optional[str] = None):
+        self.alert_webhook = alert_webhook
+        self.start_time = time.time()
+        
+    def collect_metrics(self) -> SystemMetrics:
+        """Collect system-level metrics."""
+        cpu = psutil.cpu_percent()
+        memory = psutil.virtual_memory().percent
+        disk = psutil.disk_usage('/').percent
+        net_io = psutil.net_io_counters()
+        processes = len(psutil.pids())
+        
+        return SystemMetrics(
+            cpu_usage=cpu,
+            memory_usage=memory,
+            disk_usage=disk,
+            network_io={
+                'bytes_sent': net_io.bytes_sent,
+                'bytes_recv': net_io.bytes_recv
+            },
+            process_count=processes,
+            uptime=time.time() - self.start_time
+        )
+    
+    def check_thresholds(self, metrics: SystemMetrics) -> List[str]:
+        """Check metrics against thresholds and return alerts."""
+        alerts = []
+        
+        if metrics.cpu_usage > 90:
+            alerts.append(f"High CPU usage: {metrics.cpu_usage}%")
+        if metrics.memory_usage > 90:
+            alerts.append(f"High memory usage: {metrics.memory_usage}%")
+        if metrics.disk_usage > 90:
+            alerts.append(f"High disk usage: {metrics.disk_usage}%")
+            
+        return alerts
+    
+    def send_alert(self, message: str):
+        """Send alert to configured webhook."""
+        if self.alert_webhook:
+            try:
+                requests.post(self.alert_webhook, json={
+                    "text": message,
+                    "severity": "high"
+                })
+            except Exception as e:
+                logger.error(f"Failed to send alert: {str(e)}")
+        else:
+            logger.warning(message)
+    
+    def run_monitoring_cycle(self):
+        """Run complete monitoring cycle."""
+        metrics = self.collect_metrics()
+        alerts = self.check_thresholds(metrics)
+        
+        for alert in alerts:
+            self.send_alert(alert)
+            
+        return metrics, alerts
