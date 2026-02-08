@@ -131,7 +131,8 @@ class GoalDecomposer:
         goals = result.get("rows", [])
         
         # Filter to only goals with no active tasks
-        needs_work = [g for g in goals if g.get("active_task_count", 0) == 0]
+        # NOTE: Neon HTTP API returns all values as strings, so convert to int for comparison
+        needs_work = [g for g in goals if int(g.get("active_task_count", 0)) == 0]
         
         return needs_work
     
@@ -203,6 +204,58 @@ class GoalDecomposer:
                 max_cost_cents=max_cost_cents
             )
             return 1 if fallback_id else 0
+    
+    def _call_openrouter(self, prompt: str) -> str:
+        """Call OpenRouter API directly using strategy model.
+        
+        Args:
+            prompt: The prompt to send to the LLM
+            
+        Returns:
+            LLM response content
+        """
+        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        if not api_key:
+            raise ValueError("OPENROUTER_API_KEY not set")
+        
+        # Use strategy model for planning (cost-effective)
+        model = os.getenv("LLM_MODEL_STRATEGY", "moonshotai/kimi-k2.5")
+        
+        url = "https://openrouter.ai/api/v1/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://github.com/SpartanPlumbingJosh/juggernaut-autonomy",
+            "X-Title": "JUGGERNAUT Goal Decomposer"
+        }
+        
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.7,
+            "max_tokens": 4096
+        }
+        
+        try:
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=headers,
+                method="POST"
+            )
+            
+            with urllib.request.urlopen(req, timeout=60) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+                return content
+                
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode("utf-8") if e.fp else ""
+            logger.error(f"OpenRouter API error: {e.code} - {error_body}")
+            raise
+        except Exception as e:
+            logger.error(f"OpenRouter call failed: {e}")
+            raise
     
     def _build_decomposition_prompt(
         self,
