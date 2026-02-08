@@ -69,6 +69,8 @@ MEMORY_SYNC_INTERVAL_SECONDS: int = 120
 FAILURE_CHECK_INTERVAL_SECONDS: int = 45
 ESCALATION_CHECK_INTERVAL_SECONDS: int = 60
 GARBAGE_COLLECT_INTERVAL_SECONDS: int = 3600  # Run GC every hour
+CRITICAL_MONITOR_INTERVAL_SECONDS: int = 300  # Run critical checks every 5 minutes
+ERROR_SCAN_INTERVAL_SECONDS: int = 900  # Run error scanning every 15 minutes
 
 # Thresholds
 MIN_AGENT_HEALTH_SCORE: float = 0.3
@@ -86,6 +88,8 @@ _last_memory_sync: float = 0.0
 _last_failure_check: float = 0.0
 _last_escalation_check: float = 0.0
 _last_garbage_collect: float = 0.0
+_last_critical_monitor: float = 0.0
+_last_error_scan: float = 0.0
 _cycle_count: int = 0
 
 
@@ -468,7 +472,8 @@ def run_orchestration_cycle() -> None:
     """
     global _last_health_check, _last_memory_sync
     global _last_failure_check, _last_escalation_check
-    global _last_garbage_collect, _cycle_count
+    global _last_garbage_collect, _last_critical_monitor
+    global _last_error_scan, _cycle_count
 
     current_time = time.time()
     _cycle_count += 1
@@ -535,6 +540,41 @@ def run_orchestration_cycle() -> None:
         gc_deleted = run_memory_garbage_collection()
         _last_garbage_collect = current_time
 
+    # Step 8: Critical monitoring (periodic - every 5 minutes)
+    if current_time - _last_critical_monitor >= CRITICAL_MONITOR_INTERVAL_SECONDS:
+        try:
+            from core.critical_monitoring import check_critical_issues
+            from core.database import execute_sql
+            
+            critical_result = check_critical_issues(execute_sql, log_coordination_event)
+            _last_critical_monitor = current_time
+            
+            if critical_result.get("critical_issues", 0) > 0:
+                logger.critical(
+                    "CRITICAL: %d issues detected - check execution_logs",
+                    critical_result["critical_issues"]
+                )
+        except Exception as e:
+            logger.error("Critical monitoring failed: %s", str(e))
+
+    # Step 9: Error scanning for self-fix (periodic - every 15 minutes)
+    if current_time - _last_error_scan >= ERROR_SCAN_INTERVAL_SECONDS:
+        try:
+            from core.error_to_task import scan_errors_and_create_tasks
+            from core.database import execute_sql
+            
+            scan_result = scan_errors_and_create_tasks(execute_sql, log_coordination_event)
+            _last_error_scan = current_time
+            
+            if scan_result.get("tasks_created", 0) > 0:
+                logger.info(
+                    "Error scanning: Created %d code_fix tasks from %d patterns",
+                    scan_result["tasks_created"],
+                    scan_result.get("patterns_found", 0)
+                )
+        except Exception as e:
+            logger.error("Error scanning failed: %s", str(e))
+
     logger.info("=== Orchestration cycle %d complete ===", _cycle_count)
 
 
@@ -547,6 +587,7 @@ def main() -> int:
     """
     global _running, _last_health_check, _last_failure_check
     global _last_escalation_check, _last_memory_sync, _last_garbage_collect
+    global _last_critical_monitor, _last_error_scan
 
     # Register signal handlers
     signal.signal(signal.SIGINT, _signal_handler)
@@ -567,6 +608,8 @@ def main() -> int:
     _last_failure_check = current_time
     _last_escalation_check = current_time
     _last_garbage_collect = current_time
+    _last_critical_monitor = current_time
+    _last_error_scan = current_time
 
     # Initial health check
     logger.info("Running initial health check...")
