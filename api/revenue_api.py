@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import process_payment, fulfill_order
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,28 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return await process_payment(
+                amount_cents=int(body_data.get("amount_cents", 0)),
+                currency=body_data.get("currency", "usd"),
+                customer_email=body_data.get("customer_email", ""),
+                product_id=body_data.get("product_id", ""),
+                metadata=body_data.get("metadata", {})
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid payment request: {str(e)}")
+    
+    # POST /revenue/fulfill
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "fulfill" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return await fulfill_order(body_data.get("payment_intent_id", ""))
+        except Exception as e:
+            return _error_response(400, f"Invalid fulfillment request: {str(e)}")
     
     return _error_response(404, "Not found")
 
