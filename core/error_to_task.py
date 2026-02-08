@@ -95,14 +95,14 @@ class ErrorToTaskPipeline:
         sql = f"""
             SELECT 
                 message,
-                metadata::text as metadata_text,
+                error_data::text as error_data_text,
                 COUNT(*) as occurrence_count,
                 MAX(created_at) as last_seen,
                 MIN(created_at) as first_seen
             FROM execution_logs
             WHERE level IN ('error', 'critical')
               AND created_at >= '{cutoff.isoformat()}'
-            GROUP BY message, metadata::text
+            GROUP BY message, error_data::text
             HAVING COUNT(*) >= {self.error_threshold}
             ORDER BY occurrence_count DESC
             LIMIT 10
@@ -114,22 +114,26 @@ class ErrorToTaskPipeline:
         patterns = []
         for row in rows:
             # Extract file path and line number from error message or metadata
-            file_info = self._extract_file_info(row.get("message", ""), row.get("metadata_text", ""))
-            
-            if file_info:
-                patterns.append({
-                    "error_message": row.get("message", ""),
-                    "file_path": file_info["file_path"],
-                    "line_number": file_info.get("line_number"),
-                    "occurrence_count": row.get("occurrence_count", 0),
-                    "last_seen": row.get("last_seen"),
-                    "first_seen": row.get("first_seen")
-                })
+            err_text = row.get("error_data_text", "")
+            file_info = self._extract_file_info(row.get("message", ""), err_text)
+
+            # Always emit a pattern if it crosses the threshold.
+            # If we can't extract a file path, still create a code_fix task with
+            # file_path='unknown' so Aider can search by error message.
+            patterns.append({
+                "error_message": row.get("message", ""),
+                "file_path": (file_info or {}).get("file_path") or "unknown",
+                "line_number": (file_info or {}).get("line_number"),
+                "occurrence_count": row.get("occurrence_count", 0),
+                "last_seen": row.get("last_seen"),
+                "first_seen": row.get("first_seen"),
+                "error_data_text": err_text,
+            })
         
         return patterns
     
-    def _extract_file_info(self, message: str, metadata: str) -> Optional[Dict[str, Any]]:
-        """Extract file path and line number from error message or metadata.
+    def _extract_file_info(self, message: str, error_data: str) -> Optional[Dict[str, Any]]:
+        """Extract file path and line number from error message or error_data.
         
         Args:
             message: Error message
@@ -158,16 +162,26 @@ class ErrorToTaskPipeline:
                 "line_number": int(traceback_match.group(2))
             }
         
-        # Try to extract from metadata
+        # Try to extract from error_data
         try:
-            if metadata:
-                meta = json.loads(metadata) if isinstance(metadata, str) else metadata
-                if isinstance(meta, dict):
-                    if "file_path" in meta:
+            if error_data:
+                data_obj = json.loads(error_data) if isinstance(error_data, str) else error_data
+                if isinstance(data_obj, dict):
+                    if "file_path" in data_obj:
                         return {
-                            "file_path": meta["file_path"],
-                            "line_number": meta.get("line_number")
+                            "file_path": data_obj["file_path"],
+                            "line_number": data_obj.get("line_number"),
                         }
+
+                    # If a traceback is present, try to extract from it
+                    tb = data_obj.get("traceback") if isinstance(data_obj.get("traceback"), str) else None
+                    if tb:
+                        traceback_match = re.search(r'File\s+"([^"]+\.py)",\s+line\s+(\d+)', tb)
+                        if traceback_match:
+                            return {
+                                "file_path": traceback_match.group(1),
+                                "line_number": int(traceback_match.group(2)),
+                            }
         except Exception:
             pass
         
@@ -205,6 +219,7 @@ This task will trigger Aider to analyze the code and generate a fix.
             "file_path": pattern["file_path"],
             "line_number": pattern.get("line_number"),
             "occurrence_count": pattern["occurrence_count"],
+            "error_data": pattern.get("error_data_text"),
             "auto_generated": True
         }
         

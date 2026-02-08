@@ -4950,24 +4950,6 @@ def autonomy_loop():
                     level="warn",
                 )
 
-        # CRITICAL-03c: Reset stale tasks at START of each loop cycle
-        if STALE_CLEANUP_AVAILABLE:
-            try:
-                reset_count, reset_tasks = reset_stale_tasks()
-                if reset_count > 0:
-                    log_action(
-                        "stale_cleanup.reset",
-                        f"Reset {reset_count} stale tasks back to pending",
-                        level="info",
-                        output_data={"reset_count": reset_count, "task_ids": [t.get("id") for t in reset_tasks]}
-                    )
-            except Exception as stale_err:
-                log_action(
-                    "stale_cleanup.error",
-                    f"Failed to reset stale tasks: {stale_err}",
-                    level="error"
-                )
-
         # SCALE-03: Execute auto-scaling at configurable intervals
         if auto_scaler is not None:
             time_since_last_scale = time.time() - last_auto_scale_time
@@ -5173,26 +5155,6 @@ def autonomy_loop():
             log_error(f"Stuck task escalation check failed: {stuck_err}")
 
         try:
-            # -1. Reset stale tasks at start of each loop (CRITICAL-03c)
-            if STALE_CLEANUP_AVAILABLE:
-                try:
-                    reset_count, reset_tasks = reset_stale_tasks()
-                    if reset_count > 0:
-                        log_action(
-                            "stale_cleanup",
-                            f"Reset {reset_count} stale tasks",
-                            output_data={
-                                "reset_count": reset_count,
-                                "task_ids": [t.get("id") for t in reset_tasks]
-                            }
-                        )
-                except Exception as cleanup_err:
-                    log_action(
-                        "stale_cleanup.error",
-                        f"Stale cleanup failed: {cleanup_err}",
-                        level="warn"
-                    )
-
             # PR merge monitor should run even when pending work exists.
             try:
                 _ensure_proactive_min_schema(execute_sql, log_action)
