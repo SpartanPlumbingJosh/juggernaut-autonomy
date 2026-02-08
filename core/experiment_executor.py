@@ -389,31 +389,32 @@ def create_task_for_experiment(
     if task_type == "research":
         payload["query"] = title  # Use task title as research query
     
-    payload_json = json.dumps(payload).replace("'", "''")
-
     # Build tags for easy lookup
     exp_id_short = exp_id[:8] if exp_id else "unknown"
     tags = ["experiment", f"exp-{exp_id_short}", f"phase-{phase}", "auto-generated"]
-    tags_json = json.dumps(tags).replace("'", "''")
 
     try:
-        execute_sql(f"""
+        # Use parameterized query via fetch_all to avoid SQL injection
+        from core.database import fetch_all
+        
+        fetch_all("""
             INSERT INTO governance_tasks (
                 id, title, description, task_type, status, priority,
                 payload, tags, created_at, updated_at
-            ) VALUES (
-                '{task_id}',
-                '{title}',
-                '{description}',
-                '{task_type}',
-                'pending',
-                '{priority}'::task_priority,
-                '{payload_json}'::jsonb,
-                '{tags_json}'::jsonb,
-                '{now}',
-                '{now}'
-            )
-        """)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """, (
+            task_id,
+            title,
+            description,
+            task_type,
+            'pending',
+            priority,
+            json.dumps(payload),
+            json.dumps(tags),
+            now,
+            now
+        ))
 
         log_action(
             "experiment.task_created",
@@ -532,15 +533,66 @@ def progress_single_experiment(
             "completed_count": len(completed)
         }
 
-    # If all tasks failed, report the problem
+    # If all tasks failed, reset them to pending for retry (max 3 attempts per task)
     if failed and not completed:
-        return {
-            "experiment_id": exp_id,
-            "experiment_name": exp_name,
-            "status": "blocked",
-            "reason": "All tasks failed",
-            "failed_count": len(failed)
-        }
+        from core.database import fetch_all
+        
+        # Check how many times each failed task has been retried
+        tasks_to_reset = []
+        for task in failed:
+            task_id = task.get("id")
+            # Count previous resets by checking execution logs
+            retry_count_sql = f"""
+                SELECT COUNT(*) as retry_count
+                FROM execution_logs
+                WHERE action = 'experiment.task_reset'
+                AND metadata::text LIKE '%{task_id}%'
+            """
+            result = execute_sql(retry_count_sql)
+            retry_count = (result.get("rows", [{}])[0] or {}).get("retry_count", 0)
+            
+            if retry_count < 3:
+                tasks_to_reset.append(task_id)
+        
+        if tasks_to_reset:
+            # Reset failed tasks to pending
+            task_ids_str = "', '".join(tasks_to_reset)
+            reset_sql = f"""
+                UPDATE governance_tasks
+                SET status = 'pending',
+                    error_message = 'Auto-reset by experiment executor - retry attempt',
+                    updated_at = NOW()
+                WHERE id IN ('{task_ids_str}')
+            """
+            execute_sql(reset_sql)
+            
+            log_action(
+                "experiment.task_reset",
+                f"Reset {len(tasks_to_reset)} failed tasks to pending for retry",
+                level="info",
+                output_data={
+                    "experiment_id": exp_id,
+                    "task_ids": tasks_to_reset,
+                    "failed_count": len(failed)
+                }
+            )
+            
+            return {
+                "experiment_id": exp_id,
+                "experiment_name": exp_name,
+                "status": "tasks_reset",
+                "reason": "Failed tasks reset to pending for retry",
+                "reset_count": len(tasks_to_reset)
+            }
+        else:
+            # All tasks have been retried 3 times, give up
+            return {
+                "experiment_id": exp_id,
+                "experiment_name": exp_name,
+                "status": "blocked",
+                "reason": "All tasks failed after 3 retry attempts",
+                "failed_count": len(failed)
+            }
 
     # Find the maximum phase that's been completed
     max_completed_phase = 0
@@ -605,8 +657,8 @@ def progress_experiments(
 
     try:
         res = execute_sql("""
-            SELECT id, name, description, status, hypothesis,
-                   current_iteration, budget_spent, budget_limit
+            # Fetch all running experiments (include experiment_type for classification)
+            SELECT id, name, description, status, experiment_type, hypothesis, current_iteration, budget_spent, budget_limit, created_at, updated_at
             FROM experiments
             WHERE status = 'running'
             ORDER BY created_at ASC

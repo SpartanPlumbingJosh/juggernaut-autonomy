@@ -762,11 +762,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             if not PUPPETEER_URL:
                 return [TextContent(type="text", text=json.dumps({"error": "Puppeteer not configured"}))]
             action = name.replace("browser_", "")
+            # Use PUPPETEER_AUTH_TOKEN from environment
+            puppeteer_token = os.environ.get("PUPPETEER_AUTH_TOKEN", "").strip()
+            headers = {}
+            if puppeteer_token:
+                headers["Authorization"] = f"Bearer {puppeteer_token}"
             async with aiohttp.ClientSession() as session:
                 async with session.post(
                     f"{PUPPETEER_URL}/action",
                     json={"action": action, **arguments},
-                    headers={"Authorization": "Bearer jug-pup-auth-2024"},
+                    headers=headers,
                 ) as resp:
                     result = await resp.json()
             return [TextContent(type="text", text=json.dumps(result, default=str))]
@@ -972,16 +977,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "pdf_from_html":
             if not PUPPETEER_URL:
                 return [TextContent(type="text", text=json.dumps({"error": "Puppeteer not configured for PDF generation"}))]
+            puppeteer_token = os.environ.get("PUPPETEER_AUTH_TOKEN", "").strip()
+            headers = {}
+            if puppeteer_token:
+                headers["Authorization"] = f"Bearer {puppeteer_token}"
             async with aiohttp.ClientSession() as session:
-                async with session.post(f"{PUPPETEER_URL}/action", json={"action": "html_to_pdf", "html": arguments.get("html"), "filename": arguments.get("filename", "document.pdf")}, headers={"Authorization": "Bearer jug-pup-auth-2024"}) as resp:
+                async with session.post(f"{PUPPETEER_URL}/action", json={"action": "html_to_pdf", "html": arguments.get("html"), "filename": arguments.get("filename", "document.pdf")}, headers=headers) as resp:
                     result = await resp.json()
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         
         elif name == "pdf_from_url":
             if not PUPPETEER_URL:
                 return [TextContent(type="text", text=json.dumps({"error": "Puppeteer not configured for PDF generation"}))]
+            puppeteer_token = os.environ.get("PUPPETEER_AUTH_TOKEN", "").strip()
+            headers = {}
+            if puppeteer_token:
+                headers["Authorization"] = f"Bearer {puppeteer_token}"
             async with aiohttp.ClientSession() as session:
-                async with session.post(f"{PUPPETEER_URL}/action", json={"action": "pdf", "url": arguments.get("url"), "filename": arguments.get("filename", "document.pdf")}, headers={"Authorization": "Bearer jug-pup-auth-2024"}) as resp:
+                async with session.post(f"{PUPPETEER_URL}/action", json={"action": "pdf", "url": arguments.get("url"), "filename": arguments.get("filename", "document.pdf")}, headers=headers) as resp:
                     result = await resp.json()
             return [TextContent(type="text", text=json.dumps(result, default=str))]
         

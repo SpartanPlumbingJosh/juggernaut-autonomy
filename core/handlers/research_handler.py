@@ -533,18 +533,13 @@ class ResearchHandler(BaseHandler):
         if not url:
             return None
 
-        nav = self._puppeteer_action("navigate", {"url": url})
-        if not nav or not nav.get("success"):
+        # Use single 'fetch' action that navigates and returns content in one call
+        # This avoids session state issues between separate navigate/get_text calls
+        result = self._puppeteer_action("fetch", {"url": url})
+        if not result or not result.get("success"):
             return None
 
-        page = self._puppeteer_action("get_text", {})
-        if not page or not page.get("success"):
-            return None
-
-        html = page.get("html")
-        if not isinstance(html, str) or not html.strip():
-            return None
-        return html
+        return result.get("text") or result.get("content", "")
 
 
     def _extract_domain_candidates_from_sources(
@@ -693,8 +688,12 @@ class ResearchHandler(BaseHandler):
         finding_id = str(uuid4())
         now = datetime.now(timezone.utc).isoformat()
         
+        # Extract topic from query (first 200 chars, cleaned)
+        topic = (query or "Research")[:200].strip()
+        
         # Escape values for SQL
         escaped_query = query.replace("'", "''")
+        escaped_topic = topic.replace("'", "''")
         escaped_findings = json.dumps(findings).replace("'", "''")
         escaped_task_id = task_id if task_id else "NULL"
         
@@ -725,10 +724,11 @@ class ResearchHandler(BaseHandler):
             
             insert_sql = f"""
                 INSERT INTO {RESEARCH_FINDINGS_TABLE} 
-                (id, task_id, query, findings, confidence_score, created_at)
+                (id, task_id, topic, query, findings, confidence_score, created_at)
                 VALUES (
                     '{finding_id}',
                     {f"'{escaped_task_id}'" if task_id else 'NULL'},
+                    '{escaped_topic}',
                     '{escaped_query}',
                     '{escaped_findings}'::jsonb,
                     {findings.get('confidence', 0)},
