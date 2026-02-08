@@ -550,6 +550,8 @@ def progress_single_experiment(
             """
             result = execute_sql(retry_count_sql)
             retry_count = (result.get("rows", [{}])[0] or {}).get("retry_count", 0)
+            # Ensure retry_count is int (DB may return string)
+            retry_count = int(retry_count) if retry_count else 0
             
             if retry_count < 3:
                 tasks_to_reset.append(task_id)
