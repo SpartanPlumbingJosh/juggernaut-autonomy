@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from gateways.payment_gateway import PaymentGateway
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,7 +35,9 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals and progress toward target."""
+    gateway = PaymentGateway()
+    progress = await gateway.get_revenue_progress()
     try:
         now = datetime.now(timezone.utc)
         
@@ -107,6 +110,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
+            },
+            "progress": {
+                "current_revenue": progress.get("current_revenue", 0),
+                "target_revenue": progress.get("target_revenue", 0),
+                "progress_percent": progress.get("progress_percent", 0),
+                "net_profit": progress.get("net_profit", 0)
             }
         })
         
