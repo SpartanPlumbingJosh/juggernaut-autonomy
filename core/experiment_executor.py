@@ -59,6 +59,77 @@ def _normalize_task_priority(value: Any) -> str:
 
 # Task templates for each experiment type
 EXPERIMENT_TEMPLATES: Dict[str, List[Dict[str, Any]]] = {
+    "revenue": [
+        {
+            "phase": 1,
+            "title": "Research revenue opportunity",
+            "task_type": "research",
+            "description": "Research the revenue opportunity described in the experiment hypothesis. Identify target market, pricing models, competition, and initial validation steps.",
+            "priority": "high"
+        },
+        {
+            "phase": 2,
+            "title": "Create initial implementation plan",
+            "task_type": "planning",
+            "description": "Based on research findings, create a detailed implementation plan with milestones, resource requirements, and success metrics.",
+            "priority": "high"
+        },
+        {
+            "phase": 3,
+            "title": "Execute first iteration",
+            "task_type": "code",
+            "description": "Implement the first iteration of the revenue experiment based on the plan. Focus on MVP functionality.",
+            "priority": "high"
+        },
+        {
+            "phase": 4,
+            "title": "Measure and evaluate results",
+            "task_type": "evaluation",
+            "description": "Measure results against success criteria defined in the experiment. Document learnings and determine next steps.",
+            "priority": "high"
+        }
+    ],
+    "domain_flip": [
+        {
+            "phase": 1,
+            "title": "Research expired domains",
+            "task_type": "research",
+            "description": "Find expired domains with existing traffic, backlinks, or brandable names. Check domain marketplaces and auction sites.",
+            "priority": "high"
+        },
+        {
+            "phase": 2,
+            "title": "Evaluate domain value",
+            "task_type": "analysis",
+            "description": "Analyze domain metrics: traffic history, backlink profile, domain authority, brandability. Calculate potential ROI.",
+            "priority": "high"
+        },
+        {
+            "phase": 3,
+            "title": "Acquire and list domain",
+            "task_type": "code",
+            "description": "Purchase selected domain and list it on marketplaces (Flippa, Sedo, etc.) with optimized listing.",
+            "priority": "high"
+        }
+    ],
+    "rollback_test": [
+        {
+            "phase": 1,
+            "title": "Verify rollback capability",
+            "task_type": "verification",
+            "description": "Test that the system can successfully rollback changes when needed. Verify rollback mechanisms are functional.",
+            "priority": "high"
+        }
+    ],
+    "test": [
+        {
+            "phase": 1,
+            "title": "Execute test",
+            "task_type": "verification",
+            "description": "Execute the test described in the experiment hypothesis.",
+            "priority": "normal"
+        }
+    ],
     "review_response_service": [
         {
             "phase": 1,

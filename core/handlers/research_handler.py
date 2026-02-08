@@ -71,22 +71,32 @@ class ResearchHandler(BaseHandler):
         task_id = task.get("id")
         payload = task.get("payload", {})
 
-        # Validate required fields
+        # Validate required fields - fallback to title or description if query not in payload
         query = payload.get("query") or payload.get("topic") or payload.get("search")
         if not query:
-            error_msg = "Research task missing 'query', 'topic', or 'search' in payload"
-            self._log(
-                "handler.research.missing_query",
-                error_msg,
-                level="error",
-                task_id=task_id
-            )
-            return HandlerResult(
-                success=False,
-                data={"expected_fields": ["query", "topic", "search"]},
-                error=error_msg,
-                logs=self._execution_logs
-            )
+            # Fallback: use task title or description as search query
+            query = task.get("title") or task.get("description")
+            if query:
+                self._log(
+                    "handler.research.fallback_query",
+                    f"Using task title/description as search query: {query[:100]}",
+                    level="info",
+                    task_id=task_id
+                )
+            else:
+                error_msg = "Research task missing 'query', 'topic', or 'search' in payload, and no title/description available"
+                self._log(
+                    "handler.research.missing_query",
+                    error_msg,
+                    level="error",
+                    task_id=task_id
+                )
+                return HandlerResult(
+                    success=False,
+                    data={"expected_fields": ["query", "topic", "search", "title", "description"]},
+                    error=error_msg,
+                    logs=self._execution_logs
+                )
 
         # Sanitize and validate query
         query = str(query).strip()[:MAX_QUERY_LENGTH]
