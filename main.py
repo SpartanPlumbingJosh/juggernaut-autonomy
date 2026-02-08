@@ -4112,8 +4112,55 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                 task_succeeded = False
 
         elif task.task_type == "code":
-            # Autonomous code generation handler (PR #185)
-            if CODE_TASK_AVAILABLE:
+            # H-01: Route through AIHandler for tool-assisted execution
+            _ai_tools_disabled = os.getenv("AIHANDLER_TOOLS_DISABLED", "0").strip().lower() in ("1", "true", "yes")
+            _ai_handled = False
+
+            if not _ai_tools_disabled:
+                try:
+                    from core.handlers import get_handler as _get_handler
+
+                    _ai_task_dict = {
+                        "id": task.id,
+                        "task_type": original_task_type,
+                        "title": task.title,
+                        "description": task.description,
+                        "priority": task.priority,
+                        "payload": task.payload or {},
+                    }
+                    _ai_handler = _get_handler("code", execute_sql, log_action)
+                    if _ai_handler is not None:
+                        log_action(
+                            "task.aihandler_dispatch",
+                            f"Routing code task through AIHandler (tool-assisted) task_type='{original_task_type}'",
+                            level="info",
+                            task_id=task.id,
+                        )
+                        _ai_result = _ai_handler.execute(_ai_task_dict)
+                        result = _ai_result.to_dict()
+                        task_succeeded = bool(_ai_result.success)
+                        _ai_handled = True
+
+                        waiting = bool((_ai_result.data or {}).get("waiting_approval"))
+                        if waiting:
+                            update_task_status(task.id, "waiting_approval", _ai_result.data)
+                            return False, {"waiting_approval": True, **(_ai_result.data or {})}
+
+                        if task_succeeded:
+                            log_action("task.aihandler_complete",
+                                      f"AIHandler completed code task successfully",
+                                      task_id=task.id, output_data=result)
+                        else:
+                            log_action("task.aihandler_failed",
+                                      f"AIHandler failed: {(_ai_result.error or 'unknown')[:200]}",
+                                      level="error", task_id=task.id, error_data=result)
+                except Exception as ai_err:
+                    log_action("task.aihandler_exception",
+                              f"AIHandler exception, falling back to code executor: {str(ai_err)[:200]}",
+                              level="warn", task_id=task.id)
+
+            # Legacy code generation path (PR #185) — used when AIHANDLER_TOOLS_DISABLED=1 or AIHandler failed
+            if not _ai_handled and CODE_TASK_AVAILABLE:
                 try:
                     _ensure_proactive_min_schema(execute_sql, log_action)
                 except Exception:
@@ -4290,7 +4337,7 @@ def execute_task(task: Task, dry_run: bool = False, approval_bypassed: bool = Fa
                     
                     log_action("code_task.exception", f"Code task exception: {str(code_err)}",
                               level="error", task_id=task.id, error_data=result)
-            else:
+            elif not _ai_handled:
                 result = {"error": "Code task executor not available", "import_error": _code_task_import_error}
                 task_succeeded = False
                 log_action("code_task.unavailable", "Code task executor not available",
