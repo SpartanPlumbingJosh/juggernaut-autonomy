@@ -244,6 +244,19 @@ def public_revenue(
         return {"success": False, "error": str(e)}
 
 
+@router.get("/revenue/summary")
+def public_revenue_summary() -> Dict[str, Any]:
+    """Get revenue summary (alias for /revenue for frontend compatibility)."""
+    result = public_revenue(limit=0)
+    if result.get("success"):
+        return {
+            "success": True,
+            "data": result.get("summary", {}),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    return result
+
+
 @router.get("/revenue/by-source")
 def public_revenue_by_source() -> Dict[str, Any]:
     """Get revenue breakdown by source."""
