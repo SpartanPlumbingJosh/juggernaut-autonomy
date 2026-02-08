@@ -24,6 +24,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Verify aider CLI is installed and accessible
+RUN which aider && aider --version || (echo "ERROR: aider CLI not found in PATH" && exit 1)
+
 # Cache bust - change this to force rebuild of COPY layers
 ARG CACHEBUST=20260125210000
 
