@@ -162,6 +162,140 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription with automated billing."""
+    try:
+        # Validate required fields
+        required = ["customer_id", "plan_id", "payment_method_id"]
+        if not all(field in body for field in required):
+            return _error_response(400, "Missing required fields")
+
+        # Create subscription in database
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, payment_method_id,
+            status, current_period_start, current_period_end,
+            created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["customer_id"]}',
+            '{body["plan_id"]}',
+            '{body["payment_method_id"]}',
+            'active',
+            NOW(),
+            NOW() + INTERVAL '1 month',
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        sub_id = result.get("rows", [{}])[0].get("id")
+        
+        if not sub_id:
+            return _error_response(500, "Failed to create subscription")
+
+        # Create first invoice
+        invoice_sql = f"""
+        INSERT INTO invoices (
+            id, subscription_id, amount_cents, currency,
+            status, due_date, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{sub_id}',
+            (SELECT price_cents FROM plans WHERE id = '{body["plan_id"]}'),
+            (SELECT currency FROM plans WHERE id = '{body["plan_id"]}'),
+            'pending',
+            NOW() + INTERVAL '3 days',
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        await query_db(invoice_sql)
+        
+        return _make_response(201, {
+            "subscription_id": sub_id,
+            "message": "Subscription created successfully"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_process_payment(invoice_id: str) -> Dict[str, Any]:
+    """Process payment for an invoice."""
+    try:
+        # Get invoice details
+        invoice_sql = f"""
+        SELECT i.id, i.amount_cents, i.currency, i.subscription_id,
+               s.payment_method_id, s.customer_id
+        FROM invoices i
+        JOIN subscriptions s ON i.subscription_id = s.id
+        WHERE i.id = '{invoice_id}'
+        """
+        
+        invoice_result = await query_db(invoice_sql)
+        invoice = invoice_result.get("rows", [{}])[0]
+        
+        if not invoice.get("id"):
+            return _error_response(404, "Invoice not found")
+            
+        # Process payment (simplified for MVP)
+        payment_sql = f"""
+        INSERT INTO payments (
+            id, invoice_id, amount_cents, currency,
+            status, processed_at, payment_method_id
+        ) VALUES (
+            gen_random_uuid(),
+            '{invoice_id}',
+            {invoice["amount_cents"]},
+            '{invoice["currency"]}',
+            'completed',
+            NOW(),
+            '{invoice["payment_method_id"]}'
+        )
+        RETURNING id
+        """
+        
+        payment_result = await query_db(payment_sql)
+        payment_id = payment_result.get("rows", [{}])[0].get("id")
+        
+        if not payment_id:
+            return _error_response(500, "Payment processing failed")
+            
+        # Update invoice status
+        await query_db(f"""
+            UPDATE invoices SET status = 'paid', paid_at = NOW()
+            WHERE id = '{invoice_id}'
+        """)
+        
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {invoice["amount_cents"]},
+                '{invoice["currency"]}',
+                'subscription',
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "message": "Payment processed successfully"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +365,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            request_body = json.loads(body or "{}")
+            return handle_create_subscription(request_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/payments/{invoice_id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_process_payment(parts[2])
     
     return _error_response(404, "Not found")
 
