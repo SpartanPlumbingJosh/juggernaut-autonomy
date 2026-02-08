@@ -557,60 +557,198 @@ TOOL_DEFINITIONS: List[Dict[str, Any]] = [
 
 
 def tool_web_search(query: str, detailed: bool = False) -> Dict[str, Any]:
-    """Execute web search via MCP server's Perplexity integration."""
+    """Execute web search via Perplexity API directly."""
     import json
     import urllib.request
     import urllib.error
     
-    # Get MCP server URL from environment
-    mcp_url = os.getenv("MCP_SERVER_URL", "")
-    if not mcp_url:
-        # Fallback: construct from Railway internal URL pattern
-        mcp_url = "http://juggernaut-mcp.railway.internal:8080"
+    api_key = os.getenv("PERPLEXITY_API_KEY")
+    if not api_key:
+        return {"success": False, "error": "PERPLEXITY_API_KEY environment variable not set"}
     
     try:
+        # Perplexity API endpoint
+        url = "https://api.perplexity.ai/chat/completions"
+        
+        # Build the request payload for search
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful search assistant. Provide accurate, up-to-date information with citations when possible."
+            },
+            {
+                "role": "user",
+                "content": query
+            }
+        ]
+        
+        payload = {
+            "model": "sonar-pro" if detailed else "sonar",
+            "messages": messages,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "return_citations": True,
+            "search_domain_filter": [],
+            "return_images": False,
+            "return_related_questions": False,
+            "search_recency_filter": "month",
+            "top_k": 0,
+            "stream": False,
+            "presence_penalty": 0,
+            "frequency_penalty": 1
+        }
+        
         req = urllib.request.Request(
-            f"{mcp_url.rstrip('/')}/tools/web_search",
-            data=json.dumps({"query": query, "detailed": detailed}).encode(),
-            headers={"Content-Type": "application/json"},
+            url,
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            },
             method="POST"
         )
+        
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode())
-            return {"success": True, "result": result}
+            
+            # Extract the response content and citations
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            citations = result.get("citations", [])
+            
+            return {
+                "success": True,
+                "result": {
+                    "answer": content,
+                    "citations": citations,
+                    "query": query,
+                    "model_used": payload["model"]
+                }
+            }
+            
     except urllib.error.HTTPError as e:
-        return {"success": False, "error": f"MCP server error: {e.code}"}
+        error_body = e.read().decode()
+        return {"success": False, "error": f"Perplexity API error: {e.code} - {error_body}"}
     except Exception as e:
         return {"success": False, "error": f"Search failed: {e}"}
 
 
 def tool_send_email(to: str, subject: str, body: str, from_address: str = None) -> Dict[str, Any]:
-    """Send email via MCP server's email integration."""
+    """Send email via Resend API directly."""
     import json
     import urllib.request
+    import urllib.error
     
-    mcp_url = os.getenv("MCP_SERVER_URL", "http://juggernaut-mcp.railway.internal:8080")
-    
-    payload = {
-        "to": to,
-        "subject": subject,
-        "body": body
-    }
-    if from_address:
-        payload["from"] = from_address
+    # Try Resend API first (easier setup than MS Graph)
+    api_key = os.getenv("RESEND_API_KEY")
+    if not api_key:
+        # Fallback to SendGrid if Resend not configured
+        api_key = os.getenv("SENDGRID_API_KEY")
+        if api_key:
+            return _send_via_sendgrid(api_key, to, subject, body, from_address)
+        return {"success": False, "error": "RESEND_API_KEY or SENDGRID_API_KEY environment variable not set"}
     
     try:
+        # Resend API endpoint
+        url = "https://api.resend.com/emails"
+        
+        # Determine from address
+        from_addr = from_address or os.getenv("EMAIL_FROM_ADDRESS") or "juggernaut@autonomy.system"
+        
+        payload = {
+            "from": from_addr,
+            "to": [to],
+            "subject": subject,
+            "html": body if "<" in body else None,
+            "text": body if "<" not in body else None
+        }
+        
+        # Remove None values
+        payload = {k: v for k, v in payload.items() if v is not None}
+        
         req = urllib.request.Request(
-            f"{mcp_url.rstrip('/')}/tools/send_email",
+            url,
             data=json.dumps(payload).encode(),
-            headers={"Content-Type": "application/json"},
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            },
             method="POST"
         )
+        
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read().decode())
-            return {"success": True, "result": result}
+            return {
+                "success": True,
+                "result": {
+                    "id": result.get("id"),
+                    "to": to,
+                    "subject": subject,
+                    "provider": "resend"
+                }
+            }
+            
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        return {"success": False, "error": f"Resend API error: {e.code} - {error_body}"}
     except Exception as e:
         return {"success": False, "error": f"Email send failed: {e}"}
+
+
+def _send_via_sendgrid(api_key: str, to: str, subject: str, body: str, from_address: str = None) -> Dict[str, Any]:
+    """Send email via SendGrid API."""
+    import json
+    import urllib.request
+    import urllib.error
+    
+    try:
+        url = "https://api.sendgrid.com/v3/mail/send"
+        
+        from_addr = from_address or os.getenv("EMAIL_FROM_ADDRESS") or "juggernaut@autonomy.system"
+        
+        # SendGrid uses a nested payload structure
+        payload = {
+            "personalizations": [
+                {
+                    "to": [{"email": to}]
+                }
+            ],
+            "from": {"email": from_addr},
+            "subject": subject
+        }
+        
+        # Determine if HTML or plain text
+        if "<" in body:
+            payload["content"] = [{"type": "text/html", "value": body}]
+        else:
+            payload["content"] = [{"type": "text/plain", "value": body}]
+        
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {api_key}"
+            },
+            method="POST"
+        )
+        
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            # SendGrid returns 202 Accepted with empty body on success
+            return {
+                "success": True,
+                "result": {
+                    "to": to,
+                    "subject": subject,
+                    "provider": "sendgrid",
+                    "status_code": resp.getcode()
+                }
+            }
+            
+    except urllib.error.HTTPError as e:
+        error_body = e.read().decode()
+        return {"success": False, "error": f"SendGrid API error: {e.code} - {error_body}"}
+    except Exception as e:
+        return {"success": False, "error": f"SendGrid send failed: {e}"}
 
 
 # Map tool names to their implementation functions
