@@ -18,7 +18,6 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
-from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
 # Configuration constants
@@ -28,45 +27,18 @@ FAILURE_THRESHOLD_MINUTES = int(
 )
 MAX_CONSECUTIVE_FAILURES = 3
 
-# Database configuration — from environment only (no hardcoded credentials)
-NEON_HTTP_ENDPOINT = os.environ.get("NEON_HTTP_ENDPOINT", "")
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
-
 logger = logging.getLogger(__name__)
 
 
 def _execute_query(query: str) -> dict:
     """
-    Execute a SQL query via Neon HTTP API.
-    
-    Args:
-        query: SQL query string to execute
-        
-    Returns:
-        Dict with rows, rowCount, and fields from query result
-        
-    Raises:
-        URLError: If database connection fails
-        HTTPError: If query fails
+    Execute a SQL query via core.database.query_db.
+
+    Delegates to the shared database module which correctly derives
+    the Neon HTTP endpoint from DATABASE_URL.
     """
-    headers = {
-        "Content-Type": "application/json",
-        "Neon-Connection-String": DATABASE_URL
-    }
-    data = json.dumps({"query": query}).encode("utf-8")
-    
-    request = Request(NEON_HTTP_ENDPOINT, data=data, headers=headers, method="POST")
-    
-    try:
-        with urlopen(request, timeout=30) as response:
-            result = json.loads(response.read().decode("utf-8"))
-            return result
-    except HTTPError as e:
-        logger.error("Database query failed: %s - %s", e.code, e.reason)
-        raise
-    except URLError as e:
-        logger.error("Database connection failed: %s", e.reason)
-        raise
+    from core.database import query_db
+    return query_db(query)
 
 
 def detect_failed_workers(

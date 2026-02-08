@@ -21,8 +21,8 @@ RUN pip install --no-cache-dir 'litellm[proxy]'
 # Copy config
 COPY litellm/litellm_config.yaml ./litellm_config.yaml
 
-# Ownership
-RUN chown -R litellm:litellm /app
+# Ownership — /app for config, site-packages/litellm for runtime UI writes
+RUN chown -R litellm:litellm /app /usr/local/lib/python3.11/site-packages/litellm/
 
 USER litellm
 
