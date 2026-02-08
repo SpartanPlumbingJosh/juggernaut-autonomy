@@ -771,17 +771,8 @@ def handle_orphaned_waiting_approval_tasks():
         return {"error": str(e)}
 
 def sanitize_payload(payload: Dict, max_value_length: int = 1000) -> Dict:
-    """
-    Sanitize payload to remove sensitive information before logging.
-    
-    Args:
-        payload: Dictionary to sanitize
-        max_value_length: Maximum length for string values
-    
-    Returns:
-        Sanitized dictionary safe for logging
-    """
     if not isinstance(payload, dict):
+        # If payload is not a dict (e.g., list, string, None), return as-is
         return payload
     
     sanitized = {}
