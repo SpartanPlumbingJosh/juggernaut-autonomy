@@ -5177,7 +5177,117 @@ def autonomy_loop():
             except Exception:
                 pass
             
-            # 0. Check for approved tasks that can resume (L3: Human-in-the-Loop)
+            # 0. Check scheduled tasks FIRST - run on schedule regardless of queue status (24/7 autonomous operation)
+            try:
+                _ensure_revenue_discovery_schema()
+            except Exception:
+                pass
+
+            try:
+                _ensure_revenue_discovery_scheduled_tasks()
+            except Exception:
+                pass
+
+            scheduled = get_due_scheduled_tasks()
+            if scheduled:
+                sched_task = scheduled[0]
+                sched_task_type = sched_task.get('task_type', 'unknown')
+                sched_task_id = sched_task.get('id')
+                
+                log_decision("loop.scheduled", f"Running scheduled task: {sched_task['name']}",
+                             f"Scheduled task due (type: {sched_task_type})")
+                
+                # Start the task run
+                run_info = None
+                run_id = None
+                if SCHEDULER_AVAILABLE:
+                    run_info = start_task_run(sched_task_id, triggered_by=WORKER_ID)
+                    run_id = run_info.get("run_id") if run_info.get("success") else None
+                
+                # Execute the scheduled task based on task_type
+                sched_result = None
+                sched_success = False
+                
+                try:
+                    if sched_task_type == "opportunity_scan":
+                        if PROACTIVE_AVAILABLE:
+                            sched_result = handle_opportunity_scan(
+                                sched_task,
+                                execute_sql,
+                                log_action
+                            )
+                            sched_success = sched_result.get("success", False)
+                        else:
+                            sched_result = {"error": "Proactive module not available"}
+                            sched_success = False
+                    elif sched_task_type == "proactive_diverse":
+                        sched_result = _maybe_generate_diverse_proactive_tasks()
+                        sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success", True))
+                    elif sched_task_type == "idea_generation":
+                        if REVENUE_DISCOVERY_AVAILABLE:
+                            sched_result = generate_revenue_ideas(execute_sql=execute_sql, log_action=log_action)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        else:
+                            sched_result = {"error": "revenue discovery modules not available"}
+                            sched_success = False
+                    elif sched_task_type == "idea_scoring":
+                        if REVENUE_DISCOVERY_AVAILABLE:
+                            sched_result = score_pending_ideas(execute_sql=execute_sql, log_action=log_action)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        else:
+                            sched_result = {"error": "revenue discovery modules not available"}
+                            sched_success = False
+                    elif sched_task_type == "experiment_review":
+                        if EXPERIMENT_EXECUTOR_AVAILABLE:
+                            sched_result = progress_experiments(execute_sql=execute_sql, log_action=log_action)
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        else:
+                            sched_result = {"error": "experiment_executor module not available"}
+                            sched_success = False
+                    elif sched_task_type == "portfolio_rebalance":
+                        if REVENUE_DISCOVERY_AVAILABLE:
+                            sched_result = start_experiments_from_top_ideas(
+                                execute_sql=execute_sql,
+                                log_action=log_action,
+                                max_new=1,
+                                min_score=60.0,
+                                budget=20.0,
+                            )
+                            sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success"))
+                        else:
+                            sched_result = {"error": "revenue discovery modules not available"}
+                            sched_success = False
+                    else:
+                        sched_result = {"skipped": True, "reason": f"No handler for task_type: {sched_task_type}"}
+                        sched_success = True
+                    
+                    log_action(
+                        f"scheduled.{sched_task_type}.{'complete' if sched_success else 'failed'}",
+                        f"Scheduled task {sched_task['name']}: {'success' if sched_success else 'failed'}",
+                        level="info" if sched_success else "error",
+                        output_data=sched_result
+                    )
+
+                    reschedule_scheduled_task(sched_task, success=bool(sched_success))
+                    
+                    if SCHEDULER_AVAILABLE and run_id:
+                        complete_task_run(run_id, result=sched_result)
+                    
+                except Exception as sched_error:
+                    log_action(
+                        f"scheduled.{sched_task_type}.error",
+                        f"Scheduled task {sched_task['name']} failed: {str(sched_error)}",
+                        level="error",
+                        error_data={"error": str(sched_error)}
+                    )
+                    try:
+                        reschedule_scheduled_task(sched_task, success=False)
+                    except Exception:
+                        pass
+                    if SCHEDULER_AVAILABLE and run_id:
+                        fail_task_run(run_id, error_message=str(sched_error))
+
+            # 1. Check for approved tasks that can resume (L3: Human-in-the-Loop)
             approved_tasks = poll_approved_tasks(limit=3)
             if approved_tasks:
                 for approved_task in approved_tasks:
@@ -5199,7 +5309,7 @@ def autonomy_loop():
                             error_data=result
                         )
             
-            # 1. Check for pending tasks
+            # 2. Check for pending tasks
             tasks = get_pending_tasks(limit=5)
             
             if tasks:
