@@ -23,6 +23,7 @@ from typing import Any, Callable, Dict, List, Optional, Type
 from .base import BaseHandler, HandlerResult
 from .ai_handler import AIHandler
 from .analysis_handler import AnalysisHandler
+from .code_fix_handler import CodeFixHandler
 from .database_handler import DatabaseHandler
 from .idea_scoring_handler import IdeaScoringHandler
 from .research_handler import ResearchHandler
@@ -38,6 +39,7 @@ _HANDLER_REGISTRY: Dict[str, Type[BaseHandler]] = {
     "analysis": AnalysisHandler,
     "audit": AnalysisHandler,
     "reporting": AnalysisHandler,
+    "code_fix": CodeFixHandler,
     "database": DatabaseHandler,
     "idea_scoring": IdeaScoringHandler,
     "research": ResearchHandler,

@@ -406,6 +406,16 @@ class PRTracker:
                     if aider_result:
                         change_record["aider_iteration"] = aider_result
                 
+                # Auto-merge if approved and auto-generated
+                if new_state == "approved" and old_state != "approved":
+                    from core.pr_tracker_auto_merge import try_auto_merge
+                    merge_result = try_auto_merge(
+                        task_id, repo, pr_number, status,
+                        self.execute_sql, self.log_action
+                    )
+                    if merge_result:
+                        change_record["auto_merged"] = merge_result
+                
                 changed_prs.append(change_record)
         
         return changed_prs
