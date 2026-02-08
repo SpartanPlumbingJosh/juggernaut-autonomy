@@ -28,14 +28,22 @@ LEARNING_APPLICATION_AVAILABLE = False
 HEALTH_MONITORING_AVAILABLE = False
 ESCALATION_AVAILABLE = False
 EXECUTIVE_REPORT_AVAILABLE = False
-GOAL_TRACKING_AVAILABLE = False
+TASK_SCHEDULING_AVAILABLE = False
 EXPERIMENT_LIFECYCLE_AVAILABLE = False
+GOAL_TRACKING_AVAILABLE = False
+GOAL_DECOMPOSITION_AVAILABLE = False
 
 try:
     from core.learning_application import execute_learning_application_cycle
     LEARNING_APPLICATION_AVAILABLE = True
 except ImportError as e:
     logger.warning("Learning application not available: %s", e)
+
+try:
+    from core.goal_decomposer import decompose_goals_cycle
+    GOAL_DECOMPOSITION_AVAILABLE = True
+except ImportError as e:
+    logger.warning("Goal decomposition not available: %s", e)
 
 try:
     from core.monitoring import check_all_components, get_health_status
@@ -111,6 +119,13 @@ class L5Orchestrator:
         self.is_running = True
         self.stop_event.clear()
         
+        # Start goal decomposition daemon (CRITICAL - generates work!)
+        if GOAL_DECOMPOSITION_AVAILABLE:
+            t = threading.Thread(target=self._goal_decomposition_loop, daemon=True)
+            t.start()
+            self.threads.append(t)
+            logger.info("Started goal decomposition daemon")
+        
         # Start learning application daemon
         if LEARNING_APPLICATION_AVAILABLE:
             t = threading.Thread(target=self._learning_application_loop, daemon=True)
@@ -158,6 +173,7 @@ class L5Orchestrator:
             "L5 orchestrator started with all daemons",
             level="info",
             output_data={
+                "goal_decomposition": GOAL_DECOMPOSITION_AVAILABLE,
                 "learning_application": LEARNING_APPLICATION_AVAILABLE,
                 "health_monitoring": HEALTH_MONITORING_AVAILABLE,
                 "escalation": ESCALATION_AVAILABLE,
@@ -185,6 +201,41 @@ class L5Orchestrator:
     # =========================================================================
     # DAEMON LOOPS
     # =========================================================================
+    
+    def _goal_decomposition_loop(self):
+        """Periodically decompose goals into executable tasks - THE TASK GENERATOR."""
+        interval = 180  # 3 minutes - frequent to keep queue filled
+        
+        while not self.stop_event.is_set():
+            try:
+                if GOAL_DECOMPOSITION_AVAILABLE:
+                    result = decompose_goals_cycle(
+                        execute_sql=self.execute_sql,
+                        log_action=self.log_action
+                    )
+                    
+                    if result.get("tasks_created", 0) > 0:
+                        logger.info(
+                            "Goal decomposer: Created %d tasks from %d goals",
+                            result["tasks_created"],
+                            result["goals_processed"]
+                        )
+                        self.log_action(
+                            "goal_decomposer.cycle_complete",
+                            f"Generated {result['tasks_created']} tasks from goals",
+                            level="info",
+                            output_data=result
+                        )
+            except Exception as e:
+                logger.error("Error in goal decomposition loop: %s", e)
+                self.log_action(
+                    "goal_decomposer.error",
+                    f"Goal decomposition failed: {str(e)[:200]}",
+                    level="error",
+                    output_data={"error": str(e)}
+                )
+            
+            self.stop_event.wait(interval)
     
     def _learning_application_loop(self):
         """Periodically apply captured learnings to improve the system."""
@@ -489,6 +540,7 @@ def start_l5_orchestrator(
 def get_l5_status() -> Dict[str, Any]:
     """Get status of all L5 components."""
     return {
+        "goal_decomposition": GOAL_DECOMPOSITION_AVAILABLE,
         "learning_application": LEARNING_APPLICATION_AVAILABLE,
         "health_monitoring": HEALTH_MONITORING_AVAILABLE,
         "escalation": ESCALATION_AVAILABLE,
