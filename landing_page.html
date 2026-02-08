@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Product Landing</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .product { border: 1px solid #ddd; padding: 20px; margin: 20px 0; }
+        button { background: #6772E5; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Our Awesome Product</h1>
+    <div class="product">
+        <h2>Basic Plan - $9.99/month</h2>
+        <button id="checkout-button">Subscribe Now</button>
+    </div>
+
+    <script>
+        const stripe = Stripe('pk_test_...'); // TODO: Add your public key
+        
+        document.getElementById('checkout-button').addEventListener('click', async () => {
+            try {
+                const response = await fetch('/revenue/payment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ amount: 9.99, currency: 'usd' })
+                });
+                const { client_secret } = await response.json();
+                
+                const result = await stripe.confirmCardPayment(client_secret);
+                if (result.error) {
+                    alert(result.error.message);
+                } else if (result.paymentIntent.status === 'succeeded') {
+                    alert('Payment succeeded!');
+                }
+            } catch (err) {
+                console.error('Error:', err);
+                alert('Payment failed');
+            }
+        });
+    </script>
+</body>
+</html>
