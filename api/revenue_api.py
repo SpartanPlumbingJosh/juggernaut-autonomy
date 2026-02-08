@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue & Marketing API - Expose revenue and marketing funnel analytics.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /marketing/landing - Generate landing page
+- GET /marketing/funnel - Conversion funnel metrics
+- GET /marketing/leads - Lead scoring data
 """
 
 import json
@@ -12,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from automation.marketing.landing_generator import LandingGenerator
+from automation.marketing.lead_scoring import LeadScorer
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
