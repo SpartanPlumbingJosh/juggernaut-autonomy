@@ -10,11 +10,12 @@ and populates the governance_tasks queue with work linked back to parent goals.
 
 import json
 import logging
+import os
+import urllib.request
+import urllib.error
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 from uuid import uuid4
-
-from .ai_executor import AIExecutor, select_model_for_task
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ class GoalDecomposer:
                     0
                 ) as active_task_count
             FROM goals g
-            WHERE g.status IN ('pending', 'in_progress', 'assigned')
+            WHERE g.status IN ('active', 'pending', 'in_progress', 'assigned')
               AND g.progress < 100
             ORDER BY 
                 g.deadline ASC NULLS LAST,
@@ -150,10 +151,6 @@ class GoalDecomposer:
         deadline = goal.get("deadline")
         max_cost_cents = goal.get("max_cost_cents", 50000)
         
-        # Use strategy model for planning
-        model = select_model_for_task("strategy")
-        executor = AIExecutor(model=model, max_tokens=4096)
-        
         # Build decomposition prompt
         prompt = self._build_decomposition_prompt(
             title=title,
@@ -162,12 +159,9 @@ class GoalDecomposer:
             deadline=deadline
         )
         
-        # Get LLM to break down the goal
-        messages = [{"role": "user", "content": prompt}]
-        
+        # Call OpenRouter directly (strategy model for planning)
         try:
-            response = executor.chat(messages=messages, temperature=0.7)
-            content = response.get("content", "")
+            content = self._call_openrouter(prompt)
             
             # Parse task breakdown from response
             tasks = self._parse_task_breakdown(content)
@@ -358,29 +352,29 @@ Generate the task breakdown now:"""
         tags = ["auto-generated", "goal-task", f"goal:{goal_id[:8]}", task_type]
         
         try:
-            from core.database import fetch_all
-            
-            fetch_all("""
+            # Use passed execute_sql function from main.py
+            insert_sql = f"""
                 INSERT INTO governance_tasks (
                     id, goal_id, title, description, task_type, 
                     status, priority, payload, tags, 
                     created_at, updated_at, created_by
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ) VALUES (
+                    '{task_id}',
+                    '{goal_id.replace("'", "''")}',
+                    '{title.replace("'", "''")}',
+                    '{description.replace("'", "''")}',
+                    '{task_type}',
+                    'pending',
+                    '{priority}',
+                    '{json.dumps(payload).replace("'", "''")}',
+                    '{json.dumps(tags).replace("'", "''")}',
+                    '{now}',
+                    '{now}',
+                    'goal_decomposer'
+                )
                 RETURNING id
-            """, (
-                task_id,
-                goal_id,
-                title,
-                description,
-                task_type,
-                'pending',
-                priority,
-                json.dumps(payload),
-                json.dumps(tags),
-                now,
-                now,
-                'goal_decomposer'
-            ))
+            """
+            self.execute_sql(insert_sql)
             
             logger.info(f"Created task {task_id} for goal {goal_id}: {title}")
             return task_id
