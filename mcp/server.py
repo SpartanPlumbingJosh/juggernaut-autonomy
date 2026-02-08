@@ -906,22 +906,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "ai_chat":
             if not OPENROUTER_API_KEY:
                 return [TextContent(type="text", text=json.dumps({"error": "OpenRouter not configured"}))]
-            provider = None
-            try:
-                prompt_price = float((OPENROUTER_MAX_PRICE_PROMPT or "").strip() or 0)
-                completion_price = float((OPENROUTER_MAX_PRICE_COMPLETION or "").strip() or 0)
-                if prompt_price > 0 and completion_price > 0:
-                    provider = {"max_price": {"prompt": prompt_price, "completion": completion_price}}
-            except ValueError:
-                provider = None
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "model": arguments.get("model") or "openrouter/auto",
                     "messages": arguments.get("messages"),
                     "max_tokens": arguments.get("max_tokens", 4096),
                 }
-                if provider is not None:
-                    payload["provider"] = provider
                 async with session.post(
                     LLM_CHAT_ENDPOINT,
                     headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
@@ -933,22 +923,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "ai_complete":
             if not OPENROUTER_API_KEY:
                 return [TextContent(type="text", text=json.dumps({"error": "OpenRouter not configured"}))]
-            provider = None
-            try:
-                prompt_price = float((OPENROUTER_MAX_PRICE_PROMPT or "").strip() or 0)
-                completion_price = float((OPENROUTER_MAX_PRICE_COMPLETION or "").strip() or 0)
-                if prompt_price > 0 and completion_price > 0:
-                    provider = {"max_price": {"prompt": prompt_price, "completion": completion_price}}
-            except ValueError:
-                provider = None
             async with aiohttp.ClientSession() as session:
                 payload = {
                     "model": arguments.get("model") or "openrouter/auto",
                     "messages": [{"role": "user", "content": arguments.get("prompt")}],
                     "max_tokens": arguments.get("max_tokens", 4096),
                 }
-                if provider is not None:
-                    payload["provider"] = provider
                 async with session.post(
                     LLM_CHAT_ENDPOINT,
                     headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
