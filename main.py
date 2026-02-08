@@ -1412,12 +1412,15 @@ def _ensure_revenue_discovery_scheduled_tasks() -> None:
             pass
 
 
-def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
+def _maybe_generate_diverse_proactive_tasks(force: bool = False) -> Dict[str, Any]:
     """Generate diverse, meaningful tasks when the queue is empty.
 
     This is a best-effort helper intended to keep the system from going idle.
     Rate limited via the scheduled_tasks.last_run_at timestamp for the
     synthetic task name 'proactive_diverse'.
+    
+    Args:
+        force: If True, bypass the rate limit check (used when called from scheduler)
     """
     if not PROACTIVE_AVAILABLE:
         return {"success": False, "error": "proactive module not available"}
@@ -1445,40 +1448,41 @@ def _maybe_generate_diverse_proactive_tasks() -> Dict[str, Any]:
             pass
         return {"success": True, "skipped": True, "reason": "pending_tasks_exist", "pending": pending_count}
 
-    # Rate limit: at most once per hour
-    try:
-        rate_res = execute_sql(
-            """
-            SELECT last_run_at
-            FROM scheduled_tasks
-            WHERE name = 'proactive_diverse'
-            LIMIT 1
-            """
-        )
-        if rate_res.get("rows") and rate_res["rows"][0].get("last_run_at"):
-            # Only rate-limit if it ran within the last hour
-            last_run_recent = execute_sql(
+    # Rate limit: at most once per hour (unless force=True from scheduler)
+    if not force:
+        try:
+            rate_res = execute_sql(
                 """
-                SELECT 1
+                SELECT last_run_at
                 FROM scheduled_tasks
                 WHERE name = 'proactive_diverse'
-                  AND last_run_at > NOW() - INTERVAL '1 hour'
                 LIMIT 1
                 """
             )
-            if last_run_recent.get("rows"):
-                try:
-                    log_action(
-                        "proactive.diverse_skipped",
-                        "Skipped diverse generation due to rate limit",
-                        level="debug",
-                        output_data={"reason": "rate_limited"},
-                    )
-                except Exception:
-                    pass
-                return {"success": True, "skipped": True, "reason": "rate_limited"}
-    except Exception:
-        pass
+            if rate_res.get("rows") and rate_res["rows"][0].get("last_run_at"):
+                # Only rate-limit if it ran within the last hour
+                last_run_recent = execute_sql(
+                    """
+                    SELECT 1
+                    FROM scheduled_tasks
+                    WHERE name = 'proactive_diverse'
+                      AND last_run_at > NOW() - INTERVAL '1 hour'
+                    LIMIT 1
+                    """
+                )
+                if last_run_recent.get("rows"):
+                    try:
+                        log_action(
+                            "proactive.diverse_skipped",
+                            "Skipped diverse generation due to rate limit",
+                            level="debug",
+                            output_data={"reason": "rate_limited"},
+                        )
+                    except Exception:
+                        pass
+                    return {"success": True, "skipped": True, "reason": "rate_limited"}
+        except Exception:
+            pass
 
     # Best-effort marker row used only for rate limiting. Avoid ON CONFLICT target because
     # some environments may not enforce a unique constraint on (name).
@@ -5221,7 +5225,8 @@ def autonomy_loop():
                             sched_result = {"error": "Proactive module not available"}
                             sched_success = False
                     elif sched_task_type == "proactive_diverse":
-                        sched_result = _maybe_generate_diverse_proactive_tasks()
+                        # Force=True bypasses rate limit since scheduler controls timing
+                        sched_result = _maybe_generate_diverse_proactive_tasks(force=True)
                         sched_success = bool(isinstance(sched_result, dict) and sched_result.get("success", True))
                     elif sched_task_type == "idea_generation":
                         if REVENUE_DISCOVERY_AVAILABLE:
@@ -5684,19 +5689,9 @@ def autonomy_loop():
                             fail_task_run(run_id, error_message=str(sched_error))
                 else:
                     # 3. Nothing to do - log heartbeat
-                    # Proactive diversity engine: if idle, generate 2-3 diverse meaningful tasks (rate-limited)
-                    try:
-                        gen_result = _maybe_generate_diverse_proactive_tasks()
-                        if isinstance(gen_result, dict) and gen_result.get("tasks_created"):
-                            log_action(
-                                "proactive.diverse_generation",
-                                "Generated diverse proactive tasks",
-                                level="info",
-                                output_data=gen_result,
-                            )
-                    except Exception:
-                        pass
-
+                    # Note: Proactive task generation is now handled by the scheduler (hourly)
+                    # No need to call it from the normal loop - reduces noise and rate limit conflicts
+                    
                     if loop_count % 5 == 0:  # Every 5 loops
                         log_action("loop.heartbeat", f"Loop {loop_count}: No work found",
                                    output_data={"loop": loop_count, "tasks_checked": 0})
