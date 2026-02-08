@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,7 +35,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals including subscriptions."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -44,16 +45,16 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         quarter_start = now.replace(month=quarter_month, day=1, hour=0, minute=0, second=0, microsecond=0)
         year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         
-        # Get revenue by period
+        # Get revenue by period including subscriptions
         sql = f"""
         SELECT 
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            SUM(CASE WHEN event_type IN ('revenue', 'subscription') THEN amount_cents ELSE 0 END) as total_revenue_cents,
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
+            SUM(CASE WHEN event_type IN ('revenue', 'subscription') THEN amount_cents ELSE 0 END) - 
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as net_profit_cents,
-            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
-            MIN(recorded_at) FILTER (WHERE event_type = 'revenue') as first_revenue_at,
-            MAX(recorded_at) FILTER (WHERE event_type = 'revenue') as last_revenue_at
+            COUNT(*) FILTER (WHERE event_type IN ('revenue', 'subscription')) as transaction_count,
+            MIN(recorded_at) FILTER (WHERE event_type IN ('revenue', 'subscription')) as first_revenue_at,
+            MAX(recorded_at) FILTER (WHERE event_type IN ('revenue', 'subscription')) as last_revenue_at
         FROM revenue_events
         WHERE recorded_at >= '{month_start.isoformat()}'
         """
