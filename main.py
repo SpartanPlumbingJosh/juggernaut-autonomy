@@ -1748,13 +1748,13 @@ def check_cost_limit(estimated_cost: float) -> Tuple[bool, str]:
     """Check if action would exceed cost limits."""
     sql = """
         SELECT 
-            cb.amount_cents as limit_cents,
+            cb.monthly_limit_cents as limit_cents,
             COALESCE(SUM(ce.amount_cents), 0) as spent_cents
         FROM cost_budgets cb
-        LEFT JOIN cost_events ce ON ce.category = cb.category 
-            AND ce.occurred_at >= date_trunc('month', CURRENT_DATE)
-        WHERE cb.category = 'total_monthly'
-        GROUP BY cb.amount_cents
+        LEFT JOIN cost_events ce 
+            ON ce.occurred_at >= date_trunc('month', CURRENT_DATE)
+        WHERE cb.budget_name = 'total_monthly'
+        GROUP BY cb.monthly_limit_cents
     """
     try:
         result = execute_sql(sql)
