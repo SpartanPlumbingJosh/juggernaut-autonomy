@@ -154,13 +154,200 @@ class RepairCommonIssuesPlaybook(RepairPlaybook):
                     ORDER BY created_at ASC
                     LIMIT 10
                 )
-                RETURNING id, task_type
+                RETURNING id, task_type, title
             """
-            reset_tasks = fetch_all(reset_query)
             
+            reset_results = fetch_all(reset_query)
+            reset_count = len(reset_results)
+            
+            # Record action
             self.record_action("reset_blocked_tasks", {
-                "count": len(reset_tasks),
-                "task_ids": [t.get('id') for t in reset_tasks]
+                "reset_count": reset_count,
+                "task_ids": [r["id"] for r in reset_results]
+            })
+            
+            self.repairs_attempted.append({
+                "repair_type": "reset_blocked_tasks",
+                "count": reset_count,
+                "tasks": reset_results
+            })
+            
+            return {
+                "reset_count": reset_count,
+                "tasks_reset": reset_results
+            }
+        except Exception as e:
+            logger.exception(f"Error resetting blocked tasks: {e}")
+            return {"error": str(e), "reset_count": 0}
+    
+    def _identify_stuck_tasks(self) -> dict:
+        """Identify tasks stuck in in_progress state."""
+        try:
+            query = """
+                SELECT 
+                    id,
+                    task_type,
+                    title,
+                    assigned_to,
+                    started_at,
+                    EXTRACT(EPOCH FROM (NOW() - started_at))/60 as minutes_running
+                FROM governance_tasks
+                WHERE status = 'in_progress'
+                AND started_at < NOW() - INTERVAL '30 minutes'
+                ORDER BY started_at ASC
+                LIMIT 5
+            """
+            stuck_tasks = fetch_all(query)
+            
+            self.issues_found.append({
+                "issue_type": "stuck_tasks",
+                "count": len(stuck_tasks),
+                "tasks": stuck_tasks
+            })
+            
+            return {
+                "stuck_count": len(stuck_tasks),
+                "tasks": stuck_tasks
+            }
+        except Exception as e:
+            logger.exception(f"Error identifying stuck tasks: {e}")
+            return {"error": str(e)}
+    
+    def _reset_stuck_tasks(self) -> dict:
+        """Reset stuck in_progress tasks to pending."""
+        try:
+            # Get stuck tasks
+            stuck_tasks = [
+                issue for issue in self.issues_found 
+                if issue.get("issue_type") == "stuck_tasks"
+            ]
+            
+            if not stuck_tasks or stuck_tasks[0].get("count", 0) == 0:
+                return {"reset_count": 0, "message": "No stuck tasks to reset"}
+            
+            # Reset up to 5 tasks
+            reset_query = """
+                UPDATE governance_tasks
+                SET 
+                    status = 'pending',
+                    assigned_to = NULL,
+                    updated_at = NOW(),
+                    error_message = 'Auto-reset by self-heal: stuck in in_progress >30min'
+                WHERE id IN (
+                    SELECT id
+                    FROM governance_tasks
+                    WHERE status = 'in_progress'
+                    AND started_at < NOW() - INTERVAL '30 minutes'
+                    ORDER BY started_at ASC
+                    LIMIT 5
+                )
+                RETURNING id, task_type, title
+            """
+            reset_results = fetch_all(reset_query)
+            reset_count = len(reset_results)
+            
+            self.record_action("reset_stuck_tasks", {
+                "reset_count": reset_count,
+                "task_ids": [r["id"] for r in reset_results]
+            })
+            
+            self.repairs_attempted.append({
+                "repair_type": "reset_stuck_tasks",
+                "count": reset_count,
+                "tasks": reset_results
+            })
+            
+            return {
+                "reset_count": reset_count,
+                "tasks_reset": reset_results
+            }
+        except Exception as e:
+            logger.exception(f"Error resetting stuck tasks: {e}")
+            return {"error": str(e), "reset_count": 0}
+    
+    def _identify_error_patterns(self) -> dict:
+        """Identify repeated error patterns."""
+        try:
+            query = """
+                SELECT 
+                    LEFT(message, 200) as error_message,
+                    COUNT(*) as occurrence_count,
+                    MAX(created_at) as last_seen
+                FROM execution_logs
+                WHERE level IN ('error', 'critical')
+                AND created_at > NOW() - INTERVAL '1 hour'
+                GROUP BY LEFT(message, 200)
+                HAVING COUNT(*) >= 5
+                ORDER BY occurrence_count DESC
+                LIMIT 5
+            """
+            error_patterns = fetch_all(query)
+            
+            self.issues_found.append({
+                "issue_type": "error_patterns",
+                "count": len(error_patterns),
+                "patterns": error_patterns
+            })
+            
+            return {
+                "pattern_count": len(error_patterns),
+                "patterns": error_patterns
+            }
+        except Exception as e:
+            logger.exception(f"Error identifying error patterns: {e}")
+            return {"error": str(e)}
+    
+    def _create_fix_tasks(self) -> dict:
+        """Create governance tasks to investigate/fix error patterns."""
+        try:
+            error_patterns = [
+                issue for issue in self.issues_found 
+                if issue.get("issue_type") == "error_patterns"
+            ]
+            
+            if not error_patterns or error_patterns[0].get("count", 0) == 0:
+                return {"created_count": 0, "message": "No error patterns to create tasks for"}
+            
+            # Create investigation tasks for top error patterns
+            from uuid import uuid4
+            from datetime import datetime, timezone
+            
+            created_tasks = []
+            for pattern in error_patterns[0].get("patterns", [])[:3]:  # Top 3 patterns
+                task_id = str(uuid4())
+                error_msg = pattern.get("error_message", "Unknown error")
+                occurrence_count = pattern.get("occurrence_count", 0)
+                
+                insert_query = """
+                    INSERT INTO governance_tasks (
+                        id, task_type, title, description, priority, status,
+                        payload, created_at, updated_at
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    RETURNING id
+                """
+                
+                title = f"Investigate: {error_msg[:50]}..."
+                description = f"Error occurred {occurrence_count} times in the last hour. Investigate root cause and implement fix."
+                payload = {
+                    "error_pattern": error_msg,
+                    "occurrence_count": occurrence_count,
+                    "auto_generated": True,
+                    "generated_by": "self_heal"
+                }
+                
+                now = datetime.now(timezone.utc)
+                params = (
+                    task_id, "code", title, description, "high", "pending",
+                    json.dumps(payload), now, now
+                )
+                
+                result = fetch_all(insert_query, params)
+                if result:
+                    created_tasks.append(result[0])
+            
+            self.record_action("create_fix_tasks", {
+                "created_count": len(created_tasks),
+                "task_ids": [t["id"] for t in created_tasks]
             })
             
             self.repairs_attempted.append({
