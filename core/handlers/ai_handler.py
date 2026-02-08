@@ -172,6 +172,7 @@ class AIHandler(BaseHandler):
 
         # Log tool usage summary
         tool_summary = [f"{tc['name']}" for tc in resp.tool_calls_made]
+        successful_calls = [tc for tc in resp.tool_calls_made if tc.get("result_success")]
         self._log(
             "handler.ai.tools_used",
             f"Tool calls: {len(resp.tool_calls_made)} across {resp.iterations} iterations: {', '.join(tool_summary[:20])}",
@@ -187,10 +188,17 @@ class AIHandler(BaseHandler):
         else:
             # Model returned prose instead of JSON — still may have done work via tools
             # Check if any tool calls actually succeeded, not just that calls were made
-            successful_calls = [tc for tc in resp.tool_calls_made if tc.get("result_success")]
             success = len(successful_calls) > 0
             summary = resp.content[:600] if resp.content else "Task completed via tool calls"
             result_obj = {}
+
+        # HARD RULE: if tools were enabled, do not allow "success" unless at least
+        # one tool call actually succeeded. This prevents fake completions that are
+        # just narrative text.
+        if len(successful_calls) == 0:
+            success = False
+            if not isinstance(summary, str) or not summary.strip():
+                summary = "No successful tool calls were executed. Task cannot be completed without real tool execution."
 
         if not isinstance(summary, str):
             summary = str(summary)
@@ -210,6 +218,12 @@ class AIHandler(BaseHandler):
             "tool_iterations": resp.iterations,
             "execution_mode": "tool_assisted",
             "pr_required": has_file_changes,
+            "completion_evidence": {
+                "type": "tool_execution",
+                "verified": len(successful_calls) > 0,
+                "successful_tool_calls": len(successful_calls),
+                "tool_calls": tool_summary[:40],
+            },
         }
 
         self._log(
