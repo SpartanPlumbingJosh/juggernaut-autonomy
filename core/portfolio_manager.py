@@ -276,6 +276,80 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_revenue_event(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    amount_cents: int,
+    source: str,
+    event_type: str = "revenue",
+    metadata: Optional[Dict[str, Any]] = None,
+    experiment_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Track a revenue or cost event."""
+    try:
+        attrs = {}
+        if experiment_id:
+            attrs["experiment_id"] = experiment_id
+
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            attribution,
+            recorded_at,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{event_type}',
+            {amount_cents},
+            'USD',
+            '{source}',
+            '{json.dumps(metadata or {})}'::jsonb,
+            '{json.dumps(attrs)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = execute_sql(sql)
+        transaction_id = result.get("rows", [{}])[0].get("id")
+        
+        if not transaction_id:
+            return {"success": False, "error": "Failed to create transaction"}
+
+        log_action(
+            "revenue.tracked",
+            f"Tracked {event_type} event: {amount_cents} cents from {source}",
+            level="info",
+            output_data={
+                "amount_cents": amount_cents,
+                "source": source,
+                "event_type": event_type,
+                "transaction_id": transaction_id
+            }
+        )
+        
+        return {"success": True, "transaction_id": transaction_id}
+        
+    except Exception as e:
+        log_action(
+            "revenue.tracking_failed",
+            f"Failed to track {event_type} event: {str(e)}",
+            level="error",
+            error_data={
+                "amount_cents": amount_cents,
+                "source": source,
+                "error": str(e)
+            }
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
