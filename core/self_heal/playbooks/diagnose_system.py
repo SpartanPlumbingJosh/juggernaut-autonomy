@@ -111,7 +111,7 @@ class DiagnoseSystemPlaybook(DiagnosisPlaybook):
             
             online_workers = [w for w in workers if w.get('status') == 'online']
             offline_workers = [w for w in workers if w.get('status') != 'online']
-            stale_workers = [w for w in workers if w.get('seconds_since_heartbeat', 0) > 300]
+            stale_workers = [w for w in workers if float(w.get('seconds_since_heartbeat') or 0) > 300]
             
             self.add_finding("workers_online", len(online_workers), "info")
             self.add_finding("workers_offline", len(offline_workers), 
