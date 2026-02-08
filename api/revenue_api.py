@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_engine import RevenueEngine
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,6 +37,9 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
+        engine = RevenueEngine(query_db, lambda *args, **kwargs: None)
+        metrics = engine.calculate_revenue_metrics(365)
+        
         now = datetime.now(timezone.utc)
         
         # Calculate period boundaries
@@ -166,6 +170,8 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        engine = RevenueEngine(query_db, lambda *args, **kwargs: None)
+        metrics = engine.calculate_revenue_metrics(days)
         
         # Daily revenue for the last N days
         sql = f"""
