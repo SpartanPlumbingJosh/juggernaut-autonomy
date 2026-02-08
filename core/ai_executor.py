@@ -167,7 +167,7 @@ class AIExecutor:
             iteration += 1
 
             # Build request payload
-            payload: Dict[str, Any] = {
+            payload = {
                 "model": self.model,
                 "messages": conversation,
                 "max_tokens": int(max_tokens) if max_tokens is not None else self.max_tokens,
@@ -175,9 +175,10 @@ class AIExecutor:
                 "tool_choice": "auto",
             }
 
-            provider = self._provider_routing()
-            if provider is not None:
-                payload["provider"] = provider
+            # Don't send provider field - causes "Extra inputs are not permitted" error with Anthropic
+            # provider = self._provider_routing()
+            # if provider is not None:
+            #     payload["provider"] = provider
 
             data = json.dumps(payload).encode("utf-8")
             req = urllib.request.Request(
