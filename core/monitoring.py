@@ -11,7 +11,21 @@ from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 import statistics
 
-from .database import execute_query, log_execution
+from .database import execute_query, log_execution, _db
+
+
+def _escape_sql_value(val: Any) -> str:
+    """Escape a value for SQL insertion."""
+    if val is None:
+        return "NULL"
+    elif isinstance(val, bool):
+        return "TRUE" if val else "FALSE"
+    elif isinstance(val, (int, float)):
+        return str(val)
+    elif isinstance(val, (dict, list)):
+        return _db._format_value(val)
+    else:
+        return _db._format_value(str(val))
 
 # =============================================================================
 # METRICS RECORDING
@@ -45,14 +59,11 @@ def record_metric(
     metric_id = str(uuid4())
     tags = tags or {}
     
-    result = execute_query(
-        """
+    result = execute_query(f"""
         INSERT INTO system_metrics (id, metric_name, value, metric_type, unit, component, worker_id, tags)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ({_escape_sql_value(metric_id)}, {_escape_sql_value(metric_name)}, {_escape_sql_value(value)}, {_escape_sql_value(metric_type)}, {_escape_sql_value(unit)}, {_escape_sql_value(component)}, {_escape_sql_value(worker_id)}, {_escape_sql_value(json.dumps(tags))})
         RETURNING id, recorded_at
-        """,
-        [metric_id, metric_name, value, metric_type, unit, component, worker_id, json.dumps(tags)]
-    )
+    """)
     
     return {
         "success": True,
@@ -136,24 +147,19 @@ def get_metrics(
     Returns:
         List of metric records
     """
-    conditions = ["metric_name = $1", f"recorded_at > NOW() - INTERVAL '{hours} hours'"]
-    params = [metric_name]
+    conditions = [f"metric_name = {_escape_sql_value(metric_name)}", f"recorded_at > NOW() - INTERVAL '{hours} hours'"]
     
     if component:
-        conditions.append("component = $2")
-        params.append(component)
+        conditions.append(f"component = {_escape_sql_value(component)}")
     
-    result = execute_query(
-        f"""
+    result = execute_query(f"""
         SELECT id, metric_name, value, metric_type, unit, component, 
                worker_id, tags, recorded_at
         FROM system_metrics
         WHERE {' AND '.join(conditions)}
         ORDER BY recorded_at DESC
         LIMIT {limit}
-        """,
-        params
-    )
+    """)
     
     return result.get("rows", [])
 
@@ -174,15 +180,12 @@ def get_metric_stats(
     Returns:
         Dict with min, max, avg, p50, p95, p99, count
     """
-    conditions = ["metric_name = $1", f"recorded_at > NOW() - INTERVAL '{hours} hours'"]
-    params = [metric_name]
+    conditions = [f"metric_name = {_escape_sql_value(metric_name)}", f"recorded_at > NOW() - INTERVAL '{hours} hours'"]
     
     if component:
-        conditions.append("component = $2")
-        params.append(component)
+        conditions.append(f"component = {_escape_sql_value(component)}")
     
-    result = execute_query(
-        f"""
+    result = execute_query(f"""
         SELECT 
             COUNT(*) as count,
             MIN(value) as min_val,
@@ -193,9 +196,7 @@ def get_metric_stats(
             PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY value) as p99
         FROM system_metrics
         WHERE {' AND '.join(conditions)}
-        """,
-        params
-    )
+    """)
     
     if result.get("rows"):
         row = result["rows"][0]
@@ -279,10 +280,9 @@ def run_health_check(
     response_time = int((time.time() - start) * 1000)
     
     # Upsert health check record
-    execute_query(
-        """
+    execute_query(f"""
         INSERT INTO health_checks (component, check_type, status, response_time_ms, error_message, last_check_at, consecutive_failures)
-        VALUES ($1, $2, $3, $4, $5, NOW(), CASE WHEN $3 = 'healthy' THEN 0 ELSE 1 END)
+        VALUES ({_escape_sql_value(component)}, {_escape_sql_value(check_type)}, {_escape_sql_value(status)}, {_escape_sql_value(response_time)}, {_escape_sql_value(error_message)}, NOW(), CASE WHEN {_escape_sql_value(status)} = 'healthy' THEN 0 ELSE 1 END)
         ON CONFLICT (component, check_type) DO UPDATE SET
             status = EXCLUDED.status,
             response_time_ms = EXCLUDED.response_time_ms,
@@ -292,9 +292,7 @@ def run_health_check(
                 WHEN EXCLUDED.status = 'healthy' THEN 0 
                 ELSE health_checks.consecutive_failures + 1 
             END
-        """,
-        [component, check_type, status, response_time, error_message]
-    )
+    """)
     
     return {
         "component": component,
@@ -494,18 +492,14 @@ def record_anomaly(
     """
     anomaly_id = str(uuid4())
     
-    result = execute_query(
-        """
+    result = execute_query(f"""
         INSERT INTO anomaly_events (
             id, anomaly_type, severity, component, metric_name,
             expected_value, actual_value, deviation_percent, description, metadata
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ) VALUES ({_escape_sql_value(anomaly_id)}, {_escape_sql_value(anomaly_type)}, {_escape_sql_value(severity)}, {_escape_sql_value(component)}, {_escape_sql_value(metric_name)},
+                  {_escape_sql_value(expected_value)}, {_escape_sql_value(actual_value)}, {_escape_sql_value(deviation_percent)}, {_escape_sql_value(description)}, {_escape_sql_value(json.dumps(metadata or {}))})
         RETURNING id, detected_at
-        """,
-        [anomaly_id, anomaly_type, severity, component, metric_name,
-         expected_value, actual_value, deviation_percent, description,
-         json.dumps(metadata or {})]
-    )
+    """)
     
     # Also create system alert for high/critical
     if severity in ("high", "critical"):
@@ -602,15 +596,12 @@ def resolve_anomaly(
     Returns:
         Dict with resolution status
     """
-    result = execute_query(
-        """
+    result = execute_query(f"""
         UPDATE anomaly_events
-        SET status = $2, resolved_at = NOW(), resolved_by = $3, resolution_notes = $4
-        WHERE id = $1
+        SET status = {_escape_sql_value(resolution_status)}, resolved_at = NOW(), resolved_by = {_escape_sql_value(resolved_by)}, resolution_notes = {_escape_sql_value(notes)}
+        WHERE id = {_escape_sql_value(anomaly_id)}
         RETURNING id, status
-        """,
-        [anomaly_id, resolution_status, resolved_by, notes]
-    )
+    """)
     
     return {
         "success": bool(result.get("rows")),

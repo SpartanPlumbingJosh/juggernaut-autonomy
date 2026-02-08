@@ -131,7 +131,7 @@ def apply_learning(
     log_action_func(
         "learning.applying",
         f"Applying learning: {category} - {summary[:100]}",
-        learning_id=learning_id,
+        output_data={"learning_id": learning_id},
     )
 
     application_result = None
