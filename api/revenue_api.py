@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.billing_manager import BillingManager
+from services.service_delivery import ServiceDelivery
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,12 +212,62 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict) -> Dict[str, Any]:
+    """Handle payment webhook events"""
+    try:
+        billing_manager = BillingManager()
+        result = await billing_manager.handle_webhook(body)
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to handle webhook: {str(e)}")
+
+async def handle_create_invoice(body: Dict) -> Dict[str, Any]:
+    """Create a new invoice"""
+    try:
+        billing_manager = BillingManager()
+        result = await billing_manager.create_invoice(
+            customer_id=body['customer_id'],
+            amount=body['amount'],
+            currency=body['currency'],
+            description=body.get('description', ''),
+            metadata=body.get('metadata', {})
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create invoice: {str(e)}")
+
+async def handle_deliver_service(body: Dict) -> Dict[str, Any]:
+    """Deliver a service"""
+    try:
+        service_delivery = ServiceDelivery()
+        result = await service_delivery.deliver_service(
+            customer_id=body['customer_id'],
+            service_type=body['service_type'],
+            metadata=body.get('metadata', {})
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to deliver service: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Handle POST requests with body
+    if method == "POST" and body:
+        try:
+            body_data = json.loads(body)
+            if path == "/revenue/webhook":
+                return handle_payment_webhook(body_data)
+            elif path == "/revenue/invoices":
+                return handle_create_invoice(body_data)
+            elif path == "/revenue/deliver":
+                return handle_deliver_service(body_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
