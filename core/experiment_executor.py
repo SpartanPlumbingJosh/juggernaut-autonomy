@@ -440,8 +440,8 @@ def create_task_for_experiment(
                 level="error",
                 output_data={"experiment_id": exp_id, "error": str(e)}
             )
-        except Exception:
-            pass
+        except Exception as log_err:
+            logger.error(f"Failed to log task creation error: {log_err}")
         return None
 
 
@@ -657,7 +657,6 @@ def progress_experiments(
 
     try:
         res = execute_sql("""
-            # Fetch all running experiments (include experiment_type for classification)
             SELECT id, name, description, status, experiment_type, hypothesis, current_iteration, budget_spent, budget_limit, created_at, updated_at
             FROM experiments
             WHERE status = 'running'
