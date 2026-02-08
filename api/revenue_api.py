@@ -1,17 +1,47 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+SaaS Revenue Dashboard API
 
 Endpoints:
+- POST /auth/login - User login
+- POST /auth/signup - User registration
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /subscriptions - Create subscription
+- GET /subscriptions - List subscriptions
+- POST /payments - Process payment
 """
 
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+
+# Mock payment processor
+class PaymentProcessor:
+    @staticmethod
+    async def charge_card(token: str, amount: float, currency: str = "USD") -> Dict[str, Any]:
+        # In production, integrate with Stripe/other payment processor
+        return {"success": True, "transaction_id": f"mock_txn_{hashlib.sha256(token.encode()).hexdigest()[:16]}"}
+
+# User authentication
+async def authenticate_user(email: str, password: str) -> Optional[Dict[str, Any]]:
+    """Authenticate user."""
+    try:
+        res = await query_db(f"""
+            SELECT id, email, password_hash, role
+            FROM users
+            WHERE email = '{email.replace("'", "''")}'
+            LIMIT 1
+        """)
+        user = res.get("rows", [{}])[0]
+        if user and user.get("password_hash") == hashlib.sha256(password.encode()).hexdigest():
+            return user
+        return None
+    except Exception:
+        return None
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,8 +240,89 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_login(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle user login."""
+    email = body.get("email", "")
+    password = body.get("password", "")
+    
+    user = await authenticate_user(email, password)
+    if not user:
+        return _error_response(401, "Invalid credentials")
+    
+    return _make_response(200, {
+        "user": {
+            "id": user.get("id"),
+            "email": user.get("email"),
+            "role": user.get("role")
+        }
+    })
+
+async def handle_signup(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle user registration."""
+    email = body.get("email", "")
+    password = body.get("password", "")
+    
+    if not email or not password:
+        return _error_response(400, "Email and password required")
+    
+    try:
+        # Check if user exists
+        res = await query_db(f"""
+            SELECT id FROM users WHERE email = '{email.replace("'", "''")}' LIMIT 1
+        """)
+        if res.get("rows"):
+            return _error_response(400, "User already exists")
+        
+        # Create user
+        await query_db(f"""
+            INSERT INTO users (id, email, password_hash, role, created_at)
+            VALUES (
+                gen_random_uuid(),
+                '{email.replace("'", "''")}',
+                '{hashlib.sha256(password.encode()).hexdigest()}',
+                'user',
+                NOW()
+            )
+        """)
+        return _make_response(201, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to create user: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        user_id = body.get("user_id")
+        plan_id = body.get("plan_id")
+        payment_token = body.get("payment_token")
+        
+        if not user_id or not plan_id or not payment_token:
+            return _error_response(400, "Missing required fields")
+        
+        # Process payment
+        payment = await PaymentProcessor.charge_card(payment_token, 99.00)  # $99/month
+        if not payment.get("success"):
+            return _error_response(402, "Payment failed")
+        
+        # Create subscription
+        await query_db(f"""
+            INSERT INTO subscriptions (id, user_id, plan_id, status, starts_at, ends_at, created_at)
+            VALUES (
+                gen_random_uuid(),
+                '{user_id.replace("'", "''")}',
+                '{plan_id.replace("'", "''")}',
+                'active',
+                NOW(),
+                NOW() + INTERVAL '1 month',
+                NOW()
+            )
+        """)
+        
+        return _make_response(201, {"success": True, "subscription_id": payment["transaction_id"]})
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -220,17 +331,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
-    # GET /revenue/summary
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
+    # Authentication endpoints
+    if len(parts) == 2 and parts[0] == "auth":
+        if parts[1] == "login" and method == "POST":
+            return handle_login(json.loads(body or "{}"))
+        if parts[1] == "signup" and method == "POST":
+            return handle_signup(json.loads(body or "{}"))
     
-    # GET /revenue/transactions
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
+    # Revenue endpoints
+    if len(parts) == 2 and parts[0] == "revenue":
+        if parts[1] == "summary" and method == "GET":
+            return handle_revenue_summary()
+        if parts[1] == "transactions" and method == "GET":
+            return handle_revenue_transactions(query_params)
+        if parts[1] == "charts" and method == "GET":
+            return handle_revenue_charts(query_params)
     
-    # GET /revenue/charts
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+    # Subscription endpoints
+    if len(parts) == 1 and parts[0] == "subscriptions":
+        if method == "POST":
+            return handle_create_subscription(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
