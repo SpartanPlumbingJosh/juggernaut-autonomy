@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core revenue tracking and subscription management.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /subscriptions - Create new subscription
+- GET /subscriptions/{id} - Get subscription details
 """
 
 import json
@@ -162,6 +164,74 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_id", "plan_id", "payment_method"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+        
+        # Insert subscription
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, status, 
+            payment_method, start_date, end_date,
+            created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["customer_id"]}',
+            '{body["plan_id"]}',
+            'active',
+            '{body["payment_method"]}',
+            NOW(),
+            NOW() + INTERVAL '1 month',
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        subscription_id = result.get("rows", [{}])[0].get("id")
+        
+        if not subscription_id:
+            return _error_response(500, "Failed to create subscription")
+            
+        return _make_response(201, {
+            "subscription_id": subscription_id,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_subscription_details(subscription_id: str) -> Dict[str, Any]:
+    """Get subscription details."""
+    try:
+        sql = f"""
+        SELECT 
+            id, customer_id, plan_id, status,
+            payment_method, start_date, end_date,
+            created_at, updated_at
+        FROM subscriptions
+        WHERE id = '{subscription_id}'
+        """
+        
+        result = await query_db(sql)
+        subscription = result.get("rows", [{}])[0]
+        
+        if not subscription:
+            return _error_response(404, "Subscription not found")
+            
+        return _make_response(200, subscription)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch subscription: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +301,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /subscriptions
+    if len(parts) == 1 and parts[0] == "subscriptions" and method == "POST":
+        return handle_subscription_create(json.loads(body or "{}"))
+    
+    # GET /subscriptions/{id}
+    if len(parts) == 2 and parts[0] == "subscriptions" and method == "GET":
+        return handle_subscription_details(parts[1])
     
     return _error_response(404, "Not found")
 
