@@ -70,7 +70,7 @@ class SelfHealingManager:
         self.successful_recoveries: Dict[str, int] = {}
         self.model_fallback_chain: List[str] = [
             "google/gemini-2.0-flash-exp:free",
-            "deepseek/deepseek-v3.2",
+            "deepseek/deepseek-chat",
             "deepseek/deepseek-v3.1",
         ]
         

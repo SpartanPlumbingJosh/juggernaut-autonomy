@@ -181,9 +181,9 @@ except (ValueError, TypeError):
 
 # Per-mode model policies for cost/speed/quality tradeoffs
 MODE_MODEL_POLICIES = {
-    "normal": "deepseek/deepseek-v3.2",
-    "deep_research": "deepseek/deepseek-v3.2",
-    "code": "deepseek/deepseek-v3.2",
+    "normal": "deepseek/deepseek-chat",
+    "deep_research": "deepseek/deepseek-chat",
+    "code": "deepseek/deepseek-chat",
     "ops": "google/gemini-2.0-flash-exp:free",
 }
 
@@ -192,7 +192,7 @@ TOKEN_COSTS = {
     "openrouter/auto": {"input": 5.0, "output": 15.0},
     "openai/gpt-4o": {"input": 2.5, "output": 10.0},
     "openai/gpt-4o-mini": {"input": 0.15, "output": 0.6},
-    "deepseek/deepseek-v3.2": {"input": 0.0, "output": 0.0},
+    "deepseek/deepseek-chat": {"input": 0.30, "output": 1.20},
     "google/gemini-2.0-flash-exp:free": {"input": 0.0, "output": 0.0},
     "kimi/k2": {"input": 0.0, "output": 0.0},
 }
