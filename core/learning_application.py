@@ -169,14 +169,12 @@ def apply_learning(
             log_action_func(
                 "learning.applied",
                 f"Successfully applied learning: {summary[:100]}",
-                learning_id=learning_id,
                 output_data={"result": application_result},
             )
         else:
             log_action_func(
                 "learning.apply_failed",
                 f"Failed to apply learning: {application_result}",
-                learning_id=learning_id,
                 level="warn",
             )
 

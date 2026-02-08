@@ -299,8 +299,8 @@ class L5Orchestrator:
                 if EXPERIMENT_LIFECYCLE_AVAILABLE:
                     # Progress active experiments
                     progress_result = progress_experiments(
-                        execute_sql_func=self.execute_sql,
-                        log_action_func=self.log_action,
+                        execute_sql=self.execute_sql,
+                        log_action=self.log_action,
                     )
                     
                     if progress_result:
@@ -319,16 +319,16 @@ class L5Orchestrator:
         try:
             # Find approvals that have timed out
             timeout_sql = """
-                SELECT id, current_level, escalation_history, created_at
+                SELECT id, escalation_level, escalation_reason, created_at
                 FROM approvals
-                WHERE status = 'pending'
-                  AND timeout_at < NOW()
+                WHERE decision = 'pending'
+                  AND expires_at < NOW()
             """
             result = self.execute_sql(timeout_sql)
             
             for row in result.get("rows", []):
                 approval_id = row["id"]
-                current_level = row.get("current_level", "worker")
+                current_level = row.get("escalation_level", 0)
                 
                 # Escalate to next level
                 next_level = self._get_next_escalation_level(current_level)
@@ -337,14 +337,10 @@ class L5Orchestrator:
                     # Update approval with escalation
                     update_sql = f"""
                         UPDATE approvals
-                        SET current_level = '{next_level}',
-                            escalation_history = escalation_history || jsonb_build_object(
-                                'from_level', '{current_level}',
-                                'to_level', '{next_level}',
-                                'escalated_at', NOW(),
-                                'reason', 'timeout'
-                            ),
-                            timeout_at = NOW() + INTERVAL '1 hour',
+                        SET escalation_level = {next_level},
+                            escalation_reason = COALESCE(escalation_reason, '') || 
+                                ' Escalated from level {current_level} to {next_level} at ' || NOW() || ' due to timeout.',
+                            expires_at = NOW() + INTERVAL '1 hour',
                             updated_at = NOW()
                         WHERE id = '{approval_id}'
                     """
@@ -352,7 +348,7 @@ class L5Orchestrator:
                     
                     self.log_action(
                         "escalation.auto_escalated",
-                        f"Approval {approval_id} auto-escalated to {next_level} due to timeout",
+                        f"Approval {approval_id} auto-escalated to level {next_level} due to timeout",
                         level="warning",
                         output_data={
                             "approval_id": approval_id,
