@@ -71,6 +71,11 @@ class AIExecutor:
         return {"max_price": {"prompt": prompt_price, "completion": completion_price}}
 
     def chat(self, messages: List[Dict[str, str]], max_tokens: Optional[int] = None) -> AIResponse:
+        from core.tracing import start_generation
+
+        input_preview = json.dumps(messages[-1:], ensure_ascii=False)[:2000] if messages else ""
+        gen = start_generation(name="ai_executor.chat", input_text=input_preview, model=self.model)
+
         payload = {
             "model": self.model,
             "messages": messages,
@@ -94,17 +99,27 @@ class AIExecutor:
                 raw = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             error_body = e.read().decode("utf-8")
+            gen.end(error=f"HTTP {e.code}: {error_body[:200]}", model=self.model)
             raise RuntimeError(f"OpenRouter HTTP {e.code}: {error_body}") from e
         except urllib.error.URLError as e:
+            gen.end(error=f"Connection error: {e}", model=self.model)
             raise RuntimeError(f"OpenRouter connection error: {e}") from e
         except json.JSONDecodeError as e:
+            gen.end(error=f"Invalid JSON: {e}", model=self.model)
             raise RuntimeError(f"OpenRouter invalid JSON response: {e}") from e
 
         choices = raw.get("choices") or []
         if not choices:
+            gen.end(error="Response missing choices", model=self.model)
             raise RuntimeError("OpenRouter response missing choices")
 
         content = ((choices[0] or {}).get("message") or {}).get("content") or ""
+        usage = raw.get("usage") or {}
+        gen.end(
+            output=content[:2000],
+            model=raw.get("model", self.model),
+            usage={"prompt_tokens": usage.get("prompt_tokens", 0), "completion_tokens": usage.get("completion_tokens", 0), "total_tokens": usage.get("total_tokens", 0)} if usage else None,
+        )
         return AIResponse(content=content, raw=raw)
 
     def chat_with_tools(
@@ -133,6 +148,16 @@ class AIExecutor:
         Returns:
             AIResponse with final content and list of tool calls made.
         """
+        from core.tracing import start_generation
+
+        input_preview = json.dumps(messages[-1:], ensure_ascii=False)[:2000] if messages else ""
+        _trace_gen = start_generation(
+            name="ai_executor.chat_with_tools",
+            input_text=input_preview,
+            model=self.model,
+            metadata={"max_iterations": max_iterations, "tool_count": len(tools)},
+        )
+
         all_tool_calls = []
         iteration = 0
         conversation = list(messages)  # mutable copy
@@ -228,6 +253,11 @@ class AIExecutor:
 
             # No tool calls — model returned a final text response
             content = message.get("content") or ""
+            _trace_gen.end(
+                output=content[:2000],
+                model=raw.get("model", self.model),
+                metadata={"iterations": iteration, "tool_calls": len(all_tool_calls)},
+            )
             return AIResponse(
                 content=content,
                 raw=raw,
@@ -237,6 +267,11 @@ class AIExecutor:
 
         # Max iterations reached — return whatever we have
         logger.warning("chat_with_tools hit max iterations (%d)", max_iterations)
+        _trace_gen.end(
+            error=f"Max iterations reached ({max_iterations})",
+            model=self.model,
+            metadata={"iterations": iteration, "tool_calls": len(all_tool_calls)},
+        )
         return AIResponse(
             content=f"[Tool loop reached max {max_iterations} iterations. Last tool calls: {len(all_tool_calls)}]",
             raw={},

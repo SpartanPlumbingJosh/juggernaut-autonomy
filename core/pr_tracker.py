@@ -388,7 +388,7 @@ class PRTracker:
                     if self._should_advance_gate(old_state, new_state):
                         self._try_advance_task_gate(task_id)
                 
-                changed_prs.append({
+                change_record = {
                     "repo": repo,
                     "pr_number": pr_number,
                     "task_id": task_id,
@@ -396,7 +396,17 @@ class PRTracker:
                     "new_state": new_state,
                     "old_review_status": old_review_status,
                     "new_review_status": new_review_status
-                })
+                }
+                
+                # If changes were requested, try Aider review iteration
+                if new_state == "changes_requested" and old_state != "changes_requested":
+                    aider_result = self._try_aider_review_iteration(
+                        task_id, repo, pr_number, status
+                    )
+                    if aider_result:
+                        change_record["aider_iteration"] = aider_result
+                
+                changed_prs.append(change_record)
         
         return changed_prs
     
@@ -420,6 +430,164 @@ class PRTracker:
         
         result = query_db(query)
         return result.get("rows", [])
+    
+    # =========================================================================
+    # AIDER REVIEW ITERATION
+    # =========================================================================
+    
+    MAX_REVIEW_ITERATIONS = int(os.getenv("MAX_REVIEW_ITERATIONS", "3"))
+    
+    def _try_aider_review_iteration(
+        self,
+        task_id: str,
+        repo: str,
+        pr_number: int,
+        status: PRStatus,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        When a PR gets changes_requested, fetch review comments and
+        re-run Aider to address them.
+        
+        Returns result dict or None if Aider is unavailable.
+        """
+        try:
+            from core.aider_executor import AiderExecutor, is_aider_available
+            
+            if not is_aider_available():
+                print(f"[PR_TRACKER] Aider not available for review iteration on PR #{pr_number}")
+                return None
+            
+            # Check iteration count to prevent infinite loops
+            iteration_count = self._get_review_iteration_count(repo, pr_number)
+            if iteration_count >= self.MAX_REVIEW_ITERATIONS:
+                print(
+                    f"[PR_TRACKER] PR #{pr_number} hit max review iterations "
+                    f"({self.MAX_REVIEW_ITERATIONS}), skipping Aider re-run"
+                )
+                return {"skipped": True, "reason": "max_iterations_reached", "count": iteration_count}
+            
+            # Fetch review comments from GitHub
+            review_comments = self._fetch_review_comments(repo, pr_number)
+            if not review_comments:
+                print(f"[PR_TRACKER] No actionable review comments for PR #{pr_number}")
+                return None
+            
+            # Get the branch name from PR data
+            pr_data = self._github_request(f"/repos/{repo}/pulls/{pr_number}")
+            if not pr_data:
+                return None
+            branch = pr_data.get("head", {}).get("ref")
+            if not branch:
+                return None
+            
+            # Get changed files for targeted Aider run
+            files_data = self._github_request(f"/repos/{repo}/pulls/{pr_number}/files") or []
+            target_files = [f.get("filename") for f in files_data if f.get("filename")]
+            
+            print(
+                f"[PR_TRACKER] Running Aider review iteration #{iteration_count + 1} "
+                f"on PR #{pr_number} ({len(review_comments)} comments, {len(target_files)} files)"
+            )
+            
+            # Run Aider with review feedback
+            aider = AiderExecutor()
+            result = aider.run_with_review_feedback(
+                repo=repo,
+                branch=branch,
+                review_comments=review_comments,
+                task_id=task_id,
+                target_files=target_files[:10] if target_files else None,
+            )
+            
+            # Record the iteration
+            self._record_review_iteration(repo, pr_number, iteration_count + 1, result.success)
+            
+            return {
+                "success": result.success,
+                "iteration": iteration_count + 1,
+                "files_changed": result.files_changed,
+                "error": result.error,
+            }
+            
+        except ImportError:
+            return None
+        except Exception as e:
+            print(f"[PR_TRACKER] Aider review iteration error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _fetch_review_comments(self, repo: str, pr_number: int) -> str:
+        """
+        Fetch all review comments from a PR and format them for Aider.
+        
+        Returns a formatted string of review feedback, or empty string.
+        """
+        # Get review comments (inline)
+        comments = self._github_request(f"/repos/{repo}/pulls/{pr_number}/comments") or []
+        # Get issue-level comments 
+        issue_comments = self._github_request(f"/repos/{repo}/issues/{pr_number}/comments") or []
+        # Get reviews with bodies
+        reviews = self._github_request(f"/repos/{repo}/pulls/{pr_number}/reviews") or []
+        
+        feedback_parts = []
+        
+        # Process review-level feedback (e.g., CodeRabbit summary)
+        for review in reviews:
+            state = (review.get("state") or "").upper()
+            body = (review.get("body") or "").strip()
+            reviewer = review.get("user", {}).get("login", "unknown")
+            
+            if state == "CHANGES_REQUESTED" and body:
+                feedback_parts.append(f"## Review by {reviewer} (changes requested):\n{body}")
+        
+        # Process inline code comments
+        for comment in comments:
+            body = (comment.get("body") or "").strip()
+            path = comment.get("path", "")
+            line = comment.get("line") or comment.get("original_line", "")
+            reviewer = comment.get("user", {}).get("login", "unknown")
+            
+            if body:
+                location = f" ({path}:{line})" if path else ""
+                feedback_parts.append(f"- {reviewer}{location}: {body}")
+        
+        # Process issue-level comments from CodeRabbit (usually summaries)
+        for comment in issue_comments:
+            body = (comment.get("body") or "").strip()
+            reviewer = comment.get("user", {}).get("login", "unknown")
+            
+            if reviewer.lower() in ("coderabbitai", "coderabbit[bot]") and body:
+                # Truncate long CodeRabbit summaries
+                if len(body) > 2000:
+                    body = body[:2000] + "\n... (truncated)"
+                feedback_parts.append(f"## CodeRabbit feedback:\n{body}")
+        
+        return "\n\n".join(feedback_parts)
+    
+    def _get_review_iteration_count(self, repo: str, pr_number: int) -> int:
+        """Get how many review iterations have been run for this PR."""
+        try:
+            result = query_db(
+                f"SELECT COALESCE((metadata->>'review_iterations')::int, 0) as count "
+                f"FROM pr_tracking WHERE repo = '{repo}' AND pr_number = {pr_number}"
+            )
+            rows = result.get("rows", [])
+            return int((rows[0] or {}).get("count", 0)) if rows else 0
+        except Exception:
+            return 0
+    
+    def _record_review_iteration(self, repo: str, pr_number: int, iteration: int, success: bool) -> None:
+        """Record that a review iteration was performed."""
+        try:
+            meta = json.dumps({"review_iterations": iteration, "last_iteration_success": success})
+            query_db(
+                f"UPDATE pr_tracking "
+                f"SET metadata = COALESCE(metadata, '{{}}'::jsonb) || "
+                f"'{meta}'::jsonb, "
+                f"updated_at = NOW() "
+                f"WHERE repo = '{repo}' AND pr_number = {pr_number}"
+            )
+        except Exception as e:
+            print(f"[PR_TRACKER] Error recording review iteration: {e}")
     
     # =========================================================================
     # HELPER METHODS

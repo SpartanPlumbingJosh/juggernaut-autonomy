@@ -12,8 +12,11 @@ LABEL maintainer="JUGGERNAUT System"
 LABEL version="1.3.0"
 LABEL description="JUGGERNAUT Autonomy Engine - Autonomous Revenue Framework"
 
+# Install system dependencies (git for Aider repo operations)
+RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+
 # Security: Create non-root user
-RUN groupadd -r juggernaut && useradd -r -g juggernaut juggernaut
+RUN groupadd -r juggernaut && useradd -r -g juggernaut -m juggernaut
 
 WORKDIR /app
 

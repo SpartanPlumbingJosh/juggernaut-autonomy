@@ -21,6 +21,12 @@ requests>=2.31.0
 
 redis>=5.0.0
 
+# Aider — context-aware AI code generation engine
+aider-chat>=0.50.0
+
+# Langfuse — LLM observability and tracing (optional, gracefully degrades)
+langfuse>=2.0.0
+
 # Optional (uncomment if needed):
 # psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)
 # schedule==1.2.1         # Cron scheduling (optional)
