@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and subscription management.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/payments - Process payment
 """
 
 import json
@@ -162,6 +164,64 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        email = body.get("email")
+        payment_method = body.get("payment_method")
+        plan_id = body.get("plan_id")
+        
+        if not email or not payment_method or not plan_id:
+            return _error_response(400, "Missing required fields")
+            
+        from core.portfolio_manager import PaymentProcessor
+        processor = PaymentProcessor(query_db)
+        
+        # Create customer
+        customer_res = processor.create_customer(email, payment_method)
+        if not customer_res.get("success"):
+            return _error_response(500, f"Failed to create customer: {customer_res.get('error')}")
+            
+        # Create subscription
+        subscription_res = processor.create_subscription(customer_res["customer_id"], plan_id)
+        if not subscription_res.get("success"):
+            return _error_response(500, f"Failed to create subscription: {subscription_res.get('error')}")
+            
+        return _make_response(200, {
+            "success": True,
+            "customer_id": customer_res["customer_id"],
+            "subscription_id": subscription_res["subscription_id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment."""
+    try:
+        customer_id = body.get("customer_id")
+        amount = body.get("amount")
+        
+        if not customer_id or not amount:
+            return _error_response(400, "Missing required fields")
+            
+        from core.portfolio_manager import PaymentProcessor
+        processor = PaymentProcessor(query_db)
+        
+        payment_res = processor.process_payment(customer_id, amount)
+        if not payment_res.get("success"):
+            return _error_response(500, f"Failed to process payment: {payment_res.get('error')}")
+            
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_res["payment_id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +291,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_process_payment(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
