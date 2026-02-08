@@ -1,0 +1,24 @@
+# ==============================================================================
+# JUGGERNAUT LiteLLM Proxy - Railway Configuration
+# ==============================================================================
+# Deploy as a separate service in the same Railway project.
+# Set these env vars in Railway:
+#   ANTHROPIC_API_KEY    — Direct Anthropic key (primary)
+#   OPENAI_API_KEY       — Direct OpenAI key (fallback 1)
+#   OPENROUTER_API_KEY   — OpenRouter key (fallback 2)
+#   LITELLM_MASTER_KEY   — Auth key for proxy access
+# ==============================================================================
+
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.litellm"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "always"
+restartPolicyMaxRetries = 3
+
+[service]
+name = "juggernaut-litellm"
+internalPort = 4000

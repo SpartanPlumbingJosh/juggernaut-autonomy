@@ -84,8 +84,13 @@ MSGRAPH_CLIENT_SECRET = os.environ.get('MSGRAPH_CLIENT_SECRET', '')
 MSGRAPH_TENANT_ID = os.environ.get('MSGRAPH_TENANT_ID', '')
 MSGRAPH_USER_EMAIL = os.environ.get('MSGRAPH_USER_EMAIL', '')
 
-# OpenRouter (AI + Image Gen)
-OPENROUTER_API_KEY = os.environ.get('OPENROUTER_API_KEY', '')
+# LLM API — configurable via LLM_API_BASE / LLM_API_KEY (falls back to OpenRouter)
+_OPENROUTER_CHAT_DEFAULT = 'https://openrouter.ai/api/v1/chat/completions'
+_OPENROUTER_IMAGE_DEFAULT = 'https://openrouter.ai/api/v1/images/generations'
+_LLM_BASE = (os.environ.get('LLM_API_BASE') or os.environ.get('OPENROUTER_ENDPOINT') or '').strip().rstrip('/')
+LLM_CHAT_ENDPOINT = f'{_LLM_BASE}/chat/completions' if _LLM_BASE else _OPENROUTER_CHAT_DEFAULT
+LLM_IMAGE_ENDPOINT = f'{_LLM_BASE}/images/generations' if _LLM_BASE else _OPENROUTER_IMAGE_DEFAULT
+OPENROUTER_API_KEY = os.environ.get('LLM_API_KEY') or os.environ.get('OPENROUTER_API_KEY') or ''
 OPENROUTER_MAX_PRICE_PROMPT = os.environ.get('OPENROUTER_MAX_PRICE_PROMPT', '1')
 OPENROUTER_MAX_PRICE_COMPLETION = os.environ.get('OPENROUTER_MAX_PRICE_COMPLETION', '2')
 
@@ -274,7 +279,7 @@ async def generate_image(prompt: str, model: str = "openai/dall-e-3", size: str 
         return {"error": "OpenRouter not configured"}
     async with aiohttp.ClientSession() as session:
         async with session.post(
-            "https://openrouter.ai/api/v1/images/generations",
+            LLM_IMAGE_ENDPOINT,
             headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
             json={"model": model, "prompt": prompt, "size": size, "n": 1}
         ) as resp:
@@ -918,7 +923,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 if provider is not None:
                     payload["provider"] = provider
                 async with session.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    LLM_CHAT_ENDPOINT,
                     headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
                     json=payload,
                 ) as resp:
@@ -945,7 +950,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 if provider is not None:
                     payload["provider"] = provider
                 async with session.post(
-                    "https://openrouter.ai/api/v1/chat/completions",
+                    LLM_CHAT_ENDPOINT,
                     headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
                     json=payload,
                 ) as resp:

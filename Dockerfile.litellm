@@ -1,0 +1,35 @@
+# ==============================================================================
+# JUGGERNAUT LiteLLM Proxy - Dockerfile
+# ==============================================================================
+# Unified LLM routing with automatic fallbacks and budget controls.
+# Deploy as a separate Railway service.
+# ==============================================================================
+
+FROM python:3.11-slim
+
+LABEL maintainer="JUGGERNAUT System"
+LABEL description="LiteLLM Proxy — unified LLM routing for JUGGERNAUT workers"
+
+# Security: non-root user
+RUN groupadd -r litellm && useradd -r -g litellm litellm
+
+WORKDIR /app
+
+# Install LiteLLM proxy
+RUN pip install --no-cache-dir 'litellm[proxy]'
+
+# Copy config
+COPY litellm/litellm_config.yaml ./litellm_config.yaml
+
+# Ownership
+RUN chown -R litellm:litellm /app
+
+USER litellm
+
+ENV PYTHONUNBUFFERED=1
+ENV PORT=4000
+
+EXPOSE 4000
+
+# Run proxy — listens on 0.0.0.0:$PORT with config file
+CMD ["litellm", "--config", "litellm_config.yaml", "--host", "0.0.0.0", "--port", "4000"]

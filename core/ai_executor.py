@@ -8,8 +8,12 @@ from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
-DEFAULT_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/auto")
+_OPENROUTER_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
+LLM_API_BASE = (os.getenv("LLM_API_BASE") or os.getenv("OPENROUTER_ENDPOINT") or _OPENROUTER_DEFAULT).strip().rstrip("/")
+LLM_CHAT_ENDPOINT = f"{LLM_API_BASE}/chat/completions" if not LLM_API_BASE.endswith("/chat/completions") else LLM_API_BASE
+# Backward compat alias
+OPENROUTER_ENDPOINT = LLM_CHAT_ENDPOINT
+DEFAULT_MODEL = os.getenv("LLM_MODEL") or os.getenv("OPENROUTER_MODEL") or "openrouter/auto"
 DEFAULT_MAX_TOKENS = int(os.getenv("OPENROUTER_MAX_TOKENS", "4096"))
 DEFAULT_TIMEOUT_SECONDS = int(os.getenv("OPENROUTER_TIMEOUT_SECONDS", "60"))
 DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
@@ -35,7 +39,7 @@ class AIExecutor:
         http_referer: Optional[str] = None,
         title: Optional[str] = None,
     ) -> None:
-        self.api_key = (api_key or os.getenv("OPENROUTER_API_KEY") or "").strip()
+        self.api_key = (api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY") or "").strip()
         self.model = model
         self.max_tokens = max_tokens
         self.timeout_seconds = timeout_seconds

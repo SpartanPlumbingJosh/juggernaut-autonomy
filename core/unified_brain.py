@@ -151,9 +151,12 @@ class ReasoningState:
 # Configure module logger
 logger = logging.getLogger(__name__)
 
-# Configuration constants
-DEFAULT_MODEL = "openrouter/auto"  # Smart router - auto-selects best model
-OPENROUTER_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
+# Configuration constants — LLM endpoint is configurable via LLM_API_BASE env var
+# Falls back to OpenRouter if not set (backward compatible)
+_OPENROUTER_DEFAULT = "https://openrouter.ai/api/v1/chat/completions"
+_LLM_BASE = (os.getenv("LLM_API_BASE") or os.getenv("OPENROUTER_ENDPOINT") or _OPENROUTER_DEFAULT).strip().rstrip("/")
+OPENROUTER_ENDPOINT = f"{_LLM_BASE}/chat/completions" if not _LLM_BASE.endswith("/chat/completions") else _LLM_BASE
+DEFAULT_MODEL = os.getenv("LLM_MODEL") or "openrouter/auto"
 MAX_CONVERSATION_HISTORY = 20
 MAX_MEMORIES_TO_RECALL = 10
 DEFAULT_MAX_TOKENS = 4096
@@ -695,12 +698,12 @@ class BrainService:
             model: Model to use. Defaults to BRAIN_MODEL env var or DEFAULT_MODEL.
             max_tokens: Maximum tokens in response.
         """
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         self.model = model or os.getenv("BRAIN_MODEL", DEFAULT_MODEL)
         self.max_tokens = max_tokens
 
         if not self.api_key:
-            logger.warning("No OPENROUTER_API_KEY found - API calls will fail")
+            logger.warning("No LLM_API_KEY / OPENROUTER_API_KEY found - API calls will fail")
 
     _EVIDENCE_ONLY_DIRECTIVE = (
         "EVIDENCE MODE (PRACTICAL):\n\n"
@@ -3292,13 +3295,13 @@ class CodeGenerator:
             max_tokens: Maximum tokens for response.
             temperature: Sampling temperature (0-1).
         """
-        self.api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        self.api_key = api_key or os.getenv("LLM_API_KEY") or os.getenv("OPENROUTER_API_KEY")
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
 
         if not self.api_key:
-            logger.warning("No OPENROUTER_API_KEY found - code generation will fail")
+            logger.warning("No LLM_API_KEY / OPENROUTER_API_KEY found - code generation will fail")
 
     def _make_request(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
         """
