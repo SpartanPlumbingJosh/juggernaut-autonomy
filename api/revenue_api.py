@@ -162,6 +162,47 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhooks from various platforms."""
+    try:
+        platform = body.get("platform")
+        event_type = body.get("event_type")
+        amount_cents = int(float(body.get("amount")) * 100)
+        currency = body.get("currency", "usd").lower()
+        
+        # Validate required fields
+        if not platform or not event_type or not amount_cents:
+            return _error_response(400, "Missing required fields")
+        
+        # Create transaction record
+        transaction_id = str(uuid.uuid4())
+        await query_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                '{transaction_id}',
+                'revenue',
+                {amount_cents},
+                '{currency}',
+                '{platform}',
+                '{json.dumps(body.get("metadata", {}))}',
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        
+        return _make_response(200, {
+            "success": True,
+            "transaction_id": transaction_id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +272,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
