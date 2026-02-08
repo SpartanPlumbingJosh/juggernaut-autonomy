@@ -217,7 +217,9 @@ class IdeaGenerator:
 
         if self.ai is None:
             try:
-                self.ai = AIExecutor()
+                from core.ai_executor import select_model_for_task
+
+                self.ai = AIExecutor(model=select_model_for_task("analysis"))
             except Exception:
                 self.ai = None
 

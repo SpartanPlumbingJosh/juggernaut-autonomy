@@ -26,7 +26,7 @@ Dedicated Railway service for autonomous bug fixing using Aider CLI.
 Required:
 - `GITHUB_TOKEN` - GitHub personal access token with repo access
 - `OPENROUTER_API_KEY` - For Aider's LLM calls
-- `AIDER_MODEL` - Model to use (default: `anthropic/claude-sonnet-4-20250514`)
+- `AIDER_MODEL` - Model to use (default: `openai/gpt-4o-mini`)
 
 Optional:
 - `AIDER_TIMEOUT_SECONDS` - Max execution time (default: 300)
@@ -59,7 +59,7 @@ retry_count = int(retry_count) if retry_count else 0
 **Aider Command:**
 ```bash
 aider --yes \
-  --model anthropic/claude-sonnet-4-20250514 \
+  --model openai/gpt-4o-mini \
   --message "Fix type comparison error: retry_count from DB is string, needs int conversion before comparing to 3" \
   core/experiment_executor.py
 ```

@@ -1,14 +1,14 @@
 # ==============================================================================
 # JUGGERNAUT MCP Server - Dockerfile
 # ==============================================================================
-# SSE-based Model Context Protocol server for Claude.ai integration
+# SSE-based Model Context Protocol server
 # ==============================================================================
 
 FROM python:3.11-slim
 
 LABEL maintainer="JUGGERNAUT System"
 LABEL version="1.0.0"
-LABEL description="JUGGERNAUT MCP Server - Claude.ai Integration"
+LABEL description="JUGGERNAUT MCP Server"
 
 # Security: Create non-root user
 RUN groupadd -r juggernaut && useradd -r -g juggernaut juggernaut

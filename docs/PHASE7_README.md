@@ -2,7 +2,7 @@
 
 **Status:** ✅ COMPLETE (Ready for Integration)
 **Date:** 2026-01-18
-**Author:** Claude (Phase 7 Build Session)
+**Author:** system
 
 ---
 
@@ -176,7 +176,7 @@ from api.notifications import (
 notify_revenue(amount=49.99, source="gumroad", description="Digital product sale")
 
 # Cost alert
-notify_cost_alert(category="api_anthropic", amount=85.00, budget=100.00)
+notify_cost_alert(category="api_openrouter", amount=85.00, budget=100.00)
 
 # Experiment complete
 notify_experiment_complete(

@@ -953,7 +953,7 @@ class TestSpawnWorker:
 
         assert result is not None
         assert result.worker_id is not None
-        assert result.worker_id.startswith("claude-worker-")
+        assert result.worker_id.startswith("agent-worker-")
         assert auto_scaler._last_scale_up is not None
 
     def test_spawn_worker_failure(

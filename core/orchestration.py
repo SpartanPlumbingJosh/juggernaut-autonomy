@@ -207,7 +207,7 @@ class AgentCard:
     description: str = ""
     tools: List[str] = field(default_factory=list)
     preferred_model: str = "google/gemini-flash-1.5"
-    escalation_model: str = "anthropic/claude-sonnet-4-20250514"
+    escalation_model: str = "openai/gpt-4o"
     max_concurrent_tasks: int = 5
     avg_task_duration_seconds: float = 30.0
     success_rate_threshold: float = 0.85

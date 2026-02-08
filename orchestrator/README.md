@@ -10,7 +10,7 @@ and manages escalations for the JUGGERNAUT autonomy system.
 ### Railway Configuration
 
 1. Create a new service in Railway
-2. Connect to the `SpartanPlumbingJosh/juggernaut-autonomy` repository
+2. Connect the service to your engine repository
 3. Set rootDirectory to repository root (not this folder)
 4. Configure to use `Dockerfile.orchestrator` as the Dockerfile
 5. Set environment variable: `WORKER_ID=ORCHESTRATOR`

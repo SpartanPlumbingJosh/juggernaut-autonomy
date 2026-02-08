@@ -121,7 +121,7 @@ EVIDENCE REQUIRED: Test passes in CI"""
         result = execute_sql("""
             INSERT INTO governance_tasks
             (id, title, description, status, priority, task_type, assigned_worker, created_at)
-            VALUES (gen_random_uuid(), $1, $2, 'pending', 'high', 'bugfix', 'claude-chat', NOW())
+            VALUES (gen_random_uuid(), $1, $2, 'pending', 'high', 'bugfix', 'agent-chat', NOW())
             RETURNING id
         """, [title, description])
 

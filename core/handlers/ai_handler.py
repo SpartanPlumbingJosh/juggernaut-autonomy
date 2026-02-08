@@ -3,7 +3,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from core.ai_executor import AIExecutor
+from core.ai_executor import AIExecutor, select_model_for_task
 from core import tool_executor
 
 from .base import BaseHandler, HandlerResult
@@ -111,6 +111,9 @@ class AIHandler(BaseHandler):
         title = task.get("title") or ""
         description = task.get("description") or ""
         task_type = task.get("task_type") or ""
+
+        model = select_model_for_task(task_type)
+        self.executor = AIExecutor(model=model)
 
         use_tools = self._should_use_tools(task_type)
         plan_only = _truthy_env("AIHANDLER_PLAN_ONLY", "0")

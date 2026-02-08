@@ -159,8 +159,8 @@
 
 **Policy-Based Routing:**
 - Normal mode: openrouter/auto, $0.01/1k tokens, 10 iterations
-- Deep Research: claude-3-opus, $0.10/1k tokens, 50 iterations
-- Code: claude-3.5-sonnet, $0.03/1k tokens, 20 iterations
+- Deep Research: gpt-4o, $0.10/1k tokens, 50 iterations
+- Code: gpt-4o, $0.03/1k tokens, 20 iterations
 - Ops: gpt-4o-mini, $0.001/1k tokens, 5 iterations
 
 **Components to Build:**

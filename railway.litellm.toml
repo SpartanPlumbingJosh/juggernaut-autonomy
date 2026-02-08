@@ -3,9 +3,8 @@
 # ==============================================================================
 # Deploy as a separate service in the same Railway project.
 # Set these env vars in Railway:
-#   ANTHROPIC_API_KEY    — Direct Anthropic key (primary)
-#   OPENAI_API_KEY       — Direct OpenAI key (fallback 1)
-#   OPENROUTER_API_KEY   — OpenRouter key (fallback 2)
+#   OPENAI_API_KEY       — Direct OpenAI key (fallback)
+#   OPENROUTER_API_KEY   — OpenRouter key (primary)
 #   LITELLM_MASTER_KEY   — Auth key for proxy access
 # ==============================================================================
 

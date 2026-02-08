@@ -1,7 +1,7 @@
 """
 Worker Auto-Scaling Module for JUGGERNAUT.
 
-This module implements automatic scaling of Claude workers based on task queue depth.
+This module implements automatic scaling of workers based on task queue depth.
 It monitors queue metrics and spawns/terminates workers to maintain optimal throughput.
 """
 
@@ -109,7 +109,7 @@ class ScalingEvent:
 
 class AutoScaler:
     """
-    Manages automatic scaling of Claude workers based on queue metrics.
+    Manages automatic scaling of workers based on queue metrics.
     
     This class monitors task queue depth and worker utilization to make
     intelligent scaling decisions. It implements cooldown periods to
@@ -314,7 +314,7 @@ class QueueDepthMonitor:
 
 
 class WorkerPoolManager:
-    """Manages the pool of Claude workers for task processing."""
+    """Manages the pool of workers for task processing."""
 
     def __init__(self, db_executor: Any) -> None:
         """Initialize the WorkerPoolManager."""

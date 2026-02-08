@@ -26,13 +26,13 @@ from .base import BaseHandler, HandlerResult
 logger = logging.getLogger(__name__)
 
 # Aider configuration
-AIDER_MODEL = os.getenv("AIDER_MODEL", "anthropic/claude-sonnet-4-20250514")
+AIDER_MODEL = os.getenv("AIDER_MODEL", "openai/gpt-4o-mini")
 AIDER_TIMEOUT = int(os.getenv("AIDER_TIMEOUT_SECONDS", "300"))
 WORKSPACE_DIR = os.getenv("AIDER_WORKSPACE", "/tmp/juggernaut-fixes")
 
 # GitHub configuration
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN", "")
-DEFAULT_REPO = os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy")
+DEFAULT_REPO = os.getenv("GITHUB_REPO", "")
 
 
 class CodeFixHandler(BaseHandler):

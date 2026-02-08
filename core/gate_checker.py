@@ -112,7 +112,7 @@ class GateChecker:
     def __init__(self):
         """Initialize the gate checker with API credentials."""
         self.github_token = os.getenv("GITHUB_TOKEN", "")
-        self.github_repo = os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy")
+        self.github_repo = (os.getenv("GITHUB_REPO") or "").strip()
         self.railway_token = os.getenv("RAILWAY_TOKEN", "")
         
         # Map gate types to their checker functions

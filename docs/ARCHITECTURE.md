@@ -24,7 +24,7 @@ flowchart TD
         BRAIN[Unified Brain<br>core/unified_brain.py]
         DB[(Database<br>core/database.py)]
         TASK[Task Queue<br>governance_tasks]
-        WORKERS[Claude Workers]
+        WORKERS[Workers]
     end
     
     subgraph Services["Service Layer"]
@@ -289,7 +289,7 @@ See [SCHEMA.md](./SCHEMA.md) for complete schema documentation.
 
 Key tables:
 - `governance_tasks`: Central task queue
-- `claude_workers`: Worker registration and status
+- `worker_registry`: Worker registration and status
 - `experiments`: A/B test configurations
 - `coordination_events`: Event log for debugging
 - `learnings`: Captured system learnings
@@ -366,7 +366,7 @@ SELECT * FROM governance_tasks WHERE status = 'pending' ORDER BY priority, creat
 
 **View worker status:**
 ```sql
-SELECT * FROM claude_workers WHERE last_heartbeat > NOW() - INTERVAL '5 minutes';
+SELECT * FROM worker_registry WHERE last_heartbeat > NOW() - INTERVAL '5 minutes';
 ```
 
 **Recent coordination events:**

@@ -47,11 +47,6 @@ SERVICE_LIMITS = {
         "weekly": 100.0,
         "monthly": 400.0
     },
-    "anthropic": {
-        "daily": 15.0,
-        "weekly": 75.0,
-        "monthly": 300.0
-    },
     "openai": {
         "daily": 15.0,
         "weekly": 75.0,
@@ -87,7 +82,7 @@ class CostTracker:
         Track an API cost.
         
         Args:
-            service: Service name (e.g., "openrouter", "anthropic")
+            service: Service name (e.g., "openrouter", "openai")
             cost_usd: Cost in USD
             worker_id: ID of the worker making the request
             request_id: Optional request ID for correlation
@@ -516,7 +511,7 @@ async def track_api_cost(
     Track an API cost.
     
     Args:
-        service: Service name (e.g., "openrouter", "anthropic")
+        service: Service name (e.g., "openrouter", "openai")
         cost_usd: Cost in USD
         worker_id: ID of the worker making the request
         request_id: Optional request ID for correlation

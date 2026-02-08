@@ -81,10 +81,13 @@ class GitHubClient:
             retry_attempts: Number of retry attempts for failed requests.
             retry_delay: Delay between retries in seconds.
         """
-        self.repo = repo or os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy")
+        self.repo = repo or (os.getenv("GITHUB_REPO") or "").strip()
         self.token = token or os.getenv("GITHUB_TOKEN")
         self.retry_attempts = retry_attempts
         self.retry_delay = retry_delay
+
+        if not self.repo:
+            raise ValueError("GITHUB_REPO is required (or pass repo=...) for GitHubClient")
         self._default_branch: Optional[str] = None
         
         if not self.token:

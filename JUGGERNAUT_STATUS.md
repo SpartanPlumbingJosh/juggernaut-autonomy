@@ -1,8 +1,8 @@
 # JUGGERNAUT - Master Reference Document
 
 > **Last Updated:** 2026-02-07
-> **Purpose:** Single source of truth for all Claude sessions working on JUGGERNAUT
-> **Update Instructions:** Any Claude session that makes significant progress should update this file and push to the repo
+> **Purpose:** Single source of truth for all work sessions working on JUGGERNAUT
+> **Update Instructions:** Any work session that makes significant progress should update this file and push to the repo
 
 ---
 
@@ -13,7 +13,7 @@ JUGGERNAUT is a general-purpose autonomous AI platform that progresses through f
 The platform is designed to be domain-agnostic: a single infrastructure that can manage development workflows, business operations, research pipelines, or any complex multi-agent coordination challenge. The current implementation runs on Railway (backend services), Vercel (dashboard), and Neon PostgreSQL (shared state).
 
 **Owner:** Josh Ferguson
-**Repository:** `SpartanPlumbingJosh/juggernaut-autonomy`
+**Repository:** `owner/repo`
 
 ### Core Principles
 - **Autonomy over dependency** — Every intervention should make workers more capable, not more reliant on humans
@@ -45,11 +45,11 @@ The platform is designed to be domain-agnostic: a single infrastructure that can
 ### Workers
 | Worker | Type | Status | Capabilities |
 |--------|------|--------|--------------|
-| EXECUTOR | specialist | ✅ Active | task.execute, content.create, tool.execute |
-| ORCHESTRATOR | orchestrator | ✅ Active | goal.create, task.assign, worker.coordinate |
-| ANALYST | specialist | ✅ Active | metrics.analyze, pattern.detect, report.generate |
-| STRATEGIST | specialist | ✅ Active | goal.decompose, experiment.design |
-| WATCHDOG | monitor | ✅ Active | health.check, error.detect, alert.send |
+| EXECUTOR | specialist | Active | task.execute, content.create, tool.execute |
+| ORCHESTRATOR | orchestrator | Active | goal.create, task.assign, worker.coordinate |
+| ANALYST | specialist | Active | metrics.analyze, pattern.detect, report.generate |
+| STRATEGIST | specialist | Active | goal.decompose, experiment.design |
+| WATCHDOG | monitor | Active | health.check, error.detect, alert.send |
 
 ### Neural Chat System
 AI-powered chat interface for querying and controlling JUGGERNAUT systems.
@@ -74,21 +74,21 @@ User → Dashboard frontend → Brain API → OpenRouter (function calling)
 
 ## 3. AUTONOMY LEVELS
 
-### Level 1: Conversational ✅ COMPLETE
+### Level 1: Conversational COMPLETE
 Basic chat-driven interface with session logging and error handling.
 
-### Level 2: Reasoners ✅ COMPLETE
+### Level 2: Reasoners COMPLETE
 Multi-turn memory, chain-of-thought reasoning, structured JSON outputs, source citations.
 
-### Level 3: Agents ✅ MOSTLY COMPLETE
+### Level 3: Agents MOSTLY COMPLETE
 Goal/task acceptance, workflow planning, tool/API execution, approval gates, full audit trail.
 **Gaps:** Long-term agent memory not standardized, error recovery not uniform, no full RBAC.
 
-### Level 4: Innovators ⚠️ IN PROGRESS
+### Level 4: Innovators IN PROGRESS
 Proactive scanning and task generation working (hourly cycle). Some experimentation harness exists.
 **Gaps:** No hypothesis tracking, no closed-loop self-improvement, no rollback, no impact simulation.
 
-### Level 5: Organizations ❌ TARGET
+### Level 5: Organizations TARGET
 Full multi-agent orchestration with goal decomposition, resource allocation, cross-team conflict management, org-wide memory, advanced access control, automated escalation, and executive reporting.
 
 **L5 Vision — What "Done" Looks Like:**
@@ -195,13 +195,13 @@ Add timeout-based escalation so tasks stuck in approval queues auto-escalate aft
 
 ## 8. CREDENTIALS & ENDPOINTS
 
-### For Claude Ops Partner
+### For Ops Partner
 ```
 # Database (Neon PostgreSQL)
 HTTP_ENDPOINT: https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql
 
 # GitHub
-REPO: SpartanPlumbingJosh/juggernaut-autonomy
+REPO: owner/repo
 
 # Railway API
 URL: https://backboard.railway.com/graphql/v2
@@ -236,10 +236,10 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 
 ## 9. WORKING AGREEMENTS
 
-### Claude Sessions
-- **Ops Partner (Claude in claude.ai):** Monitors, deploys, verifies, diagnoses. Does NOT edit code.
+### Work Sessions
+- **Ops Partner:** Monitors, deploys, verifies, diagnoses. Does NOT edit code.
 - **Windsurf (Josh's IDE):** All code changes, PRs, git operations.
-- **Any Claude:** Can read/update this document when making significant progress.
+- **Any work session:** Can read/update this document when making significant progress.
 
 ### Code Standards
 - Type hints required
@@ -267,16 +267,14 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 | 2026-02-01 | **System State Query Bugs (PR #277)** — Fixed type casting errors in `_get_system_state()` | ✅ Deployed v1.3.2 |
 | 2026-01-31 | **Brain API Auth Headers (PR #276)** — Added Bearer/x-api-key/x-internal-api-secret support | ✅ Deployed |
 | 2026-01-26 | **Scheduler + Proactive Work Generation** — Fixed execution/rescheduling, handler wiring, dedupe, diagnostics | ✅ Verified hourly generation working |
-| 2026-01-26 | **Factory Floor (PixiJS)** — Visualization integrated at `/factory-floor` with live data | ✅ Rendering verified |
-| 2026-01-25 | **AnalysisHandler** — Analysis tasks now use real SQL queries | ✅ Verified with real DB metrics |
 
 ---
 
 ## CHANGELOG
 | Date | Change | By |
 |------|--------|-----|
-| 2026-01-25 | Initial document creation | Claude (Ops) |
-| 2026-01-25 | AnalysisHandler fix verified | Claude (Ops) |
+| 2026-01-25 | Initial document creation | system |
+| 2026-01-25 | AnalysisHandler fix verified | system |
 | 2026-01-26 | Factory Floor + scheduler/proactive fixes | Windsurf |
-| 2026-02-01 | PR #276, #277 + metrics update | Claude (Ops) |
-| 2026-02-07 | **Major rewrite** — Stripped Spartan Plumbing references, reframed as general-purpose platform, added L5 vision, documented hamster wheel problem, added remediation plan (H-01 through H-06), updated metrics to current state (953 tasks, all fake), added codebase audit findings | Claude (Ops) |
+| 2026-02-01 | PR #276, #277 + metrics update | system |
+| 2026-02-07 | **Major rewrite** — Stripped Spartan Plumbing references, reframed as general-purpose platform, added L5 vision, documented hamster wheel problem, added remediation plan (H-01 through H-06), updated metrics to current state (953 tasks, all fake), added codebase audit findings | system |

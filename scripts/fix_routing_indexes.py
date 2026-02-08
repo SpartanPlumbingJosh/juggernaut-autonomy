@@ -25,22 +25,22 @@ VALUES
     (
         'normal',
         'Balanced cost and performance for general tasks',
-        '{"models": [{"provider": "openai", "model": "gpt-4o-mini", "priority": 1}, {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022", "priority": 2}], "max_cost_per_task": 0.10, "max_tokens": 4000, "temperature": 0.7}'::jsonb
+        '{"models": [{"provider": "openai", "model": "gpt-4o-mini", "priority": 1}], "max_cost_per_task": 0.10, "max_tokens": 4000, "temperature": 0.7}'::jsonb
     ),
     (
         'deep_research',
         'Maximum intelligence for complex analysis',
-        '{"models": [{"provider": "openai", "model": "gpt-4o", "priority": 1}, {"provider": "anthropic", "model": "claude-3-opus-20240229", "priority": 2}], "max_cost_per_task": 1.00, "max_tokens": 8000, "temperature": 0.7}'::jsonb
+        '{"models": [{"provider": "openai", "model": "gpt-4o", "priority": 1}], "max_cost_per_task": 1.00, "max_tokens": 8000, "temperature": 0.7}'::jsonb
     ),
     (
         'code',
         'Specialized for code analysis and debugging',
-        '{"models": [{"provider": "openai", "model": "gpt-4o", "priority": 1}, {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022", "priority": 2}], "max_cost_per_task": 0.50, "max_tokens": 6000, "temperature": 0.3}'::jsonb
+        '{"models": [{"provider": "openai", "model": "gpt-4o", "priority": 1}], "max_cost_per_task": 0.50, "max_tokens": 6000, "temperature": 0.3}'::jsonb
     ),
     (
         'ops',
         'Ultra-cheap for simple operational tasks',
-        '{"models": [{"provider": "openai", "model": "gpt-3.5-turbo", "priority": 1}, {"provider": "anthropic", "model": "claude-3-haiku-20240307", "priority": 2}], "max_cost_per_task": 0.01, "max_tokens": 2000, "temperature": 0.5}'::jsonb
+        '{"models": [{"provider": "openai", "model": "gpt-3.5-turbo", "priority": 1}], "max_cost_per_task": 0.01, "max_tokens": 2000, "temperature": 0.5}'::jsonb
     )
 ON CONFLICT (name) DO NOTHING""",
         """INSERT INTO cost_budgets (budget_type, budget_period, budget_amount, period_start, period_end)

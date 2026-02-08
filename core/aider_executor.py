@@ -8,7 +8,7 @@ and commits directly — replacing the blind CodeGenerator.
 Usage:
     executor = AiderExecutor()
     result = executor.run(
-        repo="SpartanPlumbingJosh/juggernaut-autonomy",
+        repo="owner/repo",
         task_description="Fix the retry logic in core/failover.py",
         target_files=["core/failover.py"],
     )
@@ -30,7 +30,7 @@ from typing import Any, Callable, Dict, List, Optional
 logger = logging.getLogger(__name__)
 
 # Aider CLI defaults
-AIDER_MODEL = os.getenv("AIDER_MODEL", "anthropic/claude-sonnet-4-20250514")
+AIDER_MODEL = os.getenv("AIDER_MODEL", "openai/gpt-4o-mini")
 AIDER_EDIT_FORMAT = os.getenv("AIDER_EDIT_FORMAT", "diff")
 AIDER_TIMEOUT_SECONDS = int(os.getenv("AIDER_TIMEOUT_SECONDS", "300"))
 AIDER_MAX_RETRIES = int(os.getenv("AIDER_MAX_RETRIES", "2"))
@@ -203,15 +203,12 @@ class AiderExecutor:
             env["OPENAI_API_KEY"] = llm_key or "not-needed"
         else:
             # Direct provider keys
-            anthropic_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
             openai_key = (os.getenv("OPENAI_API_KEY") or "").strip()
             openrouter_key = (os.getenv("OPENROUTER_API_KEY") or "").strip()
 
-            if anthropic_key:
-                env["ANTHROPIC_API_KEY"] = anthropic_key
             if openai_key:
                 env["OPENAI_API_KEY"] = openai_key
-            if openrouter_key and not anthropic_key and not openai_key:
+            if openrouter_key and not openai_key:
                 # Fall back to OpenRouter via OpenAI-compatible endpoint
                 env["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
                 env["OPENAI_API_KEY"] = openrouter_key

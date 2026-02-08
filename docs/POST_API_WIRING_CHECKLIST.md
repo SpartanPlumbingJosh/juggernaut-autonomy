@@ -1,6 +1,6 @@
 # Post-API Wiring Checklist
 
-Once Claude completes the API wiring, follow these steps to fully activate the system.
+Once the API wiring is complete, follow these steps to fully activate the system.
 
 ---
 
@@ -179,7 +179,7 @@ https://spartan-hq.vercel.app/experiments
 ## 🚨 Troubleshooting
 
 **If APIs return 404:**
-- Check Claude's router integration was deployed
+- Check the router integration was deployed
 - Verify Railway deployment succeeded
 - Check logs: `railway logs -s dashboard-api`
 

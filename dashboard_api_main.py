@@ -24,6 +24,7 @@ from api.dashboard import (
 )
 
 from core.ai_executor import AIExecutor
+from core.ai_executor import select_model_for_task
 
 # Internal (service-to-service) dashboard endpoints
 from api.internal_dashboard import router as internal_dashboard_router
@@ -253,7 +254,9 @@ async def chat(
             messages.insert(0, {"role": "system", "content": system_prompt})
 
     try:
-        executor = AIExecutor()
+        requested_model = (payload.get("model") or "").strip() if isinstance(payload, dict) else ""
+        model = requested_model or select_model_for_task("analysis")
+        executor = AIExecutor(model=model)
         resp = executor.chat(messages)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Chat failed: {e}")

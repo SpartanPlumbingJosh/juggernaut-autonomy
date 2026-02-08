@@ -51,10 +51,10 @@ def test_repositories_api():
     print("-" * 80)
     try:
         payload = {
-            "owner": "SpartanPlumbingJosh",
-            "repo": "spartan-hq",
-            "display_name": "Spartan HQ",
-            "default_branch": "master"
+            "owner": (os.environ.get("GITHUB_DEFAULT_OWNER") or "").strip(),
+            "repo": (os.environ.get("GITHUB_DEFAULT_REPO") or "").strip(),
+            "display_name": "",
+            "default_branch": "main"
         }
         
         response = requests.post(

@@ -10,8 +10,8 @@
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/SpartanPlumbingJosh/juggernaut-autonomy.git
-cd juggernaut-autonomy
+git clone https://github.com/<OWNER>/<REPO>.git
+cd <REPO>
 ```
 
 2. **Create virtual environment**

@@ -69,12 +69,11 @@ You know AI can help your business - but you're staring at a blank chat window w
 1. Find the prompt you need
 2. Copy it exactly
 3. Replace [BRACKETS] with your info
-4. Paste into ChatGPT or Claude
+4. Paste into your AI assistant
 5. Done in 60 seconds
 
 ### Works With:
 ✅ ChatGPT (Free & Plus)
-✅ Claude
 ✅ Gemini
 ✅ Any AI assistant
 
@@ -103,7 +102,7 @@ You know AI can help your business - but you're staring at a blank chat window w
 - Icons for email, content, sales
 
 ## Tags
-AI prompts, ChatGPT, small business, automation, productivity, email templates, business prompts, Claude AI, content creation, sales automation
+AI prompts, ChatGPT, small business, automation, productivity, email templates, business prompts, AI writing, content creation, sales automation
 
 ## File to Upload
 ai-automation-prompt-pack.pdf

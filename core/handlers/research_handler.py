@@ -363,7 +363,9 @@ class ResearchHandler(BaseHandler):
         task_id: Optional[str],
     ) -> Optional[Dict[str, Any]]:
         try:
-            executor = AIExecutor()
+            from core.ai_executor import select_model_for_task
+
+            executor = AIExecutor(model=select_model_for_task("research"))
         except Exception:
             return None
 

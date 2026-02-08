@@ -50,7 +50,7 @@ railway up --service aider
 # Set environment variables
 railway variables set GITHUB_TOKEN=ghp_xxx
 railway variables set OPENROUTER_API_KEY=sk-xxx
-railway variables set AIDER_MODEL=anthropic/claude-sonnet-4-20250514
+railway variables set AIDER_MODEL=openai/gpt-4o-mini
 ```
 
 ### Step 2: Enable Error Scanning
@@ -97,7 +97,7 @@ payload = {
     "file_path": "core/experiment_executor.py",
     "line_number": 554,
     "traceback": "...",
-    "repo": "SpartanPlumbingJosh/juggernaut-autonomy"
+    "repo": "owner/repo"
 }
 
 execute_sql(f"""
@@ -169,7 +169,7 @@ WHERE task_id IN (
 **Aider Service:**
 - `GITHUB_TOKEN` - GitHub PAT with repo access (required)
 - `OPENROUTER_API_KEY` - For Aider's LLM calls (required)
-- `AIDER_MODEL` - Model to use (default: claude-sonnet-4)
+- `AIDER_MODEL` - Model to use (default: openai/gpt-4o-mini)
 - `AIDER_TIMEOUT_SECONDS` - Max execution time (default: 300)
 - `AIDER_WORKSPACE` - Workspace directory (default: /tmp/juggernaut-fixes)
 

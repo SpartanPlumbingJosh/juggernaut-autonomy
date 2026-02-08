@@ -138,13 +138,13 @@ ROUTING_POLICIES = {
         "max_iterations": 10
     },
     "deep_research": {
-        "provider": "anthropic/claude-3-opus",
+        "provider": "openai/gpt-4o",
         "max_price_per_1k_tokens": 0.10,
         "max_context": 200000,
         "max_iterations": 50
     },
     "code": {
-        "provider": "anthropic/claude-3.5-sonnet",
+        "provider": "openai/gpt-4o",
         "max_price_per_1k_tokens": 0.03,
         "max_context": 200000,
         "max_iterations": 20

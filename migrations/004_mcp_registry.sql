@@ -45,7 +45,7 @@ INSERT INTO mcp_registry (
     health_status
 ) VALUES (
     'juggernaut-mcp',
-    'Main JUGGERNAUT MCP server for Claude.ai integration',
+    'Main JUGGERNAUT MCP server for chat integration',
     'active',
     'https://juggernaut-mcp-production.up.railway.app/mcp/sse',
     'UncQmFYeJRyKufiO72jdazhp9vZXBtEx',

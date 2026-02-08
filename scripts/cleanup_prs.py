@@ -58,7 +58,9 @@ def cleanup_pr_mess(*, dry_run: bool = True, max_tasks: int = 50) -> Dict[str, A
                 pr_num_int = int(pr_num)
             except Exception:
                 continue
-            repo = repo_by_pr.get(pr_num_int) or "SpartanPlumbingJosh/juggernaut-autonomy"
+            repo = repo_by_pr.get(pr_num_int) or (os.getenv("GITHUB_REPO") or "").strip()
+            if not repo:
+                continue
 
             if dry_run:
                 closed_prs.append({"task_id": task_id, "repo": repo, "pr_number": pr_num_int, "kept_pr": keep_pr, "dry_run": True})

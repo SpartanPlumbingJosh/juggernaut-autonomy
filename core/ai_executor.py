@@ -23,6 +23,64 @@ DEFAULT_MAX_PRICE_PROMPT = os.getenv("OPENROUTER_MAX_PRICE_PROMPT", "1")
 DEFAULT_MAX_PRICE_COMPLETION = os.getenv("OPENROUTER_MAX_PRICE_COMPLETION", "2")
 DEFAULT_MAX_TOOL_ITERATIONS = int(os.getenv("OPENROUTER_MAX_TOOL_ITERATIONS", "15"))
 
+# Model routing (cost-safe defaults)
+MODEL_FREE_PRIMARY = os.getenv("LLM_MODEL_FREE_PRIMARY", "google/gemini-2.0-flash-exp:free")
+MODEL_FREE_SECONDARY = os.getenv("LLM_MODEL_FREE_SECONDARY", "meta-llama/llama-3.3-70b-instruct:free")
+MODEL_WORKHORSE = os.getenv("LLM_MODEL_WORKHORSE", "deepseek/deepseek-v3.2")
+MODEL_STRATEGY = os.getenv("LLM_MODEL_STRATEGY", "moonshotai/kimi-k2-instruct")
+MODEL_CODE = os.getenv("LLM_MODEL_CODE", "deepseek/deepseek-v3.2")
+MODEL_FALLBACK = os.getenv("LLM_MODEL_FALLBACK", "deepseek/deepseek-v3.1")
+
+
+def select_model_for_task(task_type: str) -> str:
+    tt = (task_type or "").strip().lower()
+
+    free_types = {
+        "critical_monitoring",
+        "error_scanning",
+        "stale_task_reset",
+        "health_check",
+        "heartbeat",
+        "monitoring",
+        "scheduler",
+        "watchdog",
+        "status_update",
+    }
+    if tt in free_types:
+        return MODEL_FREE_PRIMARY or MODEL_FREE_SECONDARY
+
+    if tt in {"critical_monitoring", "error_scanning", "stale_task_reset"}:
+        # Extremely frequent tasks: allow override to a secondary free model
+        # by setting LLM_MODEL_FREE_PRIMARY empty and LLM_MODEL_FREE_SECONDARY.
+        return MODEL_FREE_PRIMARY or MODEL_FREE_SECONDARY
+
+    strategy_types = {"strategy", "planning", "strategic_analysis", "complex"}
+    if tt in strategy_types:
+        return MODEL_STRATEGY
+
+    code_types = {
+        "code",
+        "code_fix",
+        "code_change",
+        "code_implementation",
+        "fix_bug",
+        "deploy_code",
+        "create_pr",
+        "debugging",
+        "optimization",
+        "workflow",
+        "development",
+        "integration",
+    }
+    if tt in code_types:
+        return MODEL_CODE
+
+    research_types = {"research", "analysis", "scan", "opportunity_scan", "idea_generation", "report"}
+    if tt in research_types:
+        return MODEL_WORKHORSE
+
+    return MODEL_WORKHORSE
+
 
 _LLM_CALL_LOCK = threading.Lock()
 _LLM_CALL_TIMES = deque(maxlen=10000)

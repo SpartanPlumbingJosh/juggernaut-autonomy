@@ -1,6 +1,6 @@
 # JUGGERNAUT SYSTEM STATUS REPORT
 Generated: 2026-01-20 03:43:11 UTC
-Worker: claude-chat-DEMO
+Worker: agent-chat-DEMO
 
 ## 🚀 Services Status (Railway)
 | Service | Status |

@@ -46,7 +46,10 @@ def fetch_github_repos(owner: str, github_token: str = None) -> List[Dict[str, A
         List of repository dictionaries
     """
     try:
-        url = f"https://api.github.com/users/{owner}/repos?per_page=100&sort=updated"
+        if owner:
+            url = f"https://api.github.com/users/{owner}/repos?per_page=100&sort=updated"
+        else:
+            url = "https://api.github.com/user/repos?per_page=100&sort=updated"
         
         headers = {
             "Accept": "application/vnd.github.v3+json",
@@ -91,17 +94,26 @@ def handle_list_github_repos(query_params: Dict[str, Any]) -> Dict[str, Any]:
     List repositories from GitHub for the configured owner.
     """
     try:
-        # Default to SpartanPlumbingJosh
-        owner = query_params.get("owner", ["SpartanPlumbingJosh"])[0]
-        
-        # Get GitHub token from environment (optional)
-        github_token = os.getenv("GITHUB_TOKEN")
-        
-        repos = fetch_github_repos(owner, github_token)
+        raw_owner = query_params.get("owner")
+
+        if isinstance(raw_owner, list):
+            owner = (raw_owner[0] or "").strip()
+        else:
+            owner = (raw_owner or "").strip() if isinstance(raw_owner, str) else ""
+
+        github_token = (os.getenv("GITHUB_TOKEN") or "").strip()
+        default_owner = (os.getenv("GITHUB_DEFAULT_OWNER") or "").strip()
+
+        # Prefer explicit owner; otherwise fall back to env.
+        effective_owner = owner or default_owner
+        if not effective_owner:
+            return _error_response(400, "owner is required (or set GITHUB_DEFAULT_OWNER)")
+
+        repos = fetch_github_repos(effective_owner, github_token)
         
         return _make_response(200, {
             "success": True,
-            "owner": owner,
+            "owner": effective_owner,
             "repositories": repos,
             "count": len(repos)
         })

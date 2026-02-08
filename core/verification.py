@@ -127,7 +127,11 @@ class CompletionVerifier:
         if pr_url_match or pr_num_match:
             pr_url = pr_url_match.group(0) if pr_url_match else None
             if not pr_url and pr_num_match:
-                pr_url = f"https://github.com/{os.getenv('GITHUB_REPO', 'SpartanPlumbingJosh/juggernaut-autonomy')}/pull/{pr_num_match.group(1)}"
+                repo_env = (os.getenv('GITHUB_REPO') or '').strip()
+                if repo_env:
+                    pr_url = f"https://github.com/{repo_env}/pull/{pr_num_match.group(1)}"
+                else:
+                    return (False, None)
 
             try:
                 from core.pr_tracker import PRTracker

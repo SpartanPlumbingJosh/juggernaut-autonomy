@@ -5,9 +5,8 @@
 LiteLLM sits between JUGGERNAUT workers and LLM providers. All LLM calls route through it.
 
 ```
-Workers → LiteLLM Proxy → Anthropic (primary)
-                        → OpenAI (fallback 1)
-                        → OpenRouter (fallback 2)
+Workers → LiteLLM Proxy → OpenRouter (primary)
+                        → OpenAI (fallback)
 ```
 
 **Benefits:**
@@ -35,9 +34,8 @@ railway up --dockerfile Dockerfile.litellm
 
 | Variable | Required | Description |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Direct Anthropic API key (primary provider) |
-| `OPENAI_API_KEY` | Yes | Direct OpenAI API key (fallback 1) |
-| `OPENROUTER_API_KEY` | Yes | OpenRouter key (fallback 2, last resort) |
+| `OPENROUTER_API_KEY` | Yes | OpenRouter key (primary provider) |
+| `OPENAI_API_KEY` | No | Direct OpenAI key (fallback) |
 | `LITELLM_MASTER_KEY` | Yes | Auth key for proxy access (generate a random string) |
 
 ### 3. Get the LiteLLM internal URL
@@ -80,10 +78,9 @@ curl https://juggernaut-litellm-production.up.railway.app/v1/models \
 
 ## Fallback Behavior
 
-If Anthropic is down or rate-limited:
-1. Request automatically retries on OpenAI GPT-4o
-2. If OpenAI also fails, falls back to OpenRouter
-3. Total retries: 2 per provider
+If OpenRouter is down or rate-limited:
+1. Request automatically retries on OpenAI
+2. Total retries: 2 per provider
 
 ## Budget Controls
 

@@ -27,7 +27,7 @@ When creating code tasks, these payload fields control Aider behavior:
 
 | Field | Type | Description |
 |---|---|---|
-| `target_repo` | string | Repository to edit (e.g., "juggernaut-autonomy" or "SpartanPlumbingJosh/spartan-hq") |
+| `target_repo` | string | Repository to edit (e.g., "owner/repo") |
 | `target_files` | string[] | Files Aider should edit (added to chat) |
 | `read_only_files` | string[] | Files Aider should read for context only |
 
@@ -45,7 +45,7 @@ Example task payload:
 
 | Variable | Default | Description |
 |---|---|---|
-| `AIDER_MODEL` | `anthropic/claude-sonnet-4-20250514` | Model for Aider to use |
+| `AIDER_MODEL` | `openai/gpt-4o-mini` | Model for Aider to use |
 | `AIDER_EDIT_FORMAT` | `diff` | Edit format (diff, whole, udiff) |
 | `AIDER_TIMEOUT_SECONDS` | `300` | Max time per Aider run |
 | `AIDER_MAX_RETRIES` | `2` | Retries on failure |

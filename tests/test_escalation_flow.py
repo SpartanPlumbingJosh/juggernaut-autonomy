@@ -96,7 +96,7 @@ class TestEscalationFlowHighRisk:
             risk_level=RiskLevel.HIGH,
             estimated_cost_cents=50000,
             task_id=uuid4(),
-            worker_id="claude-chat-test",
+            worker_id="agent-chat-test",
             action_data={"domain": "example.com"},
         )
 

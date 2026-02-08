@@ -34,7 +34,7 @@ Juggernaut has **strong foundational infrastructure** but lacks **active revenue
 
 **Implemented:**
 - `core/unified_brain.py`: BrainService with OpenRouter API integration
-- Multi-model support (GPT-5.1, Claude Sonnet, Gemini 2.0 Flash)
+- Multi-model support (GPT-5.1, Gemini 2.0 Flash)
 - Streaming responses via `consult_with_tools_stream()`
 - Session management and conversation history
 - Cost tracking per conversation

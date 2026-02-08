@@ -13,12 +13,7 @@ Aider needs **at least one** of these API keys set in Railway:
 OPENAI_API_KEY=sk-...
 ```
 
-### Option 2: Anthropic
-```bash
-ANTHROPIC_API_KEY=sk-ant-...
-```
-
-### Option 3: OpenRouter (Fallback)
+### Option 2: OpenRouter (Fallback)
 ```bash
 OPENROUTER_API_KEY=sk-or-...
 ```
@@ -37,9 +32,6 @@ railway variables list --service aider
 # For Aider service
 railway variables set OPENAI_API_KEY=sk-... --service aider
 
-# OR for Anthropic
-railway variables set ANTHROPIC_API_KEY=sk-ant-... --service aider
-
 # OR for OpenRouter
 railway variables set OPENROUTER_API_KEY=sk-or-... --service aider
 ```
@@ -48,13 +40,12 @@ railway variables set OPENROUTER_API_KEY=sk-or-... --service aider
 
 Aider will use these models by default:
 
-- **OpenAI:** `gpt-4-turbo-preview` or `gpt-4`
-- **Anthropic:** `claude-3-opus-20240229` or `claude-3-sonnet-20240229`
+- **OpenAI:** `gpt-4o-mini` or `gpt-4o`
 - **OpenRouter:** Routes to best available model
 
 Override with:
 ```bash
-railway variables set AIDER_MODEL=anthropic/claude-sonnet-4 --service aider
+railway variables set AIDER_MODEL=openai/gpt-4o-mini --service aider
 ```
 
 ## Verification
@@ -66,7 +57,7 @@ railway logs --service aider --filter "aider"
 ```
 
 Look for:
-- ✅ "Using model: gpt-4" or "Using model: claude-3-opus"
+- ✅ "Using model: gpt-4o" or "Using model: gpt-4o-mini"
 - ❌ "API key not found" or "Authentication failed"
 
 ## Why Aider Failed

@@ -529,7 +529,7 @@ class AutoScaler:
             ),
             repo_url=os.environ.get(
                 "RAILWAY_REPO_URL",
-                "SpartanPlumbingJosh/juggernaut-autonomy"
+                ""
             ),
             branch=os.environ.get("RAILWAY_BRANCH", "main")
         )
@@ -769,7 +769,7 @@ class AutoScaler:
     
     def spawn_worker(
         self,
-        worker_type: str = "claude-worker",
+        worker_type: str = "agent-worker",
         use_railway: bool = True
     ) -> SpawnResult:
         """

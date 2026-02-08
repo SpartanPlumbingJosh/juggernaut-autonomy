@@ -102,7 +102,7 @@ class PRTracker:
     def __init__(self):
         """Initialize the PR tracker with GitHub credentials."""
         self.github_token = os.getenv("GITHUB_TOKEN", "")
-        self.default_repo = os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy")
+        self.default_repo = os.getenv("GITHUB_REPO", "")
     
     def track_pr(self, task_id: str, pr_url: str) -> Optional[Dict[str, Any]]:
         """

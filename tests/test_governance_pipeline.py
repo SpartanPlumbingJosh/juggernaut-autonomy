@@ -18,7 +18,7 @@ import pytest
 VALID_TASK_STATUSES = ["pending", "in_progress", "completed", "failed", "cancelled"]
 VALID_PRIORITIES = ["critical", "high", "medium", "low"]
 VALID_TASK_TYPES = ["code", "test", "deploy", "verification", "documentation"]
-WORKER_ID_PREFIX = "claude-chat"
+WORKER_ID_PREFIX = "agent-chat"
 
 
 class TestGovernancePipeline:
@@ -50,7 +50,7 @@ class TestGovernancePipeline:
         
         assert worker_id.startswith(WORKER_ID_PREFIX)
         assert len(worker_id) == len(WORKER_ID_PREFIX) + 5  # prefix + hyphen + 4 chars
-        assert worker_id.count("-") == 2  # claude-chat-XXXX
+        assert worker_id.count("-") == 2  # agent-chat-XXXX
 
     def test_task_type_validation(self) -> None:
         """Verify all task types are properly defined."""
@@ -150,9 +150,9 @@ class TestSchedulerIntegration:
 
     def test_scheduler_respects_worker_assignment(self) -> None:
         """Verify scheduler filters by assigned worker."""
-        worker_filter = "assigned_worker = 'claude-chat'"
+        worker_filter = "assigned_worker = 'agent-chat'"
         
-        assert "claude-chat" in worker_filter
+        assert "agent-chat" in worker_filter
         assert "assigned_worker" in worker_filter
 
 

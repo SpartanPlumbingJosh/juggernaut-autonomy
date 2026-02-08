@@ -1,7 +1,7 @@
 """
 Integration Test Suite for L1-L5 Features
 Task: INT-02
-Worker: claude-chat-7K2M
+Worker: agent-chat-7K2M
 
 ACCEPTANCE CRITERIA:
 1. Automated tests for each L1-L5 feature
@@ -107,7 +107,7 @@ ACCEPTANCE CRITERIA:
         
         query = f"""
         INSERT INTO governance_tasks (id, title, description, priority, status, task_type, assigned_worker, created_at)
-        VALUES ('{task_id}', '{title}', '{description.replace("'", "''")}', 'high', 'pending', 'bug', 'claude-chat', NOW())
+        VALUES ('{task_id}', '{title}', '{description.replace("'", "''")}', 'high', 'pending', 'bug', 'agent-chat', NOW())
         """
         
         result = self._execute_sql(query)

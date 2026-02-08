@@ -12,10 +12,10 @@ Different tasks need different models. Simple tasks use cheap models, complex ta
 **Purpose:** Define rules for model selection based on task characteristics
 
 **Policy Types:**
-- **Normal:** Balanced cost/performance (GPT-4o-mini, Claude Sonnet)
-- **Deep Research:** Maximum intelligence (GPT-4o, Claude Opus)
-- **Code:** Specialized for coding (GPT-4o, Claude Sonnet)
-- **Ops:** Ultra-cheap for simple tasks (GPT-3.5, Claude Haiku)
+- **Normal:** Balanced cost/performance (GPT-4o-mini)
+- **Deep Research:** Maximum intelligence (GPT-4o)
+- **Code:** Specialized for coding (GPT-4o)
+- **Ops:** Ultra-cheap for simple tasks (GPT-3.5)
 
 **Policy Structure:**
 ```python
@@ -23,8 +23,7 @@ Different tasks need different models. Simple tasks use cheap models, complex ta
     "name": "normal",
     "description": "Balanced cost and performance",
     "models": [
-        {"provider": "openai", "model": "gpt-4o-mini", "priority": 1},
-        {"provider": "anthropic", "model": "claude-3-5-sonnet", "priority": 2}
+        {"provider": "openai", "model": "gpt-4o-mini", "priority": 1}
     ],
     "max_cost_per_task": 0.10,
     "max_tokens": 4000,
@@ -194,22 +193,22 @@ CREATE TABLE cost_budgets (
 ## Default Routing Policies
 
 ### Normal (Balanced)
-- **Models:** GPT-4o-mini (primary), Claude Sonnet (fallback)
+- **Models:** GPT-4o-mini
 - **Max Cost:** $0.10 per task
 - **Use Case:** General tasks, analysis, investigation
 
 ### Deep Research (Maximum Intelligence)
-- **Models:** GPT-4o (primary), Claude Opus (fallback)
+- **Models:** GPT-4o
 - **Max Cost:** $1.00 per task
 - **Use Case:** Complex analysis, strategic decisions
 
 ### Code (Specialized)
-- **Models:** GPT-4o (primary), Claude Sonnet (fallback)
+- **Models:** GPT-4o
 - **Max Cost:** $0.50 per task
 - **Use Case:** Code analysis, debugging, fixes
 
 ### Ops (Ultra-Cheap)
-- **Models:** GPT-3.5-turbo (primary), Claude Haiku (fallback)
+- **Models:** GPT-3.5-turbo
 - **Max Cost:** $0.01 per task
 - **Use Case:** Simple queries, status checks, formatting
 

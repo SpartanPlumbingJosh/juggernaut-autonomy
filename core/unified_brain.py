@@ -180,35 +180,39 @@ except (ValueError, TypeError):
 
 # Per-mode model policies for cost/speed/quality tradeoffs
 MODE_MODEL_POLICIES = {
-    "normal": "openrouter/auto",  # Balanced - let OpenRouter choose
-    "deep_research": "anthropic/claude-3.5-sonnet",  # Quality - best reasoning
-    "code": "anthropic/claude-3.5-sonnet",  # Quality - best code generation
-    "ops": "anthropic/claude-3-haiku",  # Speed/cost - cheapest and fastest
+    "normal": "deepseek/deepseek-v3.2",
+    "deep_research": "deepseek/deepseek-v3.2",
+    "code": "deepseek/deepseek-v3.2",
+    "ops": "google/gemini-2.0-flash-exp:free",
 }
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
 TOKEN_COSTS = {
     "openrouter/auto": {"input": 5.0, "output": 15.0},
-    "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
-    "anthropic/claude-3.5-sonnet:beta": {"input": 3.0, "output": 15.0},
-    "anthropic/claude-3-opus": {"input": 15.0, "output": 75.0},
-    "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
     "openai/gpt-4o": {"input": 2.5, "output": 10.0},
+    "openai/gpt-4o-mini": {"input": 0.15, "output": 0.6},
+    "deepseek/deepseek-v3.2": {"input": 0.0, "output": 0.0},
+    "google/gemini-2.0-flash-exp:free": {"input": 0.0, "output": 0.0},
+    "kimi/k2": {"input": 0.0, "output": 0.0},
 }
 
 
-# Supported repositories - add new repos here
-SUPPORTED_REPOS = {
-    "juggernaut-autonomy": "SpartanPlumbingJosh/juggernaut-autonomy",
-    "spartan-hq": "SpartanPlumbingJosh/spartan-hq",
-}
+_supported_repos_raw = (os.getenv("BRAIN_SUPPORTED_REPOS") or "").strip()
+if _supported_repos_raw:
+    try:
+        SUPPORTED_REPOS = json.loads(_supported_repos_raw)
+    except json.JSONDecodeError:
+        SUPPORTED_REPOS = {}
+else:
+    SUPPORTED_REPOS = {}
 
 
 def _provider_routing() -> Optional[Dict[str, Any]]:
     try:
         prompt_price = float(
             (
-                os.getenv("OPENROUTER_MAX_PRICE_PROMPT", DEFAULT_MAX_PRICE_PROMPT) or ""
+                os.getenv("OPENROUTER_MAX_PRICE_PROMPT", DEFAULT_MAX_PRICE_PROMPT)
+                or ""
             ).strip()
             or 0
         )
@@ -260,7 +264,7 @@ It is completely separate from Spartan Plumbing operations and focuses on digita
 You have full access to these systems via environment variables:
 
 ### GitHub
-- Repository: SpartanPlumbingJosh/juggernaut-autonomy
+- Repository: Available via GITHUB_REPO env var
 - Token: Available via GITHUB_TOKEN env var
 
 ### Neon PostgreSQL
@@ -1944,7 +1948,6 @@ class BrainService:
             "max_tokens": self.max_tokens,
         }
 
-        # Don't send provider field when using Anthropic models - causes "Extra inputs not permitted" error
         # OpenRouter handles routing automatically based on model name
         # provider = _provider_routing()
         # if provider is not None:
@@ -2017,7 +2020,6 @@ class BrainService:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
-        # Don't send provider field when using Anthropic models - causes "Extra inputs not permitted" error
         # OpenRouter handles routing automatically based on model name
         # provider = _provider_routing()
         # if provider is not None:
@@ -2095,7 +2097,6 @@ class BrainService:
             "stream": True,  # Enable streaming
         }
 
-        # Don't send provider field when using Anthropic models - causes "Extra inputs not permitted" error
         # OpenRouter handles routing automatically based on model name
         # provider = _provider_routing()
         # if provider is not None:
@@ -2965,10 +2966,9 @@ class CodeTaskExecutor:
         if repo and repo in SUPPORTED_REPOS:
             repo = SUPPORTED_REPOS[repo]
         elif repo is None:
-            repo = SUPPORTED_REPOS.get(
-                "juggernaut-autonomy",
-                os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy"),
-            )
+            repo = (os.getenv("GITHUB_REPO") or "").strip()
+            if not repo:
+                raise ValueError("GITHUB_REPO is required (or pass repo=...) for GitHub operations")
 
         # Cache clients per repo
         if repo not in self._github_clients:
@@ -3178,10 +3178,9 @@ JUGGERNAUT Autonomous Engine (Aider)
         if repo_full and repo_full in SUPPORTED_REPOS:
             repo_full = SUPPORTED_REPOS[repo_full]
         elif repo_full is None:
-            repo_full = SUPPORTED_REPOS.get(
-                "juggernaut-autonomy",
-                os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy"),
-            )
+            repo_full = (os.getenv("GITHUB_REPO") or "").strip()
+            if not repo_full:
+                raise ValueError("GITHUB_REPO is required (or set payload target_repo/repo)")
 
         # Try Aider first (context-aware editing)
         aider_result = self._try_aider(

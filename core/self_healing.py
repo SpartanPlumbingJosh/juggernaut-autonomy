@@ -69,10 +69,9 @@ class SelfHealingManager:
         self.recovery_attempts: Dict[str, int] = {}
         self.successful_recoveries: Dict[str, int] = {}
         self.model_fallback_chain: List[str] = [
-            "google/gemini-2.5-flash",
-            "anthropic/claude-3-haiku",
-            "openai/gpt-4o-mini",
-            "openrouter/auto",
+            "google/gemini-2.0-flash-exp:free",
+            "deepseek/deepseek-v3.2",
+            "deepseek/deepseek-v3.1",
         ]
         
     def classify_failure(self, error: Exception, component: str) -> FailureContext:

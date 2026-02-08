@@ -60,7 +60,6 @@ CREATE TABLE IF NOT EXISTS service_budget_limits (
 INSERT INTO service_budget_limits (service, daily_limit, weekly_limit, monthly_limit)
 VALUES
     ('openrouter', 20.00, 100.00, 400.00),
-    ('anthropic', 15.00, 75.00, 300.00),
     ('openai', 15.00, 75.00, 300.00)
 ON CONFLICT (service) DO NOTHING;
 

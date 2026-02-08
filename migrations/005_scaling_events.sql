@@ -1,6 +1,6 @@
 -- Migration: 005_scaling_events.sql
 -- Description: Create scaling_events table for tracking auto-scaling decisions
--- Author: claude-chat-9X4B
+-- Author: system
 -- Date: 2025-01-19
 
 -- Table to track auto-scaling decisions and actions for historical analysis

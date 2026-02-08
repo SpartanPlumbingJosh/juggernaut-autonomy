@@ -26,17 +26,19 @@ class TestPRUrlParsing(unittest.TestCase):
     
     def test_parse_full_url(self):
         """Test parsing a full GitHub PR URL."""
+        repo = "example-owner/example-repo"
         result = self.tracker._parse_pr_url(
-            "https://github.com/SpartanPlumbingJosh/juggernaut-autonomy/pull/123"
+            f"https://github.com/{repo}/pull/123"
         )
-        self.assertEqual(result["repo"], "SpartanPlumbingJosh/juggernaut-autonomy")
+        self.assertEqual(result["repo"], repo)
         self.assertEqual(result["pr_number"], 123)
     
     def test_parse_number_only(self):
         """Test parsing just a PR number."""
-        result = self.tracker._parse_pr_url("456")
+        with patch.dict("os.environ", {"GITHUB_REPO": "example-owner/example-repo"}):
+            result = self.tracker._parse_pr_url("456")
         self.assertEqual(result["pr_number"], 456)
-        self.assertEqual(result["repo"], "SpartanPlumbingJosh/juggernaut-autonomy")
+        self.assertEqual(result["repo"], "example-owner/example-repo")
     
     def test_parse_with_hash(self):
         """Test parsing PR number with hash."""

@@ -134,7 +134,7 @@ A task is NOT complete until ALL of:
 
 **GOOD:**
 ```
-Merged PR #156: https://github.com/SpartanPlumbingJosh/juggernaut-autonomy/pull/156
+Merged PR #156: https://github.com/<GITHUB_REPO>/pull/156
 - Added core/memory.py with MemoryStore class
 - Implemented save_memory(), recall_memories(), search_similar()
 - All 12 unit tests passing
@@ -211,18 +211,18 @@ For tasks with `task_type = 'code'`:
 
 ### Step 1: Get main branch SHA
 ```
-GET https://api.github.com/repos/SpartanPlumbingJosh/juggernaut-autonomy/git/ref/heads/main
+GET https://api.github.com/repos/<GITHUB_REPO>/git/ref/heads/main
 ```
 
 ### Step 2: Create feature branch
 ```
-POST https://api.github.com/repos/SpartanPlumbingJosh/juggernaut-autonomy/git/refs
+POST https://api.github.com/repos/<GITHUB_REPO>/git/refs
 Body: {"ref": "refs/heads/feature/TASK_ID", "sha": "MAIN_SHA"}
 ```
 
 ### Step 3: Create/update files
 ```
-PUT https://api.github.com/repos/SpartanPlumbingJosh/juggernaut-autonomy/contents/path/to/file.py
+PUT https://api.github.com/repos/<GITHUB_REPO>/contents/path/to/file.py
 Body: {
   "message": "feat: Description of change",
   "content": "BASE64_ENCODED_CONTENT",
@@ -232,7 +232,7 @@ Body: {
 
 ### Step 4: Create PR
 ```
-POST https://api.github.com/repos/SpartanPlumbingJosh/juggernaut-autonomy/pulls
+POST https://api.github.com/repos/<GITHUB_REPO>/pulls
 Body: {
   "title": "TASK_ID: Task Title",
   "body": "Description\n\n## Changes\n- ...",
@@ -243,7 +243,7 @@ Body: {
 
 ### Step 5: Merge PR
 ```
-PUT https://api.github.com/repos/SpartanPlumbingJosh/juggernaut-autonomy/pulls/PR_NUMBER/merge
+PUT https://api.github.com/repos/<GITHUB_REPO>/pulls/PR_NUMBER/merge
 Body: {"merge_method": "squash"}
 ```
 

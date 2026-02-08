@@ -555,9 +555,8 @@ LOOP_INTERVAL = int(os.getenv("LOOP_INTERVAL", "30"))
 # L4-P1: PR auto-merge (CodeRabbit-only) configuration
 ENABLE_PR_AUTO_MERGE = os.getenv("ENABLE_PR_AUTO_MERGE", "true").lower() in ("1", "true", "yes", "y")
 PR_AUTO_MERGE_INTERVAL_SECONDS = int(os.getenv("PR_AUTO_MERGE_INTERVAL_SECONDS", "60"))
-PR_AUTO_MERGE_REPO_ALLOWLIST = {
-    os.getenv("GITHUB_REPO", "SpartanPlumbingJosh/juggernaut-autonomy")
-}
+_repo_env = (os.getenv("GITHUB_REPO") or "").strip()
+PR_AUTO_MERGE_REPO_ALLOWLIST = {_repo_env} if _repo_env else set()
 MAX_TASKS_PER_LOOP = int(os.getenv("MAX_TASKS_PER_LOOP", "2"))
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 SINGLE_WORKER_MODE = os.getenv("SINGLE_WORKER_MODE", "false").lower() == "true"

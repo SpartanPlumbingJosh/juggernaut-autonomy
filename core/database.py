@@ -213,7 +213,7 @@ def log_execution(
         tokens_used: AI tokens consumed
         cost_cents: Cost in cents
         details: Additional details dict (merged into output_data)
-        source: Source identifier (e.g., 'claude_main', 'api')
+        source: Source identifier (e.g., 'engine', 'api')
     
     Returns:
         Log entry UUID or None on failure
@@ -911,7 +911,7 @@ def record_cost(
     Args:
         cost_type: Type of cost - 'api', 'infrastructure', 'service', 'labor', 'other'
         category: Specific category within type:
-            - api: 'openai', 'anthropic', 'retell', 'deepgram', 'elevenlabs'
+            - api: 'openai', 'openrouter', 'retell', 'deepgram', 'elevenlabs'
             - infrastructure: 'railway', 'vercel', 'neon', 'cloudflare'
             - service: 'github', 'stripe', 'twilio'
             - other: 'domain', 'tool', 'subscription'
@@ -972,10 +972,10 @@ def record_api_cost(
     Convenience function to record API costs with auto-pricing.
     
     Args:
-        provider: API provider (openai, anthropic, retell, deepgram, elevenlabs, cartesia)
+        provider: API provider (openai, openrouter, retell, deepgram, elevenlabs, cartesia)
         tokens_used: Number of tokens consumed
         amount_cents: Cost in cents (auto-calculated if not provided)
-        model: Model used (e.g., 'gpt-4', 'claude-3.5-sonnet')
+        model: Model used (e.g., 'gpt-4', 'gpt-4o-mini')
         worker_id: Which worker made the call
         action: What action triggered this
     
@@ -985,7 +985,7 @@ def record_api_cost(
     # Token pricing per 1M tokens (in cents) - rough estimates
     PRICING = {
         "openai": {"gpt-4": 3000, "gpt-4-turbo": 1000, "gpt-3.5-turbo": 50, "default": 1000},
-        "anthropic": {"claude-3.5-sonnet": 300, "claude-3-haiku": 25, "default": 300},
+        "openrouter": {"default": 1000},
         "retell": {"per_minute": 10},
         "deepgram": {"per_minute": 3},
         "elevenlabs": {"per_char": 3},
