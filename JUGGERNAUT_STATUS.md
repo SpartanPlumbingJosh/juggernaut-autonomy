@@ -1,6 +1,6 @@
 # JUGGERNAUT - Master Reference Document
 
-> **Last Updated:** 2026-02-07
+> **Last Updated:** 2026-02-08
 > **Purpose:** Single source of truth for all work sessions working on JUGGERNAUT
 > **Update Instructions:** Any work session that makes significant progress should update this file and push to the repo
 
@@ -32,6 +32,24 @@ The platform is designed to be domain-agnostic: a single infrastructure that can
 | juggernaut-watchdog | `52eb8b9f-6920-4a49-8522-7bc4415076a7` | — | Health monitoring |
 | juggernaut-puppeteer | `fcf41c38-5cc1-46ac-82f2-cf078b839786` | — | Browser automation |
 | juggernaut-dashboard-api | `18cb0f88-242b-4212-82d2-070fb2f1f621` | juggernaut-dashboard-api-production.up.railway.app | Dashboard data API |
+
+### Browser Bridge (VM — JOSHHOMECOMP)
+A Node.js Express API running on Josh's VM that gives JUGGERNAUT access to a real Chrome browser on a residential IP, exposed via Cloudflare Tunnel.
+
+**Location:** `C:\browser-bridge\` on VM
+**Port:** 3100 (local), exposed via Cloudflare quick tunnel
+**Auth Token:** `jug-bridge-v1-2026-spartan-chromium` (via `Authorization: Bearer ...` or `x-bridge-token` header)
+**Endpoints:** `/health`, `/domains`, `/scrape`, `/screenshot`, `/execute`
+
+**VM Chrome Profile (for Puppeteer/CDP):**
+```
+--user-data-dir=C:\Users\User\AppData\Local\Google\Chrome\User Data
+--profile-directory="Profile 1"
+```
+Profile name: "Virtual Machine1"
+CDP port: 9222
+
+**Note:** The Cloudflare quick tunnel URL changes on restart. Current tunnel must be obtained from the running `cloudflared` process on the VM.
 
 ### Database (Neon PostgreSQL)
 - **HTTP Endpoint:** `https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql`
@@ -102,7 +120,7 @@ Full multi-agent orchestration with goal decomposition, resource allocation, cro
 
 ---
 
-## 4. CURRENT STATE (2026-02-07)
+## 4. CURRENT STATE (2026-02-08)
 
 ### What's Working
 - All 5 workers alive with active heartbeats (12-40s intervals)
@@ -110,6 +128,7 @@ Full multi-agent orchestration with goal decomposition, resource allocation, cro
 - Analysis tasks return real SQL-backed metrics
 - Zero errors in recent execution logs
 - Infrastructure healthy across all Railway services
+- **Browser Bridge deployed on VM** — real Chrome browser accessible via Cloudflare Tunnel for web scraping/automation on residential IP
 
 ### What's Broken — The Hamster Wheel
 **Critical Issue:** AIHandler produces fake completions. Workers claim tasks, ask an LLM "what would you do?", save the text response as evidence, and mark done. No real work happens.
@@ -222,6 +241,12 @@ GET /public/dashboard/tasks
 GET /public/dashboard/logs
 GET /public/dashboard/alerts
 GET /public/dashboard/revenue/summary
+
+# Browser Bridge (VM)
+LOCAL: http://localhost:3100
+AUTH: jug-bridge-v1-2026-spartan-chromium
+CHROME_PROFILE: --user-data-dir=C:\Users\User\AppData\Local\Google\Chrome\User Data --profile-directory="Profile 1"
+CDP_PORT: 9222
 ```
 
 ### Redeploy Command (Railway GraphQL)
@@ -263,6 +288,7 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 
 | Date | Fix | Status |
 |------|-----|--------|
+| 2026-02-08 | **Browser Bridge deployed on VM** — Express API + Puppeteer-core + Cloudflare Tunnel for real Chrome browser automation on residential IP | ✅ Running |
 | 2026-02-07 | **5 Critical Bug Fixes (commit f84ef37)** — ORCHESTRATOR heartbeat registration, task assignment SQL, approval routing, completion evidence validation, error handling | ✅ Deployed, ORCHESTRATOR alive after 4+ days dead |
 | 2026-02-01 | **System State Query Bugs (PR #277)** — Fixed type casting errors in `_get_system_state()` | ✅ Deployed v1.3.2 |
 | 2026-01-31 | **Brain API Auth Headers (PR #276)** — Added Bearer/x-api-key/x-internal-api-secret support | ✅ Deployed |
@@ -278,3 +304,4 @@ curl -X POST https://backboard.railway.com/graphql/v2 \
 | 2026-01-26 | Factory Floor + scheduler/proactive fixes | Windsurf |
 | 2026-02-01 | PR #276, #277 + metrics update | system |
 | 2026-02-07 | **Major rewrite** — Stripped Spartan Plumbing references, reframed as general-purpose platform, added L5 vision, documented hamster wheel problem, added remediation plan (H-01 through H-06), updated metrics to current state (953 tasks, all fake), added codebase audit findings | system |
+| 2026-02-08 | Added Browser Bridge section to architecture, VM Chrome profile flags, updated credentials section, added to recent fixes | Ops Partner |
