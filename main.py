@@ -53,37 +53,40 @@ from core.notifications import (
 logger = logging.getLogger(__name__)
 
 EXPERIMENT_EXECUTOR_AVAILABLE = False
-GOAL_TRACKER_AVAILABLE = False
 LEARNING_APPLIER_AVAILABLE = False
+GOAL_TRACKER_AVAILABLE = False
 EXECUTIVE_REPORTER_AVAILABLE = False
+L5_ORCHESTRATOR_AVAILABLE = False
 
 try:
     from core.experiment_executor import progress_experiments
-
     EXPERIMENT_EXECUTOR_AVAILABLE = True
 except Exception:
     EXPERIMENT_EXECUTOR_AVAILABLE = False
 
 try:
     from core.goal_tracker import update_goal_progress
-
     GOAL_TRACKER_AVAILABLE = True
 except Exception:
     GOAL_TRACKER_AVAILABLE = False
 
 try:
     from core.learning_applier import apply_recent_learnings
-
     LEARNING_APPLIER_AVAILABLE = True
 except Exception:
     LEARNING_APPLIER_AVAILABLE = False
 
 try:
     from core.executive_reporter import generate_executive_report
-
     EXECUTIVE_REPORTER_AVAILABLE = True
 except Exception:
     EXECUTIVE_REPORTER_AVAILABLE = False
+
+try:
+    from core.l5_orchestrator import start_l5_orchestrator, get_l5_status
+    L5_ORCHESTRATOR_AVAILABLE = True
+except Exception:
+    L5_ORCHESTRATOR_AVAILABLE = False
 
 REVENUE_DISCOVERY_AVAILABLE = False
 try:
@@ -6286,11 +6289,42 @@ if __name__ == "__main__":
     except Exception as notify_err:
         print(f"Warning: Failed to send engine start notification: {notify_err}")
     
+    # Start L5 orchestrator if available (activates all L5 daemons)
+    l5_orchestrator = None
+    if L5_ORCHESTRATOR_AVAILABLE:
+        try:
+            l5_orchestrator = start_l5_orchestrator(
+                execute_sql_func=execute_sql,
+                escape_value_func=escape_value,
+                log_action_func=log_action,
+            )
+            print("L5 Orchestrator: STARTED")
+            l5_status = get_l5_status()
+            print(f"  Learning Application: {'yes' if l5_status['learning_application'] else 'no'}")
+            print(f"  Health Monitoring: {'yes' if l5_status['health_monitoring'] else 'no'}")
+            print(f"  Escalation: {'yes' if l5_status['escalation'] else 'no'}")
+            print(f"  Executive Report: {'yes' if l5_status['executive_report'] else 'no'}")
+            print(f"  Goal Tracking: {'yes' if l5_status['goal_tracking'] else 'no'}")
+            print(f"  Experiment Lifecycle: {'yes' if l5_status['experiment_lifecycle'] else 'no'}")
+        except Exception as e:
+            print(f"L5 Orchestrator: FAILED to start ({e})")
+            l5_orchestrator = None
+    else:
+        print("L5 Orchestrator: NOT AVAILABLE")
+    
     # Run the autonomy loop (blocks forever)
     try:
         autonomy_loop()
     except KeyboardInterrupt:
         print("\nInterrupted. Shutting down...")
+    
+    # Stop L5 orchestrator on shutdown
+    if l5_orchestrator:
+        try:
+            l5_orchestrator.stop()
+            print("L5 Orchestrator: STOPPED")
+        except Exception as e:
+            print(f"L5 Orchestrator: Error stopping ({e})")
     
     print("Goodbye.")
 

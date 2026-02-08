@@ -444,6 +444,9 @@ __all__ = [
     "detect_agent_failures", "handle_agent_failure",
     "activate_backup_agent", "run_orchestration_health_check", "auto_recover",
     
+    # L5 Orchestrator (complete autonomy)
+    "start_l5_orchestrator", "get_l5_status", "L5Orchestrator",
+    
     # Convenience
     "get_worker_dashboard", "get_system_status",
 ]

@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, List
 
 def apply_recent_learnings(
     execute_sql: Callable[[str], Dict[str, Any]],
+    escape_value_func: Callable[[Any], str],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
     try:
