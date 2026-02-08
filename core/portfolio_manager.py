@@ -280,11 +280,18 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    Includes self-healing mechanisms for failed experiments and resource optimization.
+    """
     try:
         from core.learning_loop import on_experiment_complete
+        from core.monitoring import Monitor
     except ImportError:
         on_experiment_complete = None
+        Monitor = None
+        
+    # Initialize monitoring
+    monitor = Monitor(alert_webhook="https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX")
     
     try:
         res = execute_sql(
