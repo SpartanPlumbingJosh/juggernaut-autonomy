@@ -1752,7 +1752,7 @@ def check_cost_limit(estimated_cost: float) -> Tuple[bool, str]:
             COALESCE(SUM(ce.amount_cents), 0) as spent_cents
         FROM cost_budgets cb
         LEFT JOIN cost_events ce ON ce.category = cb.category 
-            AND ce.created_at >= date_trunc('month', CURRENT_DATE)
+            AND ce.occurred_at >= date_trunc('month', CURRENT_DATE)
         WHERE cb.category = 'total_monthly'
         GROUP BY cb.amount_cents
     """
