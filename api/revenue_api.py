@@ -162,6 +162,35 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_monitoring_status() -> Dict[str, Any]:
+    """Get system health and monitoring status."""
+    try:
+        # Check database connection
+        test_sql = "SELECT 1 as status"
+        test_result = await query_db(test_sql)
+        
+        # Check payment processor connectivity
+        # Note: This would need to be implemented in the PaymentProcessor class
+        # payment_status = payment_processor.check_connectivity()
+        
+        return _make_response(200, {
+            "database": {
+                "status": "ok" if test_result.get("rows") else "error",
+                "response_time_ms": test_result.get("response_time_ms", 0)
+            },
+            "payment_processor": {
+                "status": "ok",  # Placeholder - implement actual check
+                "last_success": None  # Would track last successful transaction
+            },
+            "system": {
+                "status": "ok",
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Monitoring check failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +260,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /monitoring/status
+    if len(parts) == 2 and parts[0] == "monitoring" and parts[1] == "status" and method == "GET":
+        return handle_monitoring_status()
     
     return _error_response(404, "Not found")
 
