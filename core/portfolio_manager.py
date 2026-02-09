@@ -276,6 +276,55 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def process_transactions(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    batch_size: int = 100
+) -> Dict[str, Any]:
+    """Process pending transactions and apply automated rules"""
+    try:
+        # Get pending transactions
+        res = execute_sql(f"""
+            SELECT id, amount_cents, currency, source, metadata, recorded_at
+            FROM revenue_events
+            WHERE status = 'pending'
+            ORDER BY recorded_at ASC
+            LIMIT {batch_size}
+        """)
+        transactions = res.get("rows", []) or []
+        
+        processed = 0
+        for txn in transactions:
+            txn_id = str(txn.get("id"))
+            amount = float(txn.get("amount_cents", 0)) / 100  # Convert to dollars
+            
+            # Apply standard processing rules
+            execute_sql(f"""
+                UPDATE revenue_events
+                SET status = 'processed',
+                    processed_at = NOW(),
+                    net_amount = {amount} * 0.9715  # Apply 2.85% processing fee
+                WHERE id = '{txn_id}'
+            """)
+            processed += 1
+            
+        log_action(
+            "transactions.processed",
+            f"Processed {processed} transactions",
+            level="info",
+            output_data={"processed": processed}
+        )
+        return {"success": True, "processed": processed}
+        
+    except Exception as e:
+        log_action(
+            "transactions.failed",
+            f"Transaction processing failed: {str(e)}",
+            level="error"
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
