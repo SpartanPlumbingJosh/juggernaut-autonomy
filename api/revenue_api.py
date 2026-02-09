@@ -162,6 +162,26 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_trading_engine(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Control the trading engine."""
+    try:
+        from core.portfolio_manager import start_trading_engine
+        
+        action = query_params.get("action", ["status"])[0]
+        
+        if action == "start":
+            config = {
+                "max_trade_size": float(query_params.get("max_trade_size", [100.0])[0]),
+                "risk_level": float(query_params.get("risk_level", [0.5])[0])
+            }
+            result = start_trading_engine(query_db, lambda *args, **kwargs: None, config)
+            return _make_response(200, result)
+            
+        return _make_response(200, {"status": "running"})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to control trading engine: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +251,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/trading
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "trading" and method == "POST":
+        return handle_trading_engine(query_params)
     
     return _error_response(404, "Not found")
 

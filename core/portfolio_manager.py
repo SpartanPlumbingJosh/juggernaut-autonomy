@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.trading_engine import TradingEngine
+
+logger = logging.getLogger(__name__)
 
 
 def generate_revenue_ideas(
@@ -275,6 +279,20 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def start_trading_engine(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    config: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Start the autonomous trading engine."""
+    try:
+        engine = TradingEngine(execute_sql, config)
+        engine.start()
+        return {"success": True, "status": engine.get_status()}
+    except Exception as e:
+        logger.error(f"Failed to start trading engine: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
