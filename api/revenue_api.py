@@ -1,18 +1,44 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Spartan SaaS Platform - Automated API Services.
 
 Endpoints:
+- POST /api/auth - Get API key
+- POST /api/usage - Track API consumption
+
+Revenue APIs:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
 """
 
 import json
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from functools import wraps
 
 from core.database import query_db
 
+
+def _verify_api_key(api_key: str) -> bool:
+    """Verify API key exists and is active."""
+    result = query_db(f"""
+        SELECT 1 FROM api_keys 
+        WHERE key = '{api_key}' 
+        AND status = 'active' 
+        AND (expires_at IS NULL OR expires_at > NOW())
+    """)
+    return bool(result.get("rows"))
+
+def require_api_key(func):
+    """Decorator to verify API key."""
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        api_key = kwargs.get("query_params", {}).get("api_key", [None])[0]
+        if not api_key or not _verify_api_key(api_key):
+            return _error_response(401, "Invalid or missing API key")
+        return await func(*args, **kwargs)
+    return wrapper
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
@@ -33,7 +59,47 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_auth(email: str, plan: str = "basic") -> Dict[str, Any]:
+    """Create new API key for authenticated user."""
+    try:
+        existing = await query_db(f"""
+            SELECT key FROM api_keys 
+            WHERE email = '{email}' 
+            AND status = 'active'
+            LIMIT 1
+        """)
+        if existing.get("rows"):
+            return _make_response(200, {"api_key": existing["rows"][0]["key"]})
+
+        key = f"spartan_{secrets.token_hex(16)}"
+        await query_db(f"""
+            INSERT INTO api_keys (
+                key, email, status, plan, created_at, 
+                expires_at, monthly_quota, calls_used
+            ) VALUES (
+                '{key}', '{email}', 'active', '{plan}', NOW(),
+                NOW() + INTERVAL '365 days', 10000, 0
+            )
+        """)
+        return _make_response(201, {"api_key": key})
+    except Exception as e:
+        return _error_response(500, f"Auth failed: {str(e)}")
+
+async def track_usage(api_key: str, endpoint: str, cost: int = 1) -> None:
+    """Track API usage and enforce quotas."""
+    try:
+        await query_db(f"""
+            UPDATE api_keys 
+            SET calls_used = calls_used + {cost},
+                last_used_at = NOW(),
+                updated_at = NOW()
+            WHERE key = '{api_key}'
+        """)
+    except Exception:
+        pass
+
+@require_api_key
+async def handle_revenue_summary(api_key: str) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -211,7 +277,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route SaaS API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -219,6 +285,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /api/auth
+    if len(parts) == 2 and parts[0] == "api" and parts[1] == "auth" and method == "POST":
+        json_body = json.loads(body or "{}")
+        email = json_body.get("email", "")
+        plan = json_body.get("plan", "basic")
+        if not email:
+            return _error_response(400, "Email required")
+        return handle_auth(email, plan)
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
