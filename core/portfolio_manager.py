@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.billing_system import BillingSystem
+from core.service_delivery import ServiceDelivery
 
 
 def generate_revenue_ideas(
@@ -14,7 +16,11 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    stripe_api_key: Optional[str] = None,
 ) -> Dict[str, Any]:
+    # Initialize billing and delivery systems
+    billing_system = BillingSystem(stripe_api_key) if stripe_api_key else None
+    service_delivery = ServiceDelivery()
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
