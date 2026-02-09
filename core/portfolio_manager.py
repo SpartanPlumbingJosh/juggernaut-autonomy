@@ -9,6 +9,47 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+def onboard_user(email: str, execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Automated user onboarding workflow."""
+    try:
+        # Create user record
+        execute_sql(f"""
+            INSERT INTO users (id, email, status, created_at)
+            VALUES (gen_random_uuid(), '{email}', 'active', NOW())
+            ON CONFLICT (email) DO NOTHING
+        """)
+        
+        # Initialize user profile
+        execute_sql(f"""
+            INSERT INTO user_profiles (user_id, onboarding_step)
+            SELECT id, 'welcome' FROM users WHERE email = '{email}'
+            ON CONFLICT (user_id) DO NOTHING
+        """)
+        
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def deliver_service(user_id: str, service_type: str, execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Automated service delivery."""
+    try:
+        # Record service delivery
+        execute_sql(f"""
+            INSERT INTO service_deliveries (id, user_id, service_type, delivered_at)
+            VALUES (gen_random_uuid(), '{user_id}', '{service_type}', NOW())
+        """)
+        
+        # Update user status
+        execute_sql(f"""
+            UPDATE users 
+            SET last_service_at = NOW()
+            WHERE id = '{user_id}'
+        """)
+        
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -275,6 +316,53 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def handle_transaction_error(error: Exception, transaction_id: str, execute_sql: Callable[[str, Any]], log_action: Callable[..., Any]) -> Dict[str, Any]:
+    """Handle transaction errors and retries."""
+    try:
+        # Log error
+        log_action(
+            "transaction.error",
+            f"Transaction failed: {str(error)}",
+            level="error",
+            error_data={"transaction_id": transaction_id, "error": str(error)}
+        )
+        
+        # Update transaction status
+        execute_sql(f"""
+            UPDATE transactions
+            SET status = 'failed',
+                error_message = '{str(error)[:200]}',
+                retry_count = retry_count + 1
+            WHERE id = '{transaction_id}'
+        """)
+        
+        return {"success": False, "error": str(error)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def monitor_system_health(execute_sql: Callable[[str, Any]], log_action: Callable[..., Any]) -> Dict[str, Any]:
+    """Monitor system health and alert on issues."""
+    try:
+        # Check pending transactions
+        res = execute_sql("""
+            SELECT COUNT(*) as pending_count
+            FROM transactions
+            WHERE status = 'pending'
+              AND created_at < NOW() - INTERVAL '5 minutes'
+        """)
+        pending_count = res.get("rows", [{}])[0].get("pending_count", 0)
+        
+        if pending_count > 0:
+            log_action(
+                "system.health.warning",
+                f"{pending_count} transactions pending for over 5 minutes",
+                level="warning"
+            )
+        
+        return {"success": True, "pending_transactions": pending_count}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
