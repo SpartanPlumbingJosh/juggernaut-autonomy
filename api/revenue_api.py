@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions/create - Create new subscription
+- POST /revenue/subscriptions/cancel - Cancel existing subscription
+- GET /revenue/subscriptions - List subscriptions
 """
 
 import json
@@ -164,6 +167,75 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
+
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new subscription creation."""
+    from billing.subscription_manager import SubscriptionManager
+
+    required_fields = ['customer_id', 'plan_id', 'payment_details']
+    if not all(f in body for f in required_fields):
+        return _error_response(400, "Missing required fields")
+
+    manager = SubscriptionManager()
+    success, result = await manager.create_subscription(
+        body['customer_id'],
+        body['plan_id'],
+        body['payment_details']
+    )
+
+    if not success:
+        return _error_response(400, result.get('error', 'Subscription creation failed'))
+    
+    return _make_response(200, result)
+
+async def handle_subscription_cancel(subscription_id: str) -> Dict[str, Any]:
+    """Handle subscription cancellation."""
+    from billing.subscription_manager import SubscriptionManager
+    
+    if not subscription_id:
+        return _error_response(400, "Missing subscription_id")
+
+    manager = SubscriptionManager()
+    success = await manager.cancel_subscription(subscription_id)
+
+    if not success:
+        return _error_response(400, "Cancellation failed")
+    
+    return _make_response(200, {"success": True})
+
+async def handle_list_subscriptions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """List subscriptions with optional filtering."""
+    limit = int(query_params.get("limit", 50))
+    offset = int(query_params.get("offset", 0))
+    status = query_params.get("status")
+    
+    where = ""
+    if status:
+        where = f"WHERE status = '{status.upper()}'"
+    
+    result = await query_db(
+        f"""
+        SELECT id, customer_id, plan_id, status,
+               created_at, updated_at, canceled_at,
+               last_payment_date, next_billing_date
+        FROM subscriptions
+        {where}
+        ORDER BY created_at DESC
+        LIMIT {limit}
+        OFFSET {offset}
+        """
+    )
+    
+    count = await query_db(
+        f"SELECT COUNT(*) as total FROM subscriptions {where}"
+    )
+    
+    return _make_response(200, {
+        "subscriptions": result.get("rows", []),
+        "total": count.get("rows", [{}])[0].get("total", 0),
+        "limit": limit,
+        "offset": offset
+    })
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
         
@@ -230,7 +302,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+        return await handle_revenue_charts(query_params)
+    
+    # Subscription endpoints
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions":
+        if parts[2] == "create" and method == "POST":
+            return await handle_subscription_create(json.loads(body or "{}"))
+        elif parts[2] == "cancel" and method == "POST":
+            return await handle_subscription_cancel(json.loads(body or "{}").get("subscription_id"))
+        elif parts[2] == "" and method == "GET":
+            return await handle_list_subscriptions(query_params)
     
     return _error_response(404, "Not found")
 
