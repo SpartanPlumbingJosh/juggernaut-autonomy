@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions/create - Create new subscription
+- POST /revenue/subscriptions/cancel - Cancel existing subscription
+- GET /revenue/subscriptions - List subscriptions
 """
 
 import json
@@ -230,7 +233,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+        return await handle_revenue_charts(query_params)
+    
+    # Subscription endpoints
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions":
+        if parts[2] == "create" and method == "POST":
+            return await handle_subscription_create(json.loads(body or "{}"))
+        elif parts[2] == "cancel" and method == "POST":
+            return await handle_subscription_cancel(json.loads(body or "{}").get("subscription_id"))
+        elif parts[2] == "" and method == "GET":
+            return await handle_list_subscriptions(query_params)
     
     return _error_response(404, "Not found")
 
