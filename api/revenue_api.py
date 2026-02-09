@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Record new payments
+- GET /revenue/invoices - Get invoice history
+- POST /revenue/recognize - Run revenue recognition
 """
 
 import json
@@ -162,6 +165,39 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_payments(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record a new payment."""
+    try:
+        billing_service = BillingService()
+        result = await billing_service.process_payment(
+            amount=body.get("amount"),
+            currency=body.get("currency"),
+            customer_id=body.get("customer_id")
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
+async def handle_revenue_invoices(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get invoice history."""
+    try:
+        billing_service = BillingService()
+        result = await billing_service.generate_invoice(
+            subscription_id=query_params.get("subscription_id")
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to get invoices: {str(e)}")
+
+async def handle_revenue_recognize() -> Dict[str, Any]:
+    """Run revenue recognition."""
+    try:
+        billing_service = BillingService()
+        result = await billing_service.recognize_revenue()
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to recognize revenue: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +267,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_revenue_payments(json.loads(body or "{}"))
+    
+    # GET /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "GET":
+        return handle_revenue_invoices(query_params)
+    
+    # POST /revenue/recognize
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "recognize" and method == "POST":
+        return handle_revenue_recognize()
     
     return _error_response(404, "Not found")
 
