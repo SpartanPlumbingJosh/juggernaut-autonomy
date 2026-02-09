@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and service delivery to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /services/deliver - Deliver a digital product/service
+- GET /services/status - Check service delivery status
 """
 
 import json
@@ -162,6 +164,76 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def deliver_service(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Deliver a digital product or service."""
+    try:
+        service_type = body.get("service_type")
+        customer_email = body.get("customer_email")
+        product_id = body.get("product_id")
+        
+        if not all([service_type, customer_email, product_id]):
+            return _error_response(400, "Missing required fields")
+            
+        # Generate unique delivery ID
+        delivery_id = str(uuid.uuid4())
+        
+        # Record service delivery event
+        sql = f"""
+        INSERT INTO service_deliveries (
+            id, service_type, customer_email, 
+            product_id, status, created_at
+        ) VALUES (
+            '{delivery_id}',
+            '{service_type}',
+            '{customer_email}',
+            '{product_id}',
+            'pending',
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        # Trigger delivery workflow
+        workflow_result = await trigger_delivery_workflow(
+            delivery_id, service_type, product_id
+        )
+        
+        if not workflow_result.get("success"):
+            return _error_response(500, "Failed to initiate delivery")
+            
+        return _make_response(200, {
+            "delivery_id": delivery_id,
+            "status": "initiated"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Service delivery failed: {str(e)}")
+
+
+async def check_service_status(delivery_id: str) -> Dict[str, Any]:
+    """Check status of a service delivery."""
+    try:
+        sql = f"""
+        SELECT status, updated_at, metadata
+        FROM service_deliveries
+        WHERE id = '{delivery_id}'
+        """
+        result = await query_db(sql)
+        delivery = result.get("rows", [{}])[0]
+        
+        if not delivery:
+            return _error_response(404, "Delivery not found")
+            
+        return _make_response(200, {
+            "status": delivery.get("status"),
+            "last_updated": delivery.get("updated_at"),
+            "metadata": delivery.get("metadata")
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to check status: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +303,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /services/deliver
+    if len(parts) == 2 and parts[0] == "services" and parts[1] == "deliver" and method == "POST":
+        return deliver_service(json.loads(body or "{}"))
+    
+    # GET /services/status
+    if len(parts) == 2 and parts[0] == "services" and parts[1] == "status" and method == "GET":
+        delivery_id = query_params.get("delivery_id")
+        if not delivery_id:
+            return _error_response(400, "Missing delivery_id")
+        return check_service_status(delivery_id)
     
     return _error_response(404, "Not found")
 
