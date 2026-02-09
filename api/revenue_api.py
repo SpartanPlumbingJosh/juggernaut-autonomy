@@ -10,8 +10,14 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import os
 
 from core.database import query_db
+from payment.stripe_processor import StripeProcessor
+
+# Initialize Stripe processor
+stripe_processor = StripeProcessor(api_key=os.getenv('STRIPE_SECRET_KEY'))
+stripe_processor.webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +237,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/webhook - Stripe webhook handler
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return await stripe_processor.handle_webhook(body.encode('utf-8'), headers.get('Stripe-Signature', ''))
     
     return _error_response(404, "Not found")
 
