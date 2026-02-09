@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,6 +212,12 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    # Initialize payment processor
+    payment_processor = PaymentProcessor(
+        stripe_key="sk_test_...",  # Should come from config
+        paypal_client_id="...", 
+        paypal_secret="..."
+    )
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +238,76 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/stripe/create
+    if len(parts) == 3 and parts[0] == "payment" and parts[1] == "stripe" and parts[2] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            result = await payment_processor.create_stripe_payment(
+                amount=body_data.get("amount", 0),
+                currency=body_data.get("currency", "usd"),
+                customer_email=body_data.get("email", "")
+            )
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Payment failed: {str(e)}")
+    
+    # POST /payment/paypal/create
+    if len(parts) == 3 and parts[0] == "payment" and parts[1] == "paypal" and parts[2] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            result = await payment_processor.create_paypal_payment(
+                amount=body_data.get("amount", 0),
+                currency=body_data.get("currency", "usd"),
+                return_url=body_data.get("return_url", ""),
+                cancel_url=body_data.get("cancel_url", "")
+            )
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Payment failed: {str(e)}")
+    
+    # POST /payment/fulfill
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "fulfill" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            result = await payment_processor.fulfill_order(
+                payment_id=body_data.get("payment_id", ""),
+                payment_method=body_data.get("payment_method", "")
+            )
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Fulfillment failed: {str(e)}")
+    
+    # GET /admin/dashboard
+    if len(parts) == 2 and parts[0] == "admin" and parts[1] == "dashboard" and method == "GET":
+        try:
+            # Get revenue stats
+            revenue_sql = """
+                SELECT 
+                    SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) / 100.0 as total_revenue,
+                    SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) / 100.0 as total_cost,
+                    COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+                FROM revenue_events
+            """
+            revenue_result = await query_db(revenue_sql)
+            revenue_data = revenue_result.get("rows", [{}])[0]
+            
+            # Get recent transactions
+            transactions_sql = """
+                SELECT id, amount_cents/100.0 as amount, currency, source, recorded_at
+                FROM revenue_events
+                WHERE event_type = 'revenue'
+                ORDER BY recorded_at DESC
+                LIMIT 10
+            """
+            transactions_result = await query_db(transactions_sql)
+            
+            return _make_response(200, {
+                "revenue": revenue_data,
+                "recent_transactions": transactions_result.get("rows", [])
+            })
+        except Exception as e:
+            return _error_response(500, f"Failed to fetch dashboard data: {str(e)}")
     
     return _error_response(404, "Not found")
 
