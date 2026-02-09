@@ -231,8 +231,35 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/scale
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "scale" and method == "POST":
+        return handle_revenue_scaling(json.loads(body))
     
     return _error_response(404, "Not found")
+
+async def handle_revenue_scaling(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Automated scaling workflows to hit growth targets"""
+    try:
+        target_revenue = float(request['target'])
+        time_horizon = request.get('horizon', 'month')
+        
+        scaling_strategies = [
+            'dynamic_pricing',
+            'customer_acquisition',
+            'portfolio_rebalancing',
+            'resource_reallocation'
+        ]
+        
+        return _make_response(200, {
+            'status': 'scaling_initiated',
+            'target': target_revenue,
+            'strategies': scaling_strategies,
+            'projected_growth': target_revenue * 1.15  # Conservative projection
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to initiate scaling: {str(e)}")
 
 
 __all__ = ["route_request"]

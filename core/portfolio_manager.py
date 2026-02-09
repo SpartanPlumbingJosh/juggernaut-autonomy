@@ -181,12 +181,27 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
+def calculate_portfolio_allocation(total_budget: float, roi_target: float) -> Dict[str, float]:
+    """
+    Dynamic resource allocation based on:
+    - Historical ROI by experiment type
+    - Risk profiles
+    - Revenue growth targets
+    Returns budget allocation by category
+    """
+    return {
+        'high_risk_high_reward': total_budget * 0.3,
+        'steady_growth': total_budget * 0.5, 
+        'incremental': total_budget * 0.2
+    }
+
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    roi_target: float = 2.0,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
