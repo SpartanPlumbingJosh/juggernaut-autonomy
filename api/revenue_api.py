@@ -162,6 +162,30 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events"""
+    try:
+        event = stripe.Webhook.construct_event(
+            body,
+            headers.get('stripe-signature'),
+            os.getenv('STRIPE_WEBHOOK_SECRET')
+        )
+        
+        # Handle different event types
+        if event['type'] == 'payment_intent.succeeded':
+            payment_intent = event['data']['object']
+            # Process successful payment
+            await process_successful_payment(payment_intent)
+            
+        elif event['type'] == 'payment_method.attached':
+            payment_method = event['data']['object']
+            # Handle new payment method
+            
+        return _make_response(200, {'status': 'success'})
+        
+    except Exception as e:
+        return _error_response(400, f"Webhook error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
