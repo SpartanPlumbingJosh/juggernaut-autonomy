@@ -8,10 +8,15 @@ Endpoints:
 """
 
 import json
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_automation import RevenueAutomation
+
+# Initialize revenue automation
+revenue_automation = RevenueAutomation()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +237,23 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            result = await revenue_automation.process_payment_webhook(body_data)
+            return _make_response(200 if result.get("success") else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+    
     return _error_response(404, "Not found")
 
+
+# Start monitoring in background
+async def start_monitoring():
+    await revenue_automation.monitor_system()
+
+# Run monitoring in background
+asyncio.create_task(start_monitoring())
 
 __all__ = ["route_request"]
