@@ -276,6 +276,36 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def monitor_system_health(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Monitor system health and performance."""
+    try:
+        # Check transaction processing
+        res = execute_sql("""
+            SELECT COUNT(*) as total,
+                   SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 hour'
+        """)
+        stats = res.get("rows", [{}])[0]
+        
+        # Check payment processor connectivity
+        from payment_processor import PaymentProcessor
+        processor = PaymentProcessor()
+        test_payment = processor.process_payment(100, "usd", "stripe", {"test": True})
+        
+        return {
+            "success": True,
+            "transactions_last_hour": stats.get("total", 0),
+            "failed_transactions": stats.get("failed", 0),
+            "payment_processor_ok": test_payment.get("success", False)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
