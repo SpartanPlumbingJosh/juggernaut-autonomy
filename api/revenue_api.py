@@ -10,8 +10,13 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from fastapi import Request
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+from services.webhook_handler import WebhookHandler
+from services.service_delivery import ServiceDelivery
+from services.onboarding import OnboardingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +215,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, request: Optional[Request] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +236,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /webhook/stripe
+    if len(parts) == 2 and parts[0] == "webhook" and parts[1] == "stripe" and method == "POST":
+        if not request:
+            return _error_response(400, "Request object required")
+        webhook_handler = WebhookHandler({})  # Should be initialized with config
+        return await webhook_handler.handle_stripe_webhook(request)
+    
+    # POST /webhook/paypal
+    if len(parts) == 2 and parts[0] == "webhook" and parts[1] == "paypal" and method == "POST":
+        if not request:
+            return _error_response(400, "Request object required")
+        webhook_handler = WebhookHandler({})  # Should be initialized with config
+        return await webhook_handler.handle_paypal_webhook(request)
     
     return _error_response(404, "Not found")
 
