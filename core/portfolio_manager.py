@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_stream import RevenueStream
 
 
 def generate_revenue_ideas(
@@ -275,6 +276,32 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def manage_revenue_streams(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    stream_id: Optional[str] = None,
+    action: str = "stats"
+) -> Dict[str, Any]:
+    """Manage primary revenue streams."""
+    manager = RevenueStream(execute_sql, log_action)
+    
+    if action == "create":
+        return manager.create_stream(
+            name="Primary Revenue Stream",
+            price_cents=9900,  # $99.00
+            delivery_type="digital"
+        )
+    elif action == "stats" and stream_id:
+        return manager.get_stream_stats(stream_id)
+    elif action == "process_payment" and stream_id:
+        return manager.process_payment(
+            stream_id=stream_id,
+            user_id="user_123",  # Would come from auth system
+            payment_data={"amount_cents": 9900}
+        )
+    else:
+        return {"success": False, "error": "Invalid action"}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
