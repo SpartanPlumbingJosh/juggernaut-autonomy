@@ -14,7 +14,9 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    autonomous: bool = True,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with autonomous optimization."""
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
