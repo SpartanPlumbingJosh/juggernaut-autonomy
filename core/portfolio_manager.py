@@ -14,10 +14,14 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    scaling_factor: float = 1.0,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with scaling capabilities"""
     context = context or {}
     gen = IdeaGenerator()
-    ideas = gen.generate_ideas(context)[: int(limit)]
+    # Scale idea generation based on scaling factor
+    scaled_limit = int(limit * scaling_factor)
+    ideas = gen.generate_ideas(context)[:scaled_limit]
 
     created = 0
     failures: List[Dict[str, Any]] = []
