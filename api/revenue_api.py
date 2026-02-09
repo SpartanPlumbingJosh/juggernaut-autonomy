@@ -5,13 +5,20 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process new payments
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
+from core.service_delivery import ServiceDeliveryAutomation
+from core.customer_onboarding import CustomerOnboarding
+
+logger = logging.getLogger(__name__)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,6 +168,72 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
+
+async def handle_new_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process new payment and provision service."""
+    try:
+        payment_details = json.loads(body) if isinstance(body, str) else body
+        onboarding = CustomerOnboarding()
+        processor = PaymentProcessor()
+        delivery = ServiceDeliveryAutomation()
+        
+        # Fraud detection
+        if processor.detect_fraud(payment_details, payment_details.get('customer', {})):
+            return _error_response(403, "Payment flagged for fraud review")
+        
+        # Process payment
+        success, tx_id = await processor.process_payment(payment_details)
+        if not success:
+            return _error_response(402, "Payment processing failed")
+            
+        # Create or get customer ID
+        customer_data = payment_details.get('customer', {})
+        product_id = payment_details.get('product_id')
+        customer_id = await onboarding.create_account(customer_data)
+        if not customer_id:
+            return _error_response(400, "Customer onboarding failed")
+            
+        # Provision service
+        if not await delivery.provision_service(product_id, customer_id):
+            return _error_response(500, "Service provisioning failed")
+            
+        # Send receipt
+        receipt = await processor.generate_receipt(tx_id)
+        
+        # Log revenue event
+        _ = await query_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, recorded_at, created_at,
+                metadata, attribution
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {payment_details.get('amount', 0)},
+                '{payment_details.get('currency', 'USD')}',
+                'direct_payment',
+                NOW(),
+                NOW(),
+                '{json.dumps(receipt)}'::jsonb,
+                '{json.dumps({
+                    'customer_id': customer_id,
+                    'transaction_id': tx_id
+                })}'::jsonb
+            )
+            """
+        )
+        
+        return _make_response(201, {
+            "success": True,
+            "transaction_id": tx_id,
+            "customer_id": customer_id,
+            "receipt": receipt
+        })
+        
+    except Exception as e:
+        logger.error(f"Payment processing error: {str(e)}")
+        return _error_response(500, f"Payment processing error: {str(e)}")
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
