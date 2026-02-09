@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.billing_service import BillingService
+from core.service_delivery import ServiceDelivery
 
 
 def generate_revenue_ideas(
@@ -280,7 +282,25 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    Also handles automated billing and service delivery."""
+    
+    # Process recurring billing
+    billing = BillingService(execute_sql)
+    billing_result = await billing.process_recurring_billing()
+    if not billing_result['success']:
+        log_action("billing.failed", "Recurring billing failed", level="error")
+    
+    # Process service deliveries
+    delivery = ServiceDelivery(execute_sql)
+    delivery_result = await delivery.process_pending_services()
+    if not delivery_result['success']:
+        log_action("delivery.failed", "Service delivery failed", level="error")
+    
+    # Process service renewals
+    renewal_result = await delivery.process_service_renewals()
+    if not renewal_result['success']:
+        log_action("renewal.failed", "Service renewal failed", level="error")
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
