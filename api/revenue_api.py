@@ -162,6 +162,51 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_digital_product_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment for digital product."""
+    try:
+        amount = float(body.get("amount", 0))
+        currency = body.get("currency", "USD")
+        product_id = body.get("product_id")
+        customer_email = body.get("customer_email")
+        
+        if not product_id or not customer_email or amount <= 0:
+            return _error_response(400, "Invalid payment details")
+            
+        # Record the transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, experiment_id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {int(amount * 100)},
+            '{currency}',
+            'digital_product',
+            '{{"product_id": "{product_id}", "customer_email": "{customer_email}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        transaction_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "success": True,
+            "transaction_id": transaction_id,
+            "product_id": product_id,
+            "amount": amount,
+            "currency": currency
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +276,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/digital-product/payment
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "digital-product" and parts[2] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return handle_digital_product_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
