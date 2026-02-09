@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,6 +233,36 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/payments/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = int(body_data.get("amount", 0))
+            metadata = body_data.get("metadata", {})
+            
+            processor = PaymentProcessor()
+            result = await processor.create_payment_intent(amount, metadata)
+            
+            if "error" in result:
+                return _error_response(400, result["error"])
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to create payment: {str(e)}")
+            
+    # POST /revenue/payments/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "webhook" and method == "POST":
+        try:
+            processor = PaymentProcessor()
+            result = await processor.handle_webhook(body.encode(), query_params.get("stripe-signature", ""))
+            
+            if "error" in result:
+                return _error_response(400, result["error"])
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to process webhook: {str(e)}")
+            
     return _error_response(404, "Not found")
 
 
