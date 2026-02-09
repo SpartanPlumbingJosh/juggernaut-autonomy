@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_manager import RevenueManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -36,79 +37,13 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
-        now = datetime.now(timezone.utc)
+        manager = RevenueManager(query_db, lambda *args, **kwargs: None)
+        result = await manager.get_revenue_summary()
         
-        # Calculate period boundaries
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        quarter_month = ((now.month - 1) // 3) * 3 + 1
-        quarter_start = now.replace(month=quarter_month, day=1, hour=0, minute=0, second=0, microsecond=0)
-        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
-        
-        # Get revenue by period
-        sql = f"""
-        SELECT 
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
-            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
-            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as net_profit_cents,
-            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
-            MIN(recorded_at) FILTER (WHERE event_type = 'revenue') as first_revenue_at,
-            MAX(recorded_at) FILTER (WHERE event_type = 'revenue') as last_revenue_at
-        FROM revenue_events
-        WHERE recorded_at >= '{month_start.isoformat()}'
-        """
-        
-        mtd_result = await query_db(sql.replace(month_start.isoformat(), month_start.isoformat()))
-        mtd = mtd_result.get("rows", [{}])[0]
-        
-        qtd_result = await query_db(sql.replace(month_start.isoformat(), quarter_start.isoformat()))
-        qtd = qtd_result.get("rows", [{}])[0]
-        
-        ytd_result = await query_db(sql.replace(month_start.isoformat(), year_start.isoformat()))
-        ytd = ytd_result.get("rows", [{}])[0]
-        
-        # All-time totals
-        all_time_sql = """
-        SELECT 
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
-            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
-            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
-            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as net_profit_cents,
-            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
-        FROM revenue_events
-        """
-        
-        all_time_result = await query_db(all_time_sql)
-        all_time = all_time_result.get("rows", [{}])[0]
-        
-        return _make_response(200, {
-            "mtd": {
-                "revenue_cents": mtd.get("total_revenue_cents") or 0,
-                "cost_cents": mtd.get("total_cost_cents") or 0,
-                "profit_cents": mtd.get("net_profit_cents") or 0,
-                "transaction_count": mtd.get("transaction_count") or 0,
-                "first_revenue_at": mtd.get("first_revenue_at"),
-                "last_revenue_at": mtd.get("last_revenue_at")
-            },
-            "qtd": {
-                "revenue_cents": qtd.get("total_revenue_cents") or 0,
-                "cost_cents": qtd.get("total_cost_cents") or 0,
-                "profit_cents": qtd.get("net_profit_cents") or 0,
-                "transaction_count": qtd.get("transaction_count") or 0
-            },
-            "ytd": {
-                "revenue_cents": ytd.get("total_revenue_cents") or 0,
-                "cost_cents": ytd.get("total_cost_cents") or 0,
-                "profit_cents": ytd.get("net_profit_cents") or 0,
-                "transaction_count": ytd.get("transaction_count") or 0
-            },
-            "all_time": {
-                "revenue_cents": all_time.get("total_revenue_cents") or 0,
-                "cost_cents": all_time.get("total_cost_cents") or 0,
-                "profit_cents": all_time.get("net_profit_cents") or 0,
-                "transaction_count": all_time.get("transaction_count") or 0
-            }
-        })
+        if not result.get("success"):
+            return _error_response(500, "Failed to get revenue summary")
+            
+        return _make_response(200, result["data"])
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
