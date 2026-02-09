@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +217,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+
+    # Payment webhooks
+    if len(parts) == 2 and parts[0] == "webhooks":
+        processor = PaymentProcessor(query_db)
+        
+        if parts[1] == "stripe" and method == "POST":
+            payload = json.loads(body or "{}")
+            sig_header = headers.get("Stripe-Signature", "")
+            result = await processor.handle_stripe_webhook(payload, sig_header)
+            return _make_response(200 if result["success"] else 400, result)
+            
+        elif parts[1] == "paypal" and method == "POST":
+            payload = json.loads(body or "{}")
+            result = await processor.handle_paypal_ipn(payload)
+            return _make_response(200 if result["success"] else 400, result)
+            
+        elif parts[1] == "crypto" and method == "POST":
+            payload = json.loads(body or "{}")
+            result = await processor.handle_crypto_payment(
+                payload.get("tx_hash"),
+                payload.get("currency")
+            )
+            return _make_response(200 if result["success"] else 400, result)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
