@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,22 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(provider: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment provider webhooks."""
+    processor = PaymentProcessor()
+    
+    if provider == "stripe":
+        result = await processor.handle_stripe_webhook(payload)
+    elif provider == "paddle":
+        result = await processor.handle_paddle_webhook(payload)
+    else:
+        return _error_response(400, "Unknown payment provider")
+    
+    if not result.get("success"):
+        return _error_response(400, result.get("error", "Webhook processing failed"))
+    
+    return _make_response(200, result)
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +248,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook/{provider}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            provider = parts[2].lower()
+            payload = json.loads(body) if body else {}
+            return await handle_payment_webhook(provider, payload)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
