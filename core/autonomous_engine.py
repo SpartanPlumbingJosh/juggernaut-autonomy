@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional
 
 from .database import query_db, escape_sql_value
 from .unified_brain import BrainService
+from .marketing_automation import MarketingAutomation
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ class AutonomousEngine:
         self.worker_id = worker_id
         self.limits = limits or ExecutionLimits()
         self.brain = brain or BrainService()
+        self.marketing = MarketingAutomation(self.brain)
         self.state = EngineState.STOPPED
         self.metrics = ExecutionMetrics()
         self.current_tasks: Dict[str, datetime] = {}
@@ -190,7 +192,7 @@ class AutonomousEngine:
     
     def execute_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Execute a task using the Brain.
+        Execute a task using the Brain or marketing automation.
         
         Args:
             task: Task dictionary
@@ -202,6 +204,14 @@ class AutonomousEngine:
         title = task.get("title", "")
         description = task.get("description", "")
         task_type = task.get("task_type", "general")
+        
+        # Handle marketing-specific tasks
+        if task_type == "seo_content_generation":
+            return self._execute_seo_task(task)
+        elif task_type == "lead_scoring":
+            return self._execute_lead_scoring(task)
+        elif task_type == "outreach_sequence":
+            return self._execute_outreach_task(task)
         
         logger.info(f"Executing task {task_id}: {title}")
         
@@ -430,6 +440,60 @@ Please analyze this task and execute it using available tools. Provide a detaile
                 "success": False,
                 "error": result.get("error"),
             }
+    
+    def _execute_seo_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute SEO content generation task."""
+        keywords = task.get("metadata", {}).get("keywords", [])
+        word_count = task.get("metadata", {}).get("word_count", 1500)
+        
+        result = self.marketing.generate_seo_content(keywords, word_count)
+        return {
+            "success": True,
+            "response": result["content"],
+            "cost_cents": 0.5 * len(keywords),  # Estimated cost
+            "duration_seconds": len(result["content"]) / 100  # Estimated time
+        }
+    
+    def _execute_lead_scoring(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute lead scoring task."""
+        email = task.get("metadata", {}).get("email")
+        interactions = task.get("metadata", {}).get("interactions", {})
+        
+        if not email:
+            return {
+                "success": False,
+                "error": "No email provided for lead scoring"
+            }
+            
+        profile = self.marketing.score_lead(email, interactions)
+        return {
+            "success": True,
+            "response": f"Lead scored: Engagement={profile.engagement_score:.1f}, Fit={profile.fit_score:.1f}",
+            "metadata": {
+                "engagement_score": profile.engagement_score,
+                "fit_score": profile.fit_score,
+                "ltv_estimate": profile.ltv_estimate
+            }
+        }
+    
+    def _execute_outreach_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute outreach sequence generation."""
+        email = task.get("metadata", {}).get("email")
+        if not email or email not in self.marketing.lead_profiles:
+            return {
+                "success": False,
+                "error": "Lead profile not found"
+            }
+            
+        sequence = self.marketing.create_outreach_sequence(self.marketing.lead_profiles[email])
+        return {
+            "success": True,
+            "response": f"Generated {len(sequence)} step outreach sequence",
+            "metadata": {
+                "sequence": sequence,
+                "lead_score": self.marketing.lead_profiles[email].engagement_score
+            }
+        }
     
     def get_metrics(self) -> Dict[str, Any]:
         """Get current execution metrics."""
