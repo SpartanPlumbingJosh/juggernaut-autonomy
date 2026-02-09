@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.fulfillment import FulfillmentSystem, AccessControl
 
 
 def generate_revenue_ideas(
@@ -15,6 +16,10 @@ def generate_revenue_ideas(
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas and initialize fulfillment systems."""
+    # Initialize fulfillment systems
+    fulfillment = FulfillmentSystem()
+    access_control = AccessControl()
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
