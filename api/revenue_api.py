@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment-intent - Create payment intent
+- POST /revenue/webhook/stripe - Stripe webhook handler
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import create_payment_intent, handle_stripe_webhook
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +213,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +234,46 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = int(body_data.get("amount", 0))
+            currency = str(body_data.get("currency", "usd"))
+            metadata = body_data.get("metadata", {})
+            
+            if amount <= 0:
+                return _error_response(400, "Amount must be positive")
+                
+            result = await create_payment_intent(
+                amount_cents=amount,
+                currency=currency,
+                metadata=metadata
+            )
+            
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Payment failed"))
+                
+            return _make_response(200, {
+                "client_secret": result["client_secret"],
+                "payment_intent_id": result["payment_intent_id"]
+            })
+        except Exception as e:
+            return _error_response(500, f"Failed to create payment intent: {str(e)}")
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        try:
+            sig_header = headers.get("Stripe-Signature", "")
+            result = await handle_stripe_webhook(body.encode(), sig_header)
+            
+            if not result.get("success"):
+                return _error_response(400, result.get("error", "Webhook failed"))
+                
+            return _make_response(200, {"success": True})
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
