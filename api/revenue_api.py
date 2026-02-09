@@ -1,7 +1,9 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payments, subscriptions, and revenue tracking.
 
 Endpoints:
+- POST /revenue/payment - Create payment intent
+- POST /revenue/webhook - Handle payment webhooks
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
@@ -12,6 +14,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+from services.auth_service import AuthService
+
+# Initialize services
+payment_processor = PaymentProcessor(stripe_secret_key="sk_test_...")
+auth_service = AuthService(secret_key="your-secret-key-here")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,6 +228,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return handle_payment_intent(body)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(body, query_params)
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
@@ -233,6 +249,58 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
         return handle_revenue_charts(query_params)
     
     return _error_response(404, "Not found")
+
+def handle_payment_intent(body: Optional[str]) -> Dict[str, Any]:
+    """Create a payment intent"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        data = json.loads(body)
+        amount = int(data.get("amount", 0))
+        currency = data.get("currency", "usd")
+        metadata = data.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = payment_processor.create_payment_intent(
+            amount_cents=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment intent: {str(e)}")
+
+def handle_payment_webhook(body: Optional[str], query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook events"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        sig_header = query_params.get("stripe-signature", "")
+        if not sig_header:
+            return _error_response(400, "Missing signature header")
+            
+        result = payment_processor.handle_webhook(
+            payload=body,
+            sig_header=sig_header,
+            webhook_secret="your-webhook-secret"
+        )
+        
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
 
 
 __all__ = ["route_request"]
