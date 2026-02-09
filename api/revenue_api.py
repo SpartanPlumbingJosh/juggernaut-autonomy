@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import get_payment_processor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,47 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment link for digital product."""
+    try:
+        processor = await get_payment_processor()
+        amount = int(float(body.get('amount', 0)) * 100)  # Convert to cents
+        metadata = {
+            'product_id': str(body.get('product_id', '')),
+            'user_id': str(body.get('user_id', ''))
+        }
+        result = await processor.create_payment_link(
+            product_name=body.get('product_name', 'Digital Product'),
+            amount=amount,
+            currency=body.get('currency', 'usd'),
+            metadata=metadata
+        )
+        
+        if result.get('success'):
+            return _make_response(200, {
+                'payment_url': result['payment_url'],
+                'payment_id': result['payment_id']
+            })
+        return _error_response(400, result.get('error', 'Payment processing failed'))
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+
+async def handle_payment_webhook(headers: Dict[str, Any], body: str) -> Dict[str, Any]:
+    """Process payment webhook notification."""
+    try:
+        processor = await get_payment_processor()
+        sig_header = headers.get('stripe-signature', '')
+        result = await processor.handle_webhook(body, sig_header)
+        
+        if result.get('success'):
+            # TODO: Implement fulfillment logic here
+            return _make_response(200, {'success': True})
+        return _error_response(400, result.get('error', 'Invalid webhook'))
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +273,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return await handle_create_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return await handle_payment_webhook(headers or {}, body or "")
     
     return _error_response(404, "Not found")
 
