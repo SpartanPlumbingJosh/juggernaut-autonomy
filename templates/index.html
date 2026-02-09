@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Product Landing</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .product { border: 1px solid #ddd; padding: 20px; margin-bottom: 20px; }
+        button { background: #6772e5; color: white; border: none; padding: 10px 20px; cursor: pointer; }
+        .error { color: red; }
+    </style>
+</head>
+<body>
+    <h1>Welcome to Our Product</h1>
+    <div class="product">
+        <h2>Premium Service</h2>
+        <p>Get instant access to our premium features</p>
+        <p>Price: $9.99/month</p>
+        <button id="checkout-button">Subscribe Now</button>
+        <div id="error-message" class="error"></div>
+    </div>
+
+    <script>
+        const stripe = Stripe('{{ stripe_public_key }}');
+        const checkoutButton = document.getElementById('checkout-button');
+        
+        checkoutButton.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/create-checkout-session', {
+                    method: 'POST',
+                });
+                
+                const session = await response.json();
+                const result = await stripe.redirectToCheckout({
+                    sessionId: session.id
+                });
+                
+                if (result.error) {
+                    document.getElementById('error-message').textContent = result.error.message;
+                }
+            } catch (err) {
+                document.getElementById('error-message').textContent = 'An error occurred. Please try again.';
+                console.error('Error:', err);
+            }
+        });
+    </script>
+</body>
+</html>

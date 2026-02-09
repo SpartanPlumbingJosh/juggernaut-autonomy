@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
+from core.database import query_db
+from core.config import settings
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
@@ -275,6 +278,39 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def fulfill_order(order_id: str) -> Dict[str, Any]:
+    """Process and fulfill an order."""
+    try:
+        # Simulate processing time
+        time.sleep(2)
+        
+        # Update order status
+        execute_sql(
+            f"""
+            UPDATE orders 
+            SET status = 'fulfilled',
+                fulfilled_at = NOW()
+            WHERE id = '{order_id}'
+            """
+        )
+        
+        log_action(
+            "order.fulfilled",
+            f"Order {order_id} fulfilled successfully",
+            level="info",
+            output_data={"order_id": order_id}
+        )
+        
+        return {"success": True, "order_id": order_id}
+    except Exception as e:
+        log_action(
+            "order.fulfillment_failed",
+            f"Failed to fulfill order {order_id}: {str(e)}",
+            level="error",
+            error_data={"order_id": order_id, "error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],

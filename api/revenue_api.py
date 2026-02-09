@@ -8,10 +8,14 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import settings
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +214,23 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def create_checkout_session() -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': settings.STRIPE_PRICE_ID,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=f'{settings.BASE_URL}/success',
+            cancel_url=f'{settings.BASE_URL}/cancel',
+        )
+        return _make_response(200, {'id': session.id})
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -219,6 +240,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+
+    # POST /create-checkout-session
+    if len(parts) == 1 and parts[0] == "create-checkout-session" and method == "POST":
+        return create_checkout_session()
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
