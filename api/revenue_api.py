@@ -10,6 +10,7 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from services.billing_service import BillingService
 
 from core.database import query_db
 
@@ -232,7 +233,76 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # GET /revenue/billing/subscriptions
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "billing" and parts[2] == "subscriptions" and method == "GET":
+        return await handle_billing_subscriptions(query_params)
+    
+    # POST /revenue/billing/invoices
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "billing" and parts[2] == "invoices" and method == "POST":
+        return await handle_billing_invoices(body)
+    
+    # POST /revenue/billing/payments
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "billing" and parts[2] == "payments" and method == "POST":
+        return await handle_billing_payments(body)
+    
     return _error_response(404, "Not found")
+
+async def handle_billing_subscriptions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get subscriptions for a customer."""
+    try:
+        customer_id = query_params.get("customer_id")
+        if not customer_id:
+            return _error_response(400, "Missing customer_id")
+            
+        billing = BillingService()
+        result = await billing.create_subscription(customer_id, "basic_plan")
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to get subscriptions: {str(e)}")
+
+async def handle_billing_invoices(body: Optional[str]) -> Dict[str, Any]:
+    """Generate an invoice."""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        data = json.loads(body)
+        subscription_id = data.get("subscription_id")
+        if not subscription_id:
+            return _error_response(400, "Missing subscription_id")
+            
+        billing = BillingService()
+        result = await billing.generate_invoice(subscription_id)
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to generate invoice: {str(e)}")
+
+async def handle_billing_payments(body: Optional[str]) -> Dict[str, Any]:
+    """Process a payment."""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        data = json.loads(body)
+        invoice_id = data.get("invoice_id")
+        payment_method = data.get("payment_method")
+        if not invoice_id or not payment_method:
+            return _error_response(400, "Missing invoice_id or payment_method")
+            
+        billing = BillingService()
+        result = await billing.process_payment(invoice_id, payment_method)
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
 
 
 __all__ = ["route_request"]
