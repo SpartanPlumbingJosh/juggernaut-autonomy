@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.autonomous_service import AutonomousService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,19 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/service
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "service" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            service = AutonomousService()
+            result = await service.handle_service_request(
+                payment_token=body_data.get("payment_token"),
+                customer_email=body_data.get("customer_email")
+            )
+            return _make_response(200 if result.get("success") else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Service request failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
