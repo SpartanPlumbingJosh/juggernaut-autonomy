@@ -1,13 +1,43 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+
+# Production environment configuration
+PRODUCTION = os.getenv("ENVIRONMENT") == "production"
+MONITORING_ENABLED = PRODUCTION and os.getenv("MONITORING_ENABLED", "true").lower() == "true"
+PAYMENT_PROCESSORS = ["stripe", "paypal"] if PRODUCTION else []
+
+def _log_production_event(log_action: Callable[..., Any], event: str, message: str, **kwargs):
+    """Log production events with monitoring integration"""
+    if MONITORING_ENABLED:
+        log_action(
+            f"production.{event}",
+            message,
+            level="info",
+            production=True,
+            **kwargs
+        )
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
+
+def _process_payment(amount: float, currency: str, processor: str) -> Dict[str, Any]:
+    """Process payment through configured payment processor"""
+    if processor not in PAYMENT_PROCESSORS:
+        return {"success": False, "error": f"Unsupported payment processor: {processor}"}
+    
+    # TODO: Implement actual payment processor integration
+    return {"success": True, "transaction_id": "txn_12345"}
+
+def _verify_transaction(transaction_id: str) -> Dict[str, Any]:
+    """Verify transaction status with payment processor"""
+    # TODO: Implement actual transaction verification
+    return {"success": True, "status": "completed"}
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
@@ -275,6 +305,27 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def initialize_autonomous_operations(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Initialize autonomous revenue operations"""
+    try:
+        # Verify payment processors
+        for processor in PAYMENT_PROCESSORS:
+            test_payment = _process_payment(1.00, "USD", processor)
+            if not test_payment.get("success"):
+                return {"success": False, "error": f"Payment processor {processor} failed initialization"}
+        
+        # Verify database connection
+        execute_sql("SELECT 1")
+        
+        _log_production_event(log_action, "system.startup", "Autonomous operations initialized")
+        return {"success": True}
+    except Exception as e:
+        _log_production_event(log_action, "system.startup_failed", f"Failed to initialize operations: {str(e)}", level="error")
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],

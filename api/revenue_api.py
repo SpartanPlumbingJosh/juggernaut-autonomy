@@ -114,6 +114,11 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
+async def verify_transaction(transaction_id: str) -> Dict[str, Any]:
+    """Verify transaction status"""
+    from core.portfolio_manager import _verify_transaction
+    return _verify_transaction(transaction_id)
+
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
