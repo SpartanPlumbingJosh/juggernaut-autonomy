@@ -181,6 +181,41 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
+async def deliver_product(product_id: str, user_id: str) -> Dict[str, Any]:
+    """Deliver product/service to customer."""
+    try:
+        # Get product details
+        product = await query_db(f"""
+            SELECT * FROM products WHERE id = '{product_id}'
+        """)
+        
+        if not product.get("rows"):
+            return {"success": False, "error": "Product not found"}
+        
+        # Record delivery
+        await query_db(f"""
+            INSERT INTO deliveries (
+                id, product_id, user_id, delivered_at, status
+            ) VALUES (
+                gen_random_uuid(),
+                '{product_id}',
+                '{user_id}',
+                NOW(),
+                'completed'
+            )
+        """)
+        
+        # Send confirmation email
+        await send_email(
+            to=user.email,
+            subject=f"Your {product['name']} is ready!",
+            body=f"Thank you for your purchase! Here's your product: {product['delivery_url']}"
+        )
+        
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
