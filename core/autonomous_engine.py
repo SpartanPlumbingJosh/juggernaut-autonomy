@@ -39,6 +39,9 @@ class ExecutionLimits:
     max_iterations_per_task: int = 30
     cooldown_seconds: float = 5.0
     task_timeout_seconds: float = 300.0  # 5 minutes per task
+    max_marketing_budget_cents: float = 50000.0  # $500/day marketing budget
+    max_content_volume: int = 50  # Max SEO content pieces per day
+    max_ad_campaigns: int = 10  # Max concurrent ad campaigns
 
 
 @dataclass
@@ -139,6 +142,14 @@ class AutonomousEngine:
                         WHEN 'low' THEN 4
                         ELSE 5
                     END,
+                    CASE task_type
+                        WHEN 'marketing_funnel' THEN 1
+                        WHEN 'seo_content' THEN 2
+                        WHEN 'ad_campaign' THEN 3
+                        WHEN 'onboarding' THEN 4
+                        WHEN 'sales_pipeline' THEN 5
+                        ELSE 6
+                    END,
                     created_at ASC
                 LIMIT 1
             """)
@@ -205,8 +216,44 @@ class AutonomousEngine:
         
         logger.info(f"Executing task {task_id}: {title}")
         
-        # Construct question for Brain
-        question = f"""Task: {title}
+        # Construct question for Brain based on task type
+        if task_type == "marketing_funnel":
+            question = f"""Marketing Funnel Task: {title}
+
+Description:
+{description}
+
+Please analyze and optimize our marketing funnel. Identify bottlenecks, suggest improvements, and implement changes to increase conversion rates."""
+        elif task_type == "seo_content":
+            question = f"""SEO Content Task: {title}
+
+Description:
+{description}
+
+Please generate SEO-optimized content targeting the specified keywords and topics. Ensure proper keyword density, readability, and relevance."""
+        elif task_type == "ad_campaign":
+            question = f"""Ad Campaign Task: {title}
+
+Description:
+{description}
+
+Please create and optimize programmatic ad campaigns across platforms. Set targeting parameters, budgets, and bidding strategies."""
+        elif task_type == "onboarding":
+            question = f"""Onboarding Task: {title}
+
+Description:
+{description}
+
+Please design and implement self-service onboarding flows. Create interactive tutorials, documentation, and automated guidance."""
+        elif task_type == "sales_pipeline":
+            question = f"""Sales Pipeline Task: {title}
+
+Description:
+{description}
+
+Please analyze and optimize our sales pipeline. Identify stages with drop-offs, implement automation, and suggest improvements to increase velocity."""
+        else:
+            question = f"""Task: {title}
 
 Description:
 {description}
