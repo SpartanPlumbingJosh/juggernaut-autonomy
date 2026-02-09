@@ -33,6 +33,38 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def process_payment(amount_cents: int, currency: str, source: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment and record revenue event."""
+    try:
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, experiment_id, event_type, amount_cents, 
+            currency, source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            '{source}',
+            '{json.dumps(metadata)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        result = await query_db(sql)
+        payment_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "status": "completed",
+            "amount_cents": amount_cents,
+            "currency": currency
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -232,7 +264,72 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return await process_onboarding(data)
+        except Exception as e:
+            return _error_response(400, f"Invalid onboarding data: {str(e)}")
+    
     return _error_response(404, "Not found")
+
+
+async def process_onboarding(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle customer onboarding workflow."""
+    try:
+        # Validate required fields
+        required_fields = ["email", "plan", "payment_method"]
+        for field in required_fields:
+            if not data.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Create customer record
+        sql = f"""
+        INSERT INTO customers (
+            id, email, plan, status, 
+            onboarded_at, metadata
+        ) VALUES (
+            gen_random_uuid(),
+            '{data['email']}',
+            '{data['plan']}',
+            'active',
+            NOW(),
+            '{json.dumps(data.get('metadata', {}))}'::jsonb
+        )
+        RETURNING id
+        """
+        result = await query_db(sql)
+        customer_id = result.get("rows", [{}])[0].get("id")
+
+        # Process initial payment
+        plan_prices = {
+            "basic": 9900,
+            "pro": 19900,
+            "enterprise": 49900
+        }
+        amount_cents = plan_prices.get(data['plan'], 0)
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid plan selected")
+
+        payment_res = await process_payment(
+            amount_cents=amount_cents,
+            currency="usd",
+            source=data['payment_method'],
+            metadata={
+                "customer_id": customer_id,
+                "plan": data['plan'],
+                "type": "initial_payment"
+            }
+        )
+
+        return _make_response(200, {
+            "customer_id": customer_id,
+            "status": "onboarded",
+            "payment": json.loads(payment_res['body'])
+        })
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
 
 
 __all__ = ["route_request"]
