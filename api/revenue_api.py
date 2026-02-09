@@ -162,6 +162,172 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def calculate_mrr_arr() -> Dict[str, Any]:
+    """Calculate Monthly and Annual Recurring Revenue."""
+    try:
+        # Get recurring revenue from last 30 days
+        sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'recurring_revenue' THEN amount_cents ELSE 0 END) as mrr_cents,
+            SUM(CASE WHEN event_type = 'recurring_revenue' THEN amount_cents ELSE 0 END) * 12 as arr_cents
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '30 days'
+        """
+        
+        result = await query_db(sql)
+        data = result.get("rows", [{}])[0]
+        
+        return {
+            "mrr_cents": data.get("mrr_cents") or 0,
+            "arr_cents": data.get("arr_cents") or 0
+        }
+        
+    except Exception as e:
+        raise Exception(f"Failed to calculate MRR/ARR: {str(e)}")
+
+
+async def calculate_churn_metrics() -> Dict[str, Any]:
+    """Calculate churn rate and net revenue retention."""
+    try:
+        # Get churned customers in last 30 days
+        churn_sql = """
+        SELECT COUNT(DISTINCT customer_id) as churned_customers
+        FROM revenue_events
+        WHERE event_type = 'churn'
+          AND recorded_at >= NOW() - INTERVAL '30 days'
+        """
+        
+        churn_result = await query_db(churn_sql)
+        churned = churn_result.get("rows", [{}])[0].get("churned_customers", 0)
+        
+        # Get total active customers
+        active_sql = """
+        SELECT COUNT(DISTINCT customer_id) as active_customers
+        FROM revenue_events
+        WHERE event_type = 'recurring_revenue'
+          AND recorded_at >= NOW() - INTERVAL '30 days'
+        """
+        
+        active_result = await query_db(active_sql)
+        active = active_result.get("rows", [{}])[0].get("active_customers", 0)
+        
+        # Calculate churn rate
+        churn_rate = churned / active if active > 0 else 0
+        
+        # Calculate net revenue retention
+        nrr_sql = """
+        WITH recurring AS (
+            SELECT customer_id, SUM(amount_cents) as total_revenue
+            FROM revenue_events
+            WHERE event_type = 'recurring_revenue'
+              AND recorded_at >= NOW() - INTERVAL '60 days'
+              AND recorded_at < NOW() - INTERVAL '30 days'
+            GROUP BY customer_id
+        ),
+        current AS (
+            SELECT customer_id, SUM(amount_cents) as total_revenue
+            FROM revenue_events
+            WHERE event_type = 'recurring_revenue'
+              AND recorded_at >= NOW() - INTERVAL '30 days'
+            GROUP BY customer_id
+        )
+        SELECT 
+            SUM(current.total_revenue) / NULLIF(SUM(recurring.total_revenue), 0) as nrr
+        FROM recurring
+        LEFT JOIN current ON recurring.customer_id = current.customer_id
+        """
+        
+        nrr_result = await query_db(nrr_sql)
+        nrr = nrr_result.get("rows", [{}])[0].get("nrr", 0)
+        
+        return {
+            "churn_rate": churn_rate,
+            "net_revenue_retention": nrr
+        }
+        
+    except Exception as e:
+        raise Exception(f"Failed to calculate churn metrics: {str(e)}")
+
+
+async def calculate_progress(target_cents: int = 800000000) -> Dict[str, Any]:
+    """Calculate progress toward revenue target."""
+    try:
+        # Get total revenue to date
+        sql = """
+        SELECT SUM(amount_cents) as total_revenue_cents
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        """
+        
+        result = await query_db(sql)
+        total = result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        progress = min(total / target_cents, 1.0)
+        
+        return {
+            "total_revenue_cents": total,
+            "target_cents": target_cents,
+            "progress": progress
+        }
+        
+    except Exception as e:
+        raise Exception(f"Failed to calculate progress: {str(e)}")
+
+
+async def forecast_hit_probability(target_cents: int = 800000000, deadline: str = "2026-12-31") -> Dict[str, Any]:
+    """Calculate probability of hitting revenue target by deadline."""
+    try:
+        # Get daily revenue growth rate
+        growth_sql = """
+        WITH daily AS (
+            SELECT 
+                DATE(recorded_at) as date,
+                SUM(amount_cents) as revenue_cents
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+            GROUP BY DATE(recorded_at)
+        )
+        SELECT 
+            AVG((revenue_cents - LAG(revenue_cents) OVER (ORDER BY date)) / NULLIF(LAG(revenue_cents) OVER (ORDER BY date), 0)) as growth_rate
+        FROM daily
+        """
+        
+        growth_result = await query_db(growth_sql)
+        growth_rate = growth_result.get("rows", [{}])[0].get("growth_rate", 0)
+        
+        # Get current revenue
+        current_sql = """
+        SELECT SUM(amount_cents) as total_revenue_cents
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        """
+        
+        current_result = await query_db(current_sql)
+        current = current_result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        # Calculate days remaining
+        deadline_date = datetime.strptime(deadline, "%Y-%m-%d").date()
+        days_remaining = (deadline_date - datetime.now().date()).days
+        
+        # Forecast future revenue
+        forecast = current * (1 + growth_rate) ** days_remaining
+        
+        # Calculate probability
+        probability = min(max(forecast / target_cents, 0), 1)
+        
+        return {
+            "current_revenue_cents": current,
+            "target_cents": target_cents,
+            "days_remaining": days_remaining,
+            "forecast_revenue_cents": forecast,
+            "probability": probability,
+            "growth_rate": growth_rate
+        }
+        
+    except Exception as e:
+        raise Exception(f"Failed to forecast hit probability: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +397,23 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/metrics
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "metrics" and method == "GET":
+        try:
+            mrr_arr = await calculate_mrr_arr()
+            churn_metrics = await calculate_churn_metrics()
+            progress = await calculate_progress()
+            forecast = await forecast_hit_probability()
+            
+            return _make_response(200, {
+                "mrr": mrr_arr,
+                "churn": churn_metrics,
+                "progress": progress,
+                "forecast": forecast
+            })
+        except Exception as e:
+            return _error_response(500, str(e))
     
     return _error_response(404, "Not found")
 
