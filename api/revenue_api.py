@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Autonomous Revenue System - End-to-end revenue generation with minimal human intervention.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Process new payment
+- POST /revenue/onboard - Create new customer account
 """
 
 import json
@@ -12,6 +14,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from autonomous_revenue.payment_processor import PaymentProcessor
+from autonomous_revenue.service_delivery import ServiceDelivery 
+from autonomous_revenue.onboarding import OnboardingManager
+
+payment_processor = PaymentProcessor()
+service_delivery = ServiceDelivery()
+onboarding_manager = OnboardingManager()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,8 +240,69 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_checkout(json.loads(body or "{}"))
+        
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        return handle_onboarding(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
+
+
+async def handle_checkout(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment and deliver service."""
+    try:
+        # Process payment
+        payment_success, payment_result = payment_processor.process_payment(data.get("payment", {}))
+        if not payment_success:
+            return _error_response(400, f"Payment failed: {payment_result}")
+            
+        # Deliver service
+        delivery_result = service_delivery.deliver_service(data.get("order", {}))
+        if not delivery_result.get("success"):
+            return _error_response(500, "Service delivery failed")
+            
+        # Record transaction
+        transaction_data = {
+            "payment_id": payment_result,
+            "delivery_details": delivery_result["delivery"],
+            "amount": data.get("payment", {}).get("amount"),
+            "customer_id": data.get("customer_id"),
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # TODO: Store transaction in database
+        
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_result,
+            "delivery": delivery_result["delivery"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+
+async def handle_onboarding(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new customer account."""
+    try:
+        success, result = onboarding_manager.create_account(data)
+        if not success:
+            return _error_response(400, result.get("error", "Onboarding failed"))
+            
+        # TODO: Store account in database
+        
+        return _make_response(200, {
+            "success": True,
+            "account_id": result["account_id"],
+            "next_steps": result["next_steps"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
 
 
 __all__ = ["route_request"]
