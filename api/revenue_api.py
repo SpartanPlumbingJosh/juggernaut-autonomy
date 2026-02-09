@@ -235,4 +235,64 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
-__all__ = ["route_request"]
+from services.text_to_speech import TextToSpeechService
+
+tts_service = TextToSpeechService()
+
+async def handle_tts_request(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process text-to-speech request"""
+    try:
+        user_id = body.get("user_id")
+        text = body.get("text")
+        voice = body.get("voice", "neutral")
+        format = body.get("format", "mp3")
+        
+        if not user_id or not text:
+            return _error_response(400, "Missing user_id or text")
+            
+        result = await tts_service.process_request(user_id, text, voice, format)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Processing failed"))
+            
+        return _make_response(200, {
+            "audio_url": result["audio_url"],
+            "price_cents": result["price_cents"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"TTS processing error: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    """Route revenue API requests."""
+    
+    # Handle CORS preflight
+    if method == "OPTIONS":
+        return _make_response(200, {})
+    
+    # Parse path
+    parts = [p for p in path.split("/") if p]
+
+    # POST /revenue/tts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "tts" and method == "POST":
+        try:
+            parsed_body = json.loads(body) if body else {}
+            return handle_tts_request(parsed_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+
+    # GET /revenue/summary
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
+        return handle_revenue_summary()
+    
+    # GET /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
+        return handle_revenue_transactions(query_params)
+    
+    # GET /revenue/charts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
+        return handle_revenue_charts(query_params)
+    
+    return _error_response(404, "Not found")
+
+__all__ = ["route_request", "TextToSpeechService"]
