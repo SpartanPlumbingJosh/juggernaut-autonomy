@@ -49,11 +49,18 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         SELECT 
             SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
+            SUM(CASE WHEN event_type = 'refund' THEN amount_cents ELSE 0 END) as total_refunds_cents,
             SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
-            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as net_profit_cents,
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) -
+            SUM(CASE WHEN event_type = 'refund' THEN amount_cents ELSE 0 END) as net_profit_cents,
             COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
+            COUNT(DISTINCT user_id) FILTER (WHERE event_type = 'revenue') as active_users,
             MIN(recorded_at) FILTER (WHERE event_type = 'revenue') as first_revenue_at,
-            MAX(recorded_at) FILTER (WHERE event_type = 'revenue') as last_revenue_at
+            MAX(recorded_at) FILTER (WHERE event_type = 'revenue') as last_revenue_at,
+            COUNT(DISTINCT user_id) FILTER (
+                WHERE event_type = 'revenue' 
+                AND recorded_at >= NOW() - INTERVAL '30 days'
+            ) as retained_users
         FROM revenue_events
         WHERE recorded_at >= '{month_start.isoformat()}'
         """
