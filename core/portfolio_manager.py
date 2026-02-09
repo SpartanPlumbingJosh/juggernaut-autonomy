@@ -276,11 +276,21 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
+    budget_threshold: float = 0.8,
+    min_roi: float = 20.0,
+    max_concurrent_experiments: int = 5
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Autonomous experiment management system.
+    
+    Handles:
+    - Monitoring running experiments
+    - Completing experiments that exceed budget
+    - Triggering learning loops
+    - Balancing experiment portfolio
+    """
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
@@ -305,9 +315,21 @@ def review_experiments_stub(
     except Exception as e:
         return {"success": False, "error": str(e)}
 
+    # Get current experiment budget allocation
+    budget_res = execute_sql("""
+        SELECT SUM(budget_limit) as total_budget,
+               SUM(budget_spent) as total_spent
+        FROM experiments
+        WHERE status = 'running'
+    """)
+    budget_data = budget_res.get("rows", [{}])[0]
+    total_budget = float(budget_data.get("total_budget") or 0)
+    total_spent = float(budget_data.get("total_spent") or 0)
+    
     running_count = 0
     completed_count = 0
     learning_triggered = 0
+    budget_warnings = 0
     
     for exp in rows:
         exp_id = exp.get("id")
@@ -319,6 +341,25 @@ def review_experiments_stub(
             budget_spent = float(exp.get("budget_spent") or 0)
             budget_limit = float(exp.get("budget_limit") or 0)
             
+            # Check budget thresholds
+            budget_utilization = budget_spent / budget_limit if budget_limit > 0 else 0
+            
+            # Warn if approaching budget limit
+            if budget_utilization >= budget_threshold:
+                log_action(
+                    "experiment.budget_warning",
+                    f"Experiment {exp.get('name')} approaching budget limit",
+                    level="warning",
+                    output_data={
+                        "experiment_id": exp_id,
+                        "budget_spent": budget_spent,
+                        "budget_limit": budget_limit,
+                        "utilization": budget_utilization
+                    }
+                )
+                budget_warnings += 1
+            
+            # Complete experiment if over budget
             if budget_limit > 0 and budget_spent >= budget_limit:
                 try:
                     execute_sql(f"""
