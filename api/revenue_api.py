@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,48 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Payment processing endpoints
+    processor = PaymentProcessor()
+    
+    # POST /revenue/payments/stripe/create
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "stripe" and parts[3] == "create" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return await processor.create_stripe_payment_intent(
+                data.get("amount_cents", 0),
+                data.get("currency", "usd"),
+                data.get("metadata", {}),
+                data.get("idempotency_key")
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
+    
+    # POST /revenue/payments/paypal/create
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "paypal" and parts[3] == "create" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return await processor.create_paypal_order(
+                data.get("amount_cents", 0),
+                data.get("currency", "usd"),
+                data.get("metadata", {}),
+                data.get("idempotency_key")
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
+    
+    # POST /revenue/webhooks/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhooks" and parts[2] == "stripe" and method == "POST":
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        return await processor.handle_stripe_webhook(body.encode(), sig_header)
+    
+    # POST /revenue/webhooks/paypal
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhooks" and parts[2] == "paypal" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return await processor.handle_paypal_webhook(data)
+        except Exception as e:
+            return _error_response(400, str(e))
     
     return _error_response(404, "Not found")
 
