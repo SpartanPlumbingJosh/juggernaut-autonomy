@@ -1,10 +1,15 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/customers - Create new customer
+- POST /revenue/subscriptions - Create new subscription
+- PUT /revenue/subscriptions/{id} - Update subscription
+- DELETE /revenue/subscriptions/{id} - Cancel subscription
+- GET /revenue/invoices - List invoices
 """
 
 import json
@@ -12,6 +17,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
+from core.subscription_manager import SubscriptionManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -164,6 +171,7 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
+    """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
         
@@ -210,6 +218,71 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_customer(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new billing customer."""
+    processor = PaymentProcessor()
+    email = body.get("email")
+    name = body.get("name")
+    metadata = body.get("metadata", {})
+    
+    if not email or not name:
+        return _error_response(400, "Email and name are required")
+        
+    result = processor.create_customer(email, name, metadata)
+    if not result["success"]:
+        return _error_response(500, result["error"])
+        
+    return _make_response(201, {"customer": result["customer"]})
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    manager = SubscriptionManager()
+    customer_id = body.get("customer_id")
+    plan_id = body.get("plan_id")
+    
+    if not customer_id or not plan_id:
+        return _error_response(400, "Customer ID and plan ID are required")
+        
+    result = manager.create_subscription(customer_id, plan_id)
+    if not result["success"]:
+        return _error_response(500, result["error"])
+        
+    return _make_response(201, {"subscription": result})
+
+async def handle_update_subscription(subscription_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Update an existing subscription."""
+    manager = SubscriptionManager()
+    new_plan_id = body.get("new_plan_id")
+    
+    if not new_plan_id:
+        return _error_response(400, "New plan ID is required")
+        
+    result = manager.update_subscription(subscription_id, new_plan_id)
+    if not result["success"]:
+        return _error_response(500, result["error"])
+        
+    return _make_response(200, {"subscription": result})
+
+async def handle_cancel_subscription(subscription_id: str) -> Dict[str, Any]:
+    """Cancel a subscription."""
+    manager = SubscriptionManager()
+    result = manager.cancel_subscription(subscription_id)
+    if not result["success"]:
+        return _error_response(500, result["error"])
+        
+    return _make_response(200, {"subscription": result})
+
+async def handle_list_invoices(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """List invoices for a customer."""
+    processor = PaymentProcessor()
+    customer_id = query_params.get("customer_id")
+    
+    if not customer_id:
+        return _error_response(400, "Customer ID is required")
+        
+    invoices = processor.list_transactions()
+    return _make_response(200, {"invoices": invoices})
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +304,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/customers
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customers" and method == "POST":
+        return handle_create_customer(json.loads(body or "{}"))
+        
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+        
+    # PUT /revenue/subscriptions/{id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "PUT":
+        return handle_update_subscription(parts[2], json.loads(body or "{}"))
+        
+    # DELETE /revenue/subscriptions/{id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "DELETE":
+        return handle_cancel_subscription(parts[2])
+        
+    # GET /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "GET":
+        return handle_list_invoices(query_params)
     
     return _error_response(404, "Not found")
 
