@@ -1,15 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and handle payment processing.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Payment provider webhooks
+- POST /revenue/subscribe - New customer subscription
 """
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from payment_processor import PaymentProcessor
+from service_delivery import ServiceDelivery
 
 from core.database import query_db
 
@@ -162,6 +166,63 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    """Process payment provider webhooks."""
+    try:
+        processor = PaymentProcessor()
+        provider = headers.get('x-payment-provider', 'stripe')
+        signature = headers.get('stripe-signature') or headers.get('paddle-signature', '')
+        
+        success = await processor.handle_webhook(body, signature, provider)
+        if not success:
+            return _error_response(400, "Invalid webhook payload")
+            
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+async def handle_new_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new customer subscription."""
+    try:
+        # Validate input
+        required_fields = ['email', 'name', 'plan_id', 'payment_method']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+        
+        processor = PaymentProcessor()
+        delivery = ServiceDelivery()
+        
+        # Create customer
+        customer_id, error = await processor.create_customer(
+            body['email'],
+            body['name'],
+            body['payment_method']
+        )
+        if error:
+            return _error_response(400, f"Customer creation failed: {error}")
+        
+        # Create subscription
+        sub_id, error = await processor.create_subscription(
+            customer_id,
+            body['plan_id'],
+            body['payment_method']
+        )
+        if error:
+            return _error_response(400, f"Subscription creation failed: {error}")
+        
+        # Provision service
+        success, error = await delivery.provision_service(customer_id, body['plan_id'])
+        if not success:
+            return _error_response(500, f"Service provisioning failed: {error}")
+        
+        return _make_response(201, {
+            "customer_id": customer_id,
+            "subscription_id": sub_id,
+            "status": "active"
+        })
+    except Exception as e:
+        return _error_response(500, f"Subscription processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +292,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"), headers or {})
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_new_subscription(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
