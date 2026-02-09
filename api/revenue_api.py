@@ -33,6 +33,41 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+from core.service_delivery import ServiceDelivery
+
+async def handle_service_onboard(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new client onboarding."""
+    try:
+        svc = ServiceDelivery(query_db, lambda *args, **kwargs: None)
+        result = svc.onboard_client(body)
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Onboarding failed"))
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(500, f"Onboarding error: {str(e)}")
+
+async def handle_service_delivery(service_id: str) -> Dict[str, Any]:
+    """Trigger service delivery."""
+    try:
+        svc = ServiceDelivery(query_db, lambda *args, **kwargs: None)
+        result = svc.deliver_service(service_id)
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Delivery failed"))
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Delivery error: {str(e)}")
+
+async def handle_payment_processed(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record payment processing."""
+    try:
+        svc = ServiceDelivery(query_db, lambda *args, **kwargs: None)
+        result = svc.process_payment(body["invoice_id"], body["payment_data"])
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment failed"))
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment error: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +266,19 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /service/onboard
+    if len(parts) == 2 and parts[0] == "service" and parts[1] == "onboard" and method == "POST":
+        return handle_service_onboard(json.loads(body or "{}"))
+    
+    # POST /service/deliver/{service_id}
+    if len(parts) == 2 and parts[0] == "service" and parts[1].startswith("deliver/") and method == "POST":
+        service_id = parts[1].split("/")[1]
+        return handle_service_delivery(service_id)
+    
+    # POST /payment/process
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "process" and method == "POST":
+        return handle_payment_processed(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
