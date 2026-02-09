@@ -187,6 +187,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    payment_processor: Optional[Any] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -228,11 +229,13 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
+        # Create experiment with integrated payment processing
         create_res = create_experiment_from_idea(
             execute_sql=execute_sql,
             log_action=log_action,
             idea=idea,
             budget=budget,
+            payment_processor=payment_processor
         )
         if not create_res.get("success"):
             failures.append({"idea_id": idea_id, "error": str(create_res.get("error") or "unknown")[:200]})
