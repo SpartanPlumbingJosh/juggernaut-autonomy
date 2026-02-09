@@ -187,6 +187,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    safe_mode: bool = True,  # Production safety flag
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
