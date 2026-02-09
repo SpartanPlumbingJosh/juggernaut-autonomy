@@ -1,15 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle all revenue operations including subscriptions, billing, and service delivery.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/billing - Process billing event
+- POST /revenue/onboarding - Complete customer onboarding
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import uuid
 
 from core.database import query_db
 
@@ -162,6 +166,144 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        billing_cycle = body.get("billing_cycle", "monthly")
+        start_date = body.get("start_date", datetime.now(timezone.utc).isoformat())
+        
+        # Validate required fields
+        if not customer_id or not plan_id:
+            return _error_response(400, "Missing required fields: customer_id and plan_id are required")
+        
+        # Create subscription record
+        subscription_id = str(uuid.uuid4())
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, billing_cycle, 
+            status, start_date, created_at, updated_at
+        ) VALUES (
+            '{subscription_id}',
+            '{customer_id}',
+            '{plan_id}',
+            '{billing_cycle}',
+            'active',
+            '{start_date}',
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        # Create initial billing event
+        billing_event = {
+            "subscription_id": subscription_id,
+            "event_type": "subscription_created",
+            "amount_cents": 0,
+            "currency": "USD",
+            "metadata": {
+                "plan_id": plan_id,
+                "billing_cycle": billing_cycle
+            }
+        }
+        await _create_billing_event(billing_event)
+        
+        return _make_response(201, {
+            "subscription_id": subscription_id,
+            "status": "active",
+            "start_date": start_date
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def _create_billing_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a billing event record."""
+    event_id = str(uuid.uuid4())
+    sql = f"""
+    INSERT INTO billing_events (
+        id, subscription_id, event_type, amount_cents,
+        currency, metadata, created_at
+    ) VALUES (
+        '{event_id}',
+        '{event_data.get("subscription_id")}',
+        '{event_data.get("event_type")}',
+        {event_data.get("amount_cents", 0)},
+        '{event_data.get("currency", "USD")}',
+        '{json.dumps(event_data.get("metadata", {}))}',
+        NOW()
+    )
+    """
+    return await query_db(sql)
+
+
+async def handle_billing_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a billing event."""
+    try:
+        required_fields = ["subscription_id", "event_type", "amount_cents"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, f"Missing required fields: {', '.join(required_fields)}")
+        
+        # Create billing event
+        result = await _create_billing_event(body)
+        
+        # Update revenue events if this is a payment
+        if body["event_type"] == "payment":
+            revenue_event = {
+                "event_type": "revenue",
+                "amount_cents": body["amount_cents"],
+                "currency": body.get("currency", "USD"),
+                "source": "subscription",
+                "metadata": {
+                    "subscription_id": body["subscription_id"],
+                    "billing_event_id": result.get("id")
+                }
+            }
+            await _create_revenue_event(revenue_event)
+        
+        return _make_response(201, {"success": True, "event_id": result.get("id")})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process billing event: {str(e)}")
+
+
+async def handle_customer_onboarding(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Complete customer onboarding."""
+    try:
+        required_fields = ["customer_id", "plan_id"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, f"Missing required fields: {', '.join(required_fields)}")
+        
+        # Create subscription
+        subscription = await handle_subscription_creation(body)
+        if subscription.get("statusCode", 200) != 201:
+            return subscription
+        
+        # Trigger initial billing
+        billing_event = {
+            "subscription_id": subscription["body"]["subscription_id"],
+            "event_type": "initial_payment",
+            "amount_cents": body.get("initial_payment_cents", 0),
+            "currency": body.get("currency", "USD"),
+            "metadata": {
+                "onboarding": True
+            }
+        }
+        await handle_billing_event(billing_event)
+        
+        return _make_response(201, {
+            "success": True,
+            "subscription_id": subscription["body"]["subscription_id"],
+            "onboarding_complete": True
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to complete onboarding: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +373,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_creation(json.loads(body or "{}"))
+    
+    # POST /revenue/billing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "billing" and method == "POST":
+        return handle_billing_event(json.loads(body or "{}"))
+    
+    # POST /revenue/onboarding
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboarding" and method == "POST":
+        return handle_customer_onboarding(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
