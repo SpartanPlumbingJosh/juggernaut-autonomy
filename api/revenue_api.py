@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Payment endpoints
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create_customer" and method == "POST":
+        return await PaymentProcessor().create_customer(json.loads(body or "{}"))
+    
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create_subscription" and method == "POST":
+        return await PaymentProcessor().create_subscription(json.loads(body or "{}"))
+    
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "process_payment" and method == "POST":
+        return await PaymentProcessor().process_payment(json.loads(body or "{}"))
+    
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "generate_invoice" and method == "POST":
+        return await PaymentProcessor().generate_invoice(json.loads(body or "{}"))
+    
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "handle_dunning" and method == "POST":
+        return await PaymentProcessor().handle_dunning()
     
     return _error_response(404, "Not found")
 
