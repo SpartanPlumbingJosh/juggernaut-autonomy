@@ -2,12 +2,14 @@
 Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- GET /revenue/summary - MTD/QTD/YTD totals 
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/automated - Record automated billing events
 """
 
 import json
+from uuid import uuid4
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -112,6 +114,44 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
+
+
+async def handle_automated_billing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process automated billing events from SaaS systems."""
+    try:
+        required_fields = ["customer_id", "amount_cents", "service_period", "product_code"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+
+        event_id = str(uuid4())
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at
+        ) VALUES (
+            '{event_id}',
+            'revenue',
+            {int(body['amount_cents'])},
+            '{body.get('currency', 'USD')}',
+            'saas_auto_billing',
+            '{json.dumps({
+                'customer_id': body['customer_id'],
+                'service_period': body['service_period'],
+                'product_code': body['product_code'],
+                'billing_cycle': 'automated'
+            })}'::jsonb,
+            NOW()
+        )
+        """
+        await query_db(sql)
+        return _make_response(200, {"status": "success", "event_id": event_id})
+    except Exception as e:
+        return _error_response(500, f"Failed to record billing: {str(e)}")
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +271,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/automated
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "automated" and method == "POST":
+        try:
+            body = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+        return handle_automated_billing(body)
     
     return _error_response(404, "Not found")
 
