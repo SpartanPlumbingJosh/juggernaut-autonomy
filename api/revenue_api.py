@@ -232,7 +232,54 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/products
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "products" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_create_product(body_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
+    
     return _error_response(404, "Not found")
+
+
+async def handle_create_product(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new product."""
+    try:
+        name = body.get("name")
+        description = body.get("description")
+        price_cents = body.get("price_cents")
+        digital_delivery_url = body.get("digital_delivery_url")
+        
+        if not name or not description or not price_cents or not digital_delivery_url:
+            return _error_response(400, "Missing required fields")
+            
+        product_id = str(uuid.uuid4())
+        sql = f"""
+        INSERT INTO products (
+            id, name, description, price_cents, digital_delivery_url,
+            status, created_at, updated_at, metadata
+        ) VALUES (
+            '{product_id}',
+            '{name.replace("'", "''")}',
+            '{description.replace("'", "''")}',
+            {price_cents},
+            '{digital_delivery_url.replace("'", "''")}',
+            'active',
+            NOW(),
+            NOW(),
+            '{{}}'::jsonb
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(201, {
+            "success": True,
+            "product_id": product_id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create product: {str(e)}")
 
 
 __all__ = ["route_request"]
