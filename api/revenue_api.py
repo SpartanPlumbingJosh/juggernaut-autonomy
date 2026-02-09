@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/dashboard - Main dashboard with current performance vs targets
+- GET /revenue/projection - Future revenue projections
 """
 
 import json
