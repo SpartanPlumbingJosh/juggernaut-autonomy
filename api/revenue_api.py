@@ -5,13 +5,23 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process payments
 """
 
 import json
+import stripe
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+
+# Initialize Stripe
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY_TEST" if os.getenv("PAYMENT_ENV", "test") == "test" else "STRIPE_SECRET_KEY_LIVE")
+stripe.api_version = "2023-08-16"
+
+# Configure deposit account
+DEPOSIT_ACCOUNT_ID = os.getenv("DEPOSIT_ACCOUNT_ID")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +172,45 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(body: Optional[str]) -> Dict[str, Any]:
+    """Process payment transactions."""
+    try:
+        if not body:
+            return _error_response(400, "Missing payment data")
+        
+        data = json.loads(body)
+        payment_method_id = data.get("payment_method_id")
+        amount = data.get("amount")
+        currency = data.get("currency", "usd")
+        
+        if not payment_method_id or not amount:
+            return _error_response(400, "Missing required payment fields")
+        
+        # Create payment intent
+        intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            payment_method=payment_method_id,
+            confirmation_method="manual",
+            confirm=True,
+            transfer_destination=DEPOSIT_ACCOUNT_ID,
+            metadata={
+                "system": "revenue_api",
+                "env": os.getenv("PAYMENT_ENV", "test")
+            }
+        )
+        
+        return _make_response(200, {
+            "success": True,
+            "payment_intent_id": intent.id,
+            "status": intent.status
+        })
+        
+    except stripe.error.StripeError as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +280,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return await handle_payment_processing(body)
     
     return _error_response(404, "Not found")
 

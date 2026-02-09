@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+# Payment processing configuration
+PAYMENT_ENV = os.getenv("PAYMENT_ENV", "test")  # test or live
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY_TEST" if PAYMENT_ENV == "test" else "STRIPE_SECRET_KEY_LIVE")
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET")
+
+# Monitoring configuration
+MONITORING_ENABLED = os.getenv("MONITORING_ENABLED", "true").lower() == "true"
+SENTRY_DSN = os.getenv("SENTRY_DSN")
 
 
 def generate_revenue_ideas(
