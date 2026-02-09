@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payments/subscribe - Create new subscription
+- POST /payments/webhook - Handle payment provider webhooks
 """
 
 import json
@@ -162,6 +164,53 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new subscription creation."""
+    from core.payment_processor import StripeProvider, PaymentProcessor
+    
+    try:
+        user_id = body.get("user_id")
+        plan_id = body.get("plan_id")
+        payment_method = body.get("payment_method")
+        
+        if not all([user_id, plan_id, payment_method]):
+            return _error_response(400, "Missing required fields")
+        
+        # Initialize payment processor
+        provider = StripeProvider({"api_key": "sk_test_..."})  # Should come from config
+        processor = PaymentProcessor(provider)
+        
+        result = await processor.create_subscription(user_id, plan_id, payment_method)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, {
+            "subscription_id": result.get("subscription_id")
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment provider webhooks."""
+    from core.payment_processor import StripeProvider, PaymentProcessor
+    
+    try:
+        # Initialize payment processor
+        provider = StripeProvider({"api_key": "sk_test_..."})  # Should come from config
+        processor = PaymentProcessor(provider)
+        
+        result = await processor.handle_payment_webhook(body)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, {})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to handle webhook: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +280,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payments/subscribe
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "subscribe" and method == "POST":
+        return handle_payment_subscription(json.loads(body or "{}"))
+    
+    # POST /payments/webhook
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
