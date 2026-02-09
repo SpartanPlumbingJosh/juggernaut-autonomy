@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from api.b2b_api import B2BAPIService
 
 
 def generate_revenue_ideas(
@@ -280,7 +281,35 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    Also handles B2B API revenue stream monitoring."""
+    
+    # Monitor B2B API revenue
+    b2b_service = B2BAPIService()
+    try:
+        # Get B2B revenue stats
+        b2b_revenue = await query_db(
+            """
+            SELECT SUM(amount_cents) as total_revenue_cents
+            FROM revenue_events
+            WHERE source = 'b2b_api'
+            AND recorded_at >= NOW() - INTERVAL '1 month'
+            """
+        )
+        total_revenue = b2b_revenue.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        log_action(
+            "b2b.revenue_monitor",
+            f"B2B API revenue: ${total_revenue/100:.2f}",
+            level="info",
+            output_data={"revenue_cents": total_revenue}
+        )
+    except Exception as e:
+        log_action(
+            "b2b.revenue_monitor_failed",
+            f"Failed to monitor B2B revenue: {str(e)}",
+            level="error"
+        )
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
