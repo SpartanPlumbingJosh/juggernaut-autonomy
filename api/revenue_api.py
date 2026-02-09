@@ -3,12 +3,16 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process payment and trigger delivery
+- POST /revenue/webhook - Payment processor webhook handler
 """
 
 import json
 from datetime import datetime, timezone, timedelta
+import stripe
+from fastapi import BackgroundTasks
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -162,6 +166,114 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def _process_payment(payment_intent_id: str, metadata: Dict[str, Any]) -> None:
+    """Process payment and trigger product delivery."""
+    try:
+        # Verify payment with Stripe
+        payment = stripe.PaymentIntent.retrieve(payment_intent_id)
+        if payment.status != 'succeeded':
+            raise ValueError(f"Payment not succeeded: {payment.status}")
+            
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {payment.amount},
+                '{payment.currency}',
+                'stripe',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        # Trigger product delivery
+        await _deliver_product(payment_intent_id, metadata)
+        
+    except Exception as e:
+        # Log failed payment processing
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'payment_failed',
+                0,
+                'usd',
+                'stripe',
+                '{json.dumps({"error": str(e), "payment_intent_id": payment_intent_id})}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        raise
+
+async def _deliver_product(payment_intent_id: str, metadata: Dict[str, Any]) -> None:
+    """Deliver product/service after successful payment."""
+    try:
+        # Implement your product delivery logic here
+        # This could be sending an email, generating a download link, 
+        # triggering a fulfillment service, etc.
+        
+        # Example: Record delivery event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'delivery',
+                0,
+                'usd',
+                'stripe',
+                '{json.dumps({"payment_intent_id": payment_intent_id})}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+    except Exception as e:
+        # Log failed delivery
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'delivery_failed',
+                0,
+                'usd',
+                'stripe',
+                '{json.dumps({"error": str(e), "payment_intent_id": payment_intent_id})}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        raise
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment processor webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            body,
+            headers.get('Stripe-Signature'),
+            settings.STRIPE_WEBHOOK_SECRET
+        )
+        
+        if event['type'] == 'payment_intent.succeeded':
+            payment_intent = event['data']['object']
+            await _process_payment(payment_intent['id'], payment_intent.get('metadata', {}))
+            
+        return _make_response(200, {"status": "processed"})
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +343,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return await handle_payment_webhook(body)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return await handle_payment_webhook(body)
     
     return _error_response(404, "Not found")
 
