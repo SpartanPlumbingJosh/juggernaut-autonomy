@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and handle payments.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment session
+- POST /revenue/webhook/stripe - Stripe webhook handler
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +234,32 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            product_data = body_data.get("product", {})
+            customer_email = body_data.get("customer_email", "")
+            if not product_data or not customer_email:
+                return _error_response(400, "Missing product or customer_email")
+            
+            result = await PaymentProcessor.create_stripe_checkout(product_data, customer_email)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Payment failed"))
+            
+            return _make_response(200, {"checkout_url": result["url"]})
+        except Exception as e:
+            return _error_response(500, f"Checkout failed: {str(e)}")
+    
+    # POST /revenue/webhook/stripe
+    if (len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" 
+        and parts[2] == "stripe" and method == "POST"):
+        sig_header = headers.get("stripe-signature", "")
+        result = await PaymentProcessor.handle_stripe_webhook(body or "", sig_header)
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook failed"))
+        return _make_response(200, {"status": "processed"})
     
     return _error_response(404, "Not found")
 
