@@ -276,6 +276,14 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def initialize_revenue_tracker(
+    execute_sql: Callable[[str], Dict[str, Any]], 
+    log_action: Callable[..., Any]
+) -> RevenueTracker:
+    """Initialize the revenue tracking system."""
+    from core.revenue_tracker import RevenueTracker
+    return RevenueTracker(execute_sql, log_action)
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -283,6 +291,10 @@ def review_experiments_stub(
     """Review running experiments and trigger learning loop for completed ones."""
     try:
         from core.learning_loop import on_experiment_complete
+        
+        # Run revenue tracking
+        tracker = initialize_revenue_tracker(execute_sql, log_action)
+        await tracker.run_daily_check()
     except ImportError:
         on_experiment_complete = None
     
