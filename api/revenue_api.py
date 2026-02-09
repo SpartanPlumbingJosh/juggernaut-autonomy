@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/create-payment - Create payment intent
+- POST /revenue/webhook/stripe - Handle Stripe webhook
 """
 
 import json
@@ -12,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_integration import create_payment_intent, handle_stripe_webhook
+from api.product_delivery import deliver_product
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,6 +236,38 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/create-payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-payment" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            amount = int(data.get("amount", 0))
+            currency = str(data.get("currency", "usd"))
+            metadata = data.get("metadata", {})
+            
+            if amount <= 0:
+                return _error_response(400, "Invalid amount")
+                
+            result = await create_payment_intent(amount, currency, metadata)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Payment failed"))
+                
+            return _make_response(200, {
+                "client_secret": result["client_secret"],
+                "payment_intent_id": result["payment_intent_id"]
+            })
+        except Exception as e:
+            return _error_response(500, f"Payment creation failed: {str(e)}")
+            
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        try:
+            result = await handle_stripe_webhook(body or "", headers.get("Stripe-Signature", ""))
+            if not result.get("success"):
+                return _error_response(400, result.get("error", "Webhook failed"))
+            return _make_response(200, {"message": "Webhook processed"})
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
