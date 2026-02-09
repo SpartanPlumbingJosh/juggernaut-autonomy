@@ -12,6 +12,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+from services.service_delivery import ServiceDelivery
+from services.monitoring import Monitoring
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +36,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(payment_processor: PaymentProcessor) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -210,7 +213,15 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(
+    path: str, 
+    method: str, 
+    query_params: Dict[str, Any], 
+    body: Optional[str] = None,
+    payment_processor: Optional[PaymentProcessor] = None,
+    service_delivery: Optional[ServiceDelivery] = None,
+    monitoring: Optional[Monitoring] = None
+) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
