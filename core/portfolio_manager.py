@@ -276,6 +276,37 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_revenue_attribution(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    experiment_id: str,
+    amount_cents: int,
+    source: str,
+    metadata: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Track revenue attribution to specific experiments."""
+    try:
+        # Record revenue event with experiment attribution
+        execute_sql(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at,
+                attribution
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                'USD',
+                '{source}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW(),
+                '{{"experiment_id": "{experiment_id}"}}'::jsonb
+            )
+        """)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

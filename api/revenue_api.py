@@ -5,13 +5,33 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Handle payment gateway webhooks
 """
 
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+
+# Supported payment gateways
+PAYMENT_GATEWAYS = {
+    "stripe": {
+        "webhook_secret": "your_stripe_webhook_secret",
+        "currency_map": {
+            "usd": "USD",
+            "eur": "EUR"
+        }
+    },
+    "paypal": {
+        "webhook_secret": "your_paypal_webhook_secret",
+        "currency_map": {
+            "usd": "USD",
+            "eur": "EUR"
+        }
+    }
+}
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +230,66 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_revenue_webhook(body: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    """Handle payment gateway webhook events."""
+    try:
+        gateway = headers.get("X-Payment-Gateway", "").lower()
+        if gateway not in PAYMENT_GATEWAYS:
+            return _error_response(400, "Unsupported payment gateway")
+        
+        # Verify webhook signature
+        secret = PAYMENT_GATEWAYS[gateway]["webhook_secret"]
+        signature = headers.get("X-Signature", "")
+        payload_hash = hashlib.sha256((json.dumps(body) + secret).encode()).hexdigest()
+        
+        if signature != payload_hash:
+            return _error_response(401, "Invalid webhook signature")
+        
+        # Check for duplicate event
+        event_id = body.get("id")
+        if event_id:
+            existing = await query_db(f"""
+                SELECT id FROM revenue_events 
+                WHERE metadata->>'gateway_event_id' = '{event_id}'
+                LIMIT 1
+            """)
+            if existing.get("rows"):
+                return _make_response(200, {"status": "duplicate"})
+        
+        # Map gateway-specific fields to our standard format
+        amount_cents = int(float(body.get("amount", 0)) * 100)
+        currency = PAYMENT_GATEWAYS[gateway]["currency_map"].get(
+            body.get("currency", "").lower(), 
+            body.get("currency", "USD")
+        )
+        
+        # Create revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                '{currency}',
+                '{gateway}',
+                '{json.dumps({
+                    "gateway_event_id": event_id,
+                    "gateway": gateway,
+                    "raw_event": body
+                })}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {"status": "success"})
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +310,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing body or headers")
+        try:
+            body_data = json.loads(body)
+            return handle_revenue_webhook(body_data, headers)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
