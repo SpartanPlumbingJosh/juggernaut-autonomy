@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/create-customer - Create payment customer
+- POST /revenue/create-subscription - Create subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
@@ -12,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +235,40 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/create-customer
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-customer" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return await PaymentProcessor.create_customer(
+                data.get("email"),
+                data.get("name")
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
+    
+    # POST /revenue/create-subscription
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-subscription" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return await PaymentProcessor.create_subscription(
+                data.get("customer_id"),
+                data.get("price_id"),
+                data.get("payment_method_id")
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        return await PaymentProcessor.handle_webhook(body.encode(), sig_header)
     
     return _error_response(404, "Not found")
 
