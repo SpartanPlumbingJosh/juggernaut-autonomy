@@ -1,15 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue Tracking System - Automated revenue tracking and forecasting.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/metrics - Key SaaS metrics (MRR, ARR, churn)
+- GET /revenue/forecast - Year-end projections
 """
 
 import json
+import math
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from scipy.stats import linregress
 
 from core.database import query_db
 
@@ -162,6 +166,110 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def calculate_saas_metrics() -> Dict[str, Any]:
+    """Calculate key SaaS metrics (MRR, ARR, churn)."""
+    try:
+        # Get recurring revenue data
+        sql = """
+        SELECT 
+            DATE_TRUNC('month', recorded_at) as month,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+            COUNT(DISTINCT customer_id) as active_customers
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+          AND is_recurring = true
+        GROUP BY DATE_TRUNC('month', recorded_at)
+        ORDER BY month DESC
+        LIMIT 12
+        """
+        
+        result = await query_db(sql)
+        months = result.get("rows", [])
+        
+        if not months:
+            return {
+                "mrr": 0,
+                "arr": 0,
+                "churn_rate": 0
+            }
+            
+        # Calculate MRR (Monthly Recurring Revenue)
+        latest_month = months[0]
+        mrr = latest_month.get("revenue_cents", 0) / 100
+        
+        # Calculate ARR (Annual Recurring Revenue)
+        arr = mrr * 12
+        
+        # Calculate Churn Rate
+        if len(months) > 1:
+            prev_month = months[1]
+            lost_customers = prev_month.get("active_customers", 0) - latest_month.get("active_customers", 0)
+            churn_rate = lost_customers / prev_month.get("active_customers", 1) if prev_month.get("active_customers", 0) > 0 else 0
+        else:
+            churn_rate = 0
+            
+        return {
+            "mrr": mrr,
+            "arr": arr,
+            "churn_rate": churn_rate
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
+async def forecast_year_end() -> Dict[str, Any]:
+    """Forecast year-end revenue based on current trajectory."""
+    try:
+        # Get daily revenue data for the year
+        sql = """
+        SELECT 
+            DATE(recorded_at) as date,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= DATE_TRUNC('year', NOW())
+        GROUP BY DATE(recorded_at)
+        ORDER BY date ASC
+        """
+        
+        result = await query_db(sql)
+        days = result.get("rows", [])
+        
+        if not days:
+            return {
+                "forecast": 0,
+                "confidence": 0,
+                "goal_progress": 0
+            }
+            
+        # Prepare data for linear regression
+        x = [i for i in range(len(days))]
+        y = [day.get("revenue_cents", 0) / 100 for day in days]
+        
+        # Calculate linear regression
+        slope, intercept, r_value, p_value, std_err = linregress(x, y)
+        
+        # Forecast year-end revenue
+        days_in_year = 365
+        forecast = slope * days_in_year + intercept
+        
+        # Calculate progress toward $14M goal
+        goal = 14000000
+        current_revenue = sum(y)
+        goal_progress = current_revenue / goal
+        
+        return {
+            "forecast": forecast,
+            "confidence": r_value**2,
+            "goal_progress": goal_progress,
+            "current_revenue": current_revenue,
+            "goal": goal
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +339,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/metrics
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "metrics" and method == "GET":
+        metrics = await calculate_saas_metrics()
+        if "error" in metrics:
+            return _error_response(500, f"Failed to calculate metrics: {metrics['error']}")
+        return _make_response(200, metrics)
+        
+    # GET /revenue/forecast
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "forecast" and method == "GET":
+        forecast = await forecast_year_end()
+        if "error" in forecast:
+            return _error_response(500, f"Failed to calculate forecast: {forecast['error']}")
+        return _make_response(200, forecast)
     
     return _error_response(404, "Not found")
 
