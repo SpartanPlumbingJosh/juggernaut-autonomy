@@ -21,7 +21,7 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
             "Access-Control-Allow-Headers": "Content-Type, Authorization"
         },
         "body": json.dumps(body)
@@ -162,6 +162,47 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def process_transaction(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment transaction."""
+    try:
+        from payment_processor import PaymentProcessor
+        processor = PaymentProcessor()
+        
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = body.get("currency", "usd")
+        payment_method = body.get("payment_method", "stripe")
+        metadata = body.get("metadata", {})
+        
+        # Process payment
+        payment_result = await processor.process_payment(
+            amount_cents, currency, payment_method, metadata
+        )
+        
+        if not payment_result.get("success"):
+            return _error_response(400, payment_result.get("error", "Payment failed"))
+            
+        # Log transaction
+        logged = await processor.log_transaction(
+            query_db,
+            amount_cents,
+            currency,
+            payment_result["payment_id"],
+            payment_result["status"],
+            metadata
+        )
+        
+        if not logged:
+            return _error_response(500, "Failed to log transaction")
+            
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_result["payment_id"],
+            "status": payment_result["status"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Transaction processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +272,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "POST":
+        return process_transaction(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
