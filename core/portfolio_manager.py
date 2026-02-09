@@ -276,6 +276,19 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def _calculate_revenue_target_progress(current_revenue: float) -> Dict[str, Any]:
+    """Calculate progress towards $16M revenue target."""
+    target = 1600000000  # $16M in cents
+    progress = (current_revenue / target) * 100
+    remaining = target - current_revenue
+    
+    return {
+        "target": target,
+        "current": current_revenue,
+        "progress": progress,
+        "remaining": remaining
+    }
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -403,9 +416,23 @@ def review_experiments_stub(
     except Exception:
         pass
 
+    # Calculate revenue target progress
+    try:
+        revenue_sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents
+        FROM revenue_events
+        """
+        revenue_result = execute_sql(revenue_sql)
+        current_revenue = revenue_result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        target_progress = _calculate_revenue_target_progress(current_revenue)
+    except Exception as e:
+        target_progress = {"error": str(e)}
+
     return {
         "success": True,
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "revenue_target_progress": target_progress
     }
