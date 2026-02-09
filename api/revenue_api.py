@@ -8,10 +8,16 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
+TARGET_REVENUE_CENTS = 800000000  # $8M in cents
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +216,80 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer = stripe.Customer.create(
+            email=body.get("email"),
+            payment_method=body.get("payment_method_id"),
+            invoice_settings={
+                'default_payment_method': body.get("payment_method_id")
+            }
+        )
+
+        subscription = stripe.Subscription.create(
+            customer=customer.id,
+            items=[{
+                'price': body.get("price_id"),
+            }],
+            expand=['latest_invoice.payment_intent']
+        )
+
+        return _make_response(200, {
+            "subscription_id": subscription.id,
+            "client_secret": subscription.latest_invoice.payment_intent.client_secret,
+            "status": subscription.status
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event_type = event['type']
+        data = event['data']['object']
+
+        if event_type == 'invoice.payment_succeeded':
+            # Record successful payment
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {data['amount_paid']},
+                    '{data['currency']}',
+                    'stripe',
+                    '{json.dumps({
+                        'invoice_id': data['id'],
+                        'customer_id': data['customer'],
+                        'subscription_id': data['subscription']
+                    })}',
+                    NOW(),
+                    NOW()
+                )
+            """)
+            
+            # Check progress toward $8M target
+            progress = await query_db("""
+                SELECT SUM(amount_cents) as total_revenue_cents
+                FROM revenue_events
+                WHERE event_type = 'revenue'
+            """)
+            total_revenue = progress.get("rows", [{}])[0].get("total_revenue_cents", 0)
+            percent_complete = (total_revenue / TARGET_REVENUE_CENTS) * 100
+
+            return _make_response(200, {
+                "event": event_type,
+                "total_revenue_cents": total_revenue,
+                "percent_complete": percent_complete
+            })
+
+        return _make_response(200, {"event": event_type})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +311,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
