@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle revenue tracking and billing operations.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Process payment webhooks
+- POST /revenue/subscribe - Create new subscription
 """
 
 import json
@@ -12,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.billing_service import BillingService
+from services.user_onboarder import UserOnboarder
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +214,15 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(
+    path: str, 
+    method: str, 
+    query_params: Dict[str, Any], 
+    body: Optional[str] = None,
+    headers: Optional[Dict[str, str]] = None,
+    billing_service: Optional[BillingService] = None,
+    onboarder: Optional[UserOnboarder] = None
+) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -232,6 +244,54 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not billing_service or not headers:
+            return _error_response(400, "Missing dependencies for webhook")
+        try:
+            stripe_signature = headers.get("stripe-signature", "")
+            payload = body.encode() if body else b""
+            result = billing_service.parse_webhook(payload, stripe_signature)
+            if not result["success"]:
+                return _error_response(400, result["error"])
+            return _make_response(200, {"event": result["event"].type})
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        if not billing_service or not onboarder or not body:
+            return _error_response(400, "Missing requirements for subscription")
+        try:
+            data = json.loads(body)
+            user_id = data.get("user_id")
+            price_id = data.get("price_id")
+            email = data.get("email")
+            
+            # Check if eligible for trial
+            trial_status = await onboarder.check_trial_status(user_id)
+            if trial_status.get("active"):
+                await onboarder.complete_onboarding(user_id)
+                return _make_response(200, {"status": "trial_active"})
+
+            # Create customer if needed
+            cust_result = await billing_service.create_customer(email, user_id)
+            if not cust_result["success"]:
+                return _error_response(400, cust_result["error"])
+
+            # Create subscription
+            sub_result = await billing_service.create_subscription(
+                cust_result["customer_id"],
+                price_id,
+                user_id
+            )
+            if not sub_result["success"]:
+                return _error_response(400, sub_result["error"])
+            
+            return _make_response(200, sub_result)
+        except Exception as e:
+            return _error_response(500, f"Subscription failed: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
