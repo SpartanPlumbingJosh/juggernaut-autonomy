@@ -8,10 +8,21 @@ Endpoints:
 """
 
 import json
+import stripe
+import paypalrestsdk
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from config import settings
+
+# Configure payment processors
+stripe.api_key = settings.STRIPE_SECRET_KEY
+paypalrestsdk.configure({
+    "mode": settings.PAYPAL_MODE,
+    "client_id": settings.PAYPAL_CLIENT_ID,
+    "client_secret": settings.PAYPAL_SECRET
+})
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +221,82 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def create_payment_intent(amount: int, currency: str = "usd", metadata: Optional[Dict] = None) -> Dict[str, Any]:
+    """Create a Stripe payment intent."""
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            metadata=metadata or {},
+            automatic_payment_methods={"enabled": True},
+        )
+        
+        # Log payment initiated
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                status, source, metadata 
+            ) VALUES (
+                gen_random_uuid(), 'payment_intent', {amount}, '{currency}',
+                'pending', 'stripe', '{json.dumps(metadata or {})}'::jsonb
+            )
+            """
+        )
+        
+        return {
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id,
+            "amount": amount,
+            "currency": currency
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+async def fulfill_payment(payment_id: str, service_data: Dict) -> Dict[str, Any]:
+    """Fulfill payment and deliver service."""
+    try:
+        # Validate payment
+        payment = stripe.PaymentIntent.retrieve(payment_id)
+        if payment.status != "succeeded":
+            return {"error": "Payment not completed"}
+            
+        # Deliver service - this would call your specific service implementation
+        service_result = await deliver_service(service_data)
+        
+        # Log successful payment and service delivery
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                status, source, metadata
+            ) VALUES (
+                gen_random_uuid(), 'revenue', {payment.amount}, '{payment.currency}',
+                'completed', 'stripe', '{json.dumps(service_data)}'::jsonb
+            )
+            """
+        )
+        
+        return {
+            "success": True,
+            "service_result": service_result,
+            "amount": payment.amount,
+            "currency": payment.currency
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+async def deliver_service(data: Dict) -> Dict[str, Any]:
+    """Basic automated service delivery."""
+    # This would be replaced with your specific service logic
+    return {
+        "service_type": data.get("service_type"),
+        "delivered_at": datetime.now(timezone.utc).isoformat(),
+        "status": "completed"
+    }
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +318,46 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            amount = int(data.get("amount", 0))
+            if amount <= 0:
+                return _error_response(400, "Invalid amount")
+                
+            metadata = data.get("metadata", {})
+            service_data = data.get("service_data", {})
+                
+            # Create payment intent
+            intent = await create_payment_intent(amount, data.get("currency", "usd"), metadata)
+            if "error" in intent:
+                return _error_response(500, intent["error"])
+                
+            return _make_response(200, intent)
+            
+        except Exception as e:
+            return _error_response(500, str(e))
+            
+    # POST /revenue/fulfill
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "fulfill" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            payment_id = data.get("payment_intent_id")
+            service_data = data.get("service_data", {})
+            
+            if not payment_id:
+                return _error_response(400, "Missing payment_intent_id")
+                
+            result = await fulfill_payment(payment_id, service_data)
+            if "error" in result:
+                return _error_response(500, result["error"])
+                
+            return _make_response(200, result)
+            
+        except Exception as e:
+            return _error_response(500, str(e))
     
     return _error_response(404, "Not found")
 
