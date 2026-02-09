@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Product Name - Value Proposition</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="min-h-screen flex flex-col items-center justify-center p-4">
+        <div class="bg-white rounded-lg shadow-lg p-8 max-w-2xl w-full">
+            <h1 class="text-4xl font-bold text-center mb-4">Product Name</h1>
+            <p class="text-xl text-center mb-8">Your Value Proposition Here</p>
+            
+            <div class="grid md:grid-cols-2 gap-8">
+                <div>
+                    <h2 class="text-2xl font-semibold mb-4">Features</h2>
+                    <ul class="list-disc pl-5">
+                        <li class="mb-2">Feature 1</li>
+                        <li class="mb-2">Feature 2</li>
+                        <li class="mb-2">Feature 3</li>
+                    </ul>
+                </div>
+                
+                <div class="bg-gray-50 p-6 rounded-lg">
+                    <h2 class="text-2xl font-semibold mb-4">Get Started</h2>
+                    <p class="mb-4">Price: $49.99</p>
+                    
+                    <!-- Payment Buttons -->
+                    <div id="payment-buttons" class="space-y-4">
+                        <button id="stripe-button" class="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700">
+                            Pay with Stripe
+                        </button>
+                        <button id="paypal-button" class="w-full bg-yellow-400 text-black py-2 px-4 rounded hover:bg-yellow-500">
+                            Pay with PayPal
+                        </button>
+                    </div>
+                    
+                    <!-- Download Section (hidden until payment success) -->
+                    <div id="download-section" class="hidden mt-6">
+                        <p class="mb-4">Your purchase is complete!</p>
+                        <a href="#" id="download-link" class="bg-green-500 text-white py-2 px-4 rounded hover:bg-green-600">
+                            Download Now
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stripe.js -->
+    <script src="https://js.stripe.com/v3/"></script>
+    <!-- PayPal SDK -->
+    <script src="https://www.paypal.com/sdk/js?client-id=YOUR_CLIENT_ID&currency=USD"></script>
+    
+    <script>
+        // Stripe Payment Handler
+        const stripeButton = document.getElementById('stripe-button');
+        stripeButton.addEventListener('click', async () => {
+            const stripe = Stripe('YOUR_STRIPE_PUBLIC_KEY');
+            const response = await fetch('/create-stripe-session', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
+            const session = await response.json();
+            const result = await stripe.redirectToCheckout({
+                sessionId: session.id
+            });
+        });
+
+        // PayPal Payment Handler
+        paypal.Buttons({
+            createOrder: function(data, actions) {
+                return actions.order.create({
+                    purchase_units: [{
+                        amount: {
+                            value: '49.99'
+                        }
+                    }]
+                });
+            },
+            onApprove: function(data, actions) {
+                return actions.order.capture().then(function(details) {
+                    // Show download section
+                    document.getElementById('payment-buttons').classList.add('hidden');
+                    document.getElementById('download-section').classList.remove('hidden');
+                    document.getElementById('download-link').href = '/download?transaction=' + data.orderID;
+                });
+            }
+        }).render('#paypal-button');
+    </script>
+</body>
+</html>
