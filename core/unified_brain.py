@@ -2208,6 +2208,13 @@ class BrainService:
         Raises:
             APIError: If tool execution fails.
         """
+        # Handle customer acquisition pipeline tools
+        if tool_name == "seo_content_generate":
+            return self._execute_seo_content_generate(arguments)
+        elif tool_name == "ad_campaign_manage":
+            return self._execute_ad_campaign_manage(arguments)
+        elif tool_name == "onboarding_flow_optimize":
+            return self._execute_onboarding_optimize(arguments)
         if tool_name == "code_executor":
             try:
                 task_id = str(arguments.get("task_id") or uuid4())
@@ -2489,6 +2496,80 @@ class BrainService:
                 return {"error": str(e)}
 
         return last_error or {"error": "Tool execution failed"}
+
+    def _execute_seo_content_generate(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute SEO content generation tool."""
+        try:
+            from core.content_generator import generate_seo_content
+            
+            result = generate_seo_content(
+                topic=arguments["topic"],
+                keywords=arguments["target_keywords"],
+                word_count=arguments.get("word_count", 1500),
+                tone=arguments.get("tone", "professional")
+            )
+            
+            return {
+                "success": True,
+                "content": result["content"],
+                "seo_score": result["seo_score"],
+                "keywords_covered": result["keywords_covered"],
+                "readability_score": result["readability_score"]
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"SEO content generation failed: {str(e)}"
+            }
+
+    def _execute_ad_campaign_manage(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute ad campaign management tool."""
+        try:
+            from core.ad_manager import manage_campaign
+            
+            result = manage_campaign(
+                name=arguments["campaign_name"],
+                platform=arguments["platform"],
+                daily_budget=arguments["daily_budget"],
+                targets=arguments.get("target_metrics", {}),
+                assets=arguments.get("creative_assets", [])
+            )
+            
+            return {
+                "success": True,
+                "campaign_id": result["campaign_id"],
+                "estimated_reach": result["estimated_reach"],
+                "projected_spend": result["projected_spend"]
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Ad campaign management failed: {str(e)}"
+            }
+
+    def _execute_onboarding_optimize(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute onboarding flow optimization tool."""
+        try:
+            from core.onboarding_optimizer import optimize_onboarding
+            
+            result = optimize_onboarding(
+                flow_name=arguments["flow_name"],
+                variants=arguments["variants"],
+                primary_metric=arguments.get("primary_metric", "conversion_rate"),
+                sample_size=arguments.get("sample_size", 1000)
+            )
+            
+            return {
+                "success": True,
+                "test_id": result["test_id"],
+                "estimated_duration_days": result["estimated_duration"],
+                "traffic_allocation": result["traffic_allocation"]
+            }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Onboarding optimization failed: {str(e)}"
+            }
 
     def _create_fallback_task(
         self, tool_name: str, arguments: Dict[str, Any], error: str, user_question: str
