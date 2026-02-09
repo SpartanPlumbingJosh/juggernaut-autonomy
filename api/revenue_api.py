@@ -1,15 +1,23 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and handle payments.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment checkout session
+- POST /revenue/webhook - Handle payment webhooks
+- POST /revenue/deliver - Service delivery endpoint
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from api.stripe_integration import (
+    create_checkout_session,
+    handle_stripe_webhook,
+    StripePaymentError
+)
 
 from core.database import query_db
 
@@ -219,6 +227,43 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            session = create_checkout_session(
+                price_id=data["price_id"],
+                customer_email=data["customer_email"],
+                success_url=data["success_url"],
+                cancel_url=data["cancel_url"],
+                metadata=data.get("metadata", {})
+            )
+            return _make_response(200, {"session_id": session.id})
+        except StripePaymentError as e:
+            return _error_response(400, str(e))
+        except Exception as e:
+            return _error_response(500, f"Checkout failed: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            sig_header = query_params.get("stripe-signature", [""])[0]
+            result = handle_stripe_webhook(body.encode(), sig_header)
+            return _make_response(200, result)
+        except StripePaymentError as e:
+            return _error_response(400, str(e))
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+    
+    # POST /revenue/deliver
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "deliver" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            # Implement your service delivery logic here
+            return _make_response(200, {"status": "delivered"})
+        except Exception as e:
+            return _error_response(500, f"Delivery failed: {str(e)}")
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
