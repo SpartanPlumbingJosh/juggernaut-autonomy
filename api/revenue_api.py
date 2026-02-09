@@ -8,10 +8,12 @@ Endpoints:
 """
 
 import json
+import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +233,37 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = float(body_data.get("amount", 0))
+            currency = str(body_data.get("currency", "usd"))
+            
+            if amount <= 0:
+                return _error_response(400, "Invalid amount")
+                
+            result = await PaymentProcessor.create_payment_intent(amount, currency)
+            if "error" in result:
+                return _error_response(500, result["error"])
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to create payment: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            sig_header = headers.get("stripe-signature", "")
+            result = await PaymentProcessor.handle_webhook(body.encode(), sig_header)
+            
+            if "error" in result:
+                return _error_response(500, result["error"])
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to process webhook: {str(e)}")
     
     return _error_response(404, "Not found")
 
