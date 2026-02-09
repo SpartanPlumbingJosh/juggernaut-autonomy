@@ -1,17 +1,25 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Autonomous Revenue System - End-to-end monetization with zero human intervention.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment intent
+- POST /revenue/webhook - Process payment events
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import logging
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
+
+# Initialize payment processor
+processor = PaymentProcessor(api_key="sk_test_...")  # Should be from config
+logger = logging.getLogger(__name__)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +170,55 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment intent for autonomous checkout."""
+    try:
+        amount = int(body.get("amount", 0))
+        currency = str(body.get("currency", "usd")).lower()
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = await processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment failed"))
+            
+        return _make_response(200, {
+            "client_secret": result["client_secret"],
+            "amount": amount,
+            "currency": currency
+        })
+        
+    except Exception as e:
+        logger.error(f"Checkout failed: {str(e)}")
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+
+async def handle_webhook(payload: str, sig_header: str) -> Dict[str, Any]:
+    """Process payment webhook for autonomous fulfillment."""
+    try:
+        result = await processor.handle_webhook(
+            payload=payload,
+            sig_header=sig_header,
+            webhook_secret="whsec_..."  # Should be from config
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+            
+        return _make_response(200, {"status": "processed"})
+        
+    except Exception as e:
+        logger.error(f"Webhook failed: {str(e)}")
+        return _error_response(500, f"Webhook failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +288,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_checkout(json.loads(body or "{}"))
+        
+    # POST /revenue/webhook    
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = headers.get("stripe-signature", "")
+        return handle_webhook(body or "", sig_header)
     
     return _error_response(404, "Not found")
 
