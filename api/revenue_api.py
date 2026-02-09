@@ -1,17 +1,23 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Integrated payment processing and revenue analytics.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Process payments
+- POST /revenue/subscriptions - Manage subscriptions
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from config import STRIPE_API_KEY
+
+stripe.api_key = STRIPE_API_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +222,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+
+    # Parse body if present
+    request_data = {}
+    if body:
+        try:
+            request_data = json.loads(body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -232,7 +246,101 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_payment_checkout(request_data)
+
+    # POST /revenue/subscriptions  
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_request(request_data)
+
     return _error_response(404, "Not found")
+
+
+async def handle_payment_checkout(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process one-time payments."""
+    try:
+        amount = int(float(data.get("amount", 0)) * 100)  # Convert to cents
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=data.get("currency", "usd"),
+            metadata=data.get("metadata", {}),
+        )
+
+        # Record in revenue_events
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, amount_cents, currency, event_type,
+                source, metadata, recorded_at
+            ) VALUES (
+                '{payment_intent.id}',
+                {amount},
+                '{data.get("currency", "usd")}',
+                'payment',
+                'stripe',
+                '{json.dumps(data.get("metadata", {}))}',
+                NOW()
+            )
+        """)
+
+        return _make_response(200, {
+            "client_secret": payment_intent.client_secret,
+            "payment_id": payment_intent.id
+        })
+
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def handle_subscription_request(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Manage recurring subscriptions."""
+    try:
+        customer = stripe.Customer.create(
+            email=data.get("email"),
+            payment_method=data.get("payment_method"),
+            invoice_settings={
+                "default_payment_method": data.get("payment_method"),
+            },
+        )
+
+        subscription = stripe.Subscription.create(
+            customer=customer.id,
+            items=[{"price": data.get("price_id")}],
+            expand=["latest_invoice.payment_intent"],
+        )
+
+        # Record initial payment
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, amount_cents, currency, event_type,
+                source, metadata, recorded_at
+            ) VALUES (
+                '{subscription.latest_invoice.payment_intent.id}',
+                {subscription.latest_invoice.amount_due},
+                '{subscription.latest_invoice.currency}',
+                'subscription',
+                'stripe',
+                '{json.dumps({
+                    "subscription_id": subscription.id,
+                    "customer_id": customer.id,
+                    "interval": data.get("interval")
+                })}',
+                NOW()
+            )
+        """)
+
+        return _make_response(200, {
+            "subscription_id": subscription.id,
+            "customer_id": customer.id,
+            "status": subscription.status,
+            "client_secret": subscription.latest_invoice.payment_intent.client_secret
+        })
+
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
 
 
 __all__ = ["route_request"]
