@@ -2,11 +2,59 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+class RevenueModelType(Enum):
+    SUBSCRIPTION = "subscription"
+    TRANSACTIONAL = "transactional"
+    ADVERTISING = "advertising"
+    LICENSING = "licensing"
+    DATA_MONETIZATION = "data_monetization"
+
+@dataclass
+class RevenueModel:
+    """Core revenue model implementation"""
+    model_type: RevenueModelType
+    base_revenue: float
+    growth_rate: float
+    churn_rate: float
+    acquisition_cost: float
+    lifetime_value: float
+    
+    def calculate_projection(self, months: int = 12) -> Dict[int, float]:
+        """Calculate revenue projection for given months"""
+        projection = {}
+        current_revenue = self.base_revenue
+        for month in range(1, months + 1):
+            # Apply growth and churn
+            current_revenue *= (1 + self.growth_rate - self.churn_rate)
+            projection[month] = current_revenue
+        return projection
+    
+    def calculate_roi(self, investment: float) -> Tuple[float, float]:
+        """Calculate ROI metrics"""
+        net_value = self.lifetime_value - self.acquisition_cost
+        roi = (net_value - investment) / investment if investment > 0 else 0
+        return roi, net_value
+    
+    def validate(self) -> Dict[str, str]:
+        """Validate model parameters"""
+        errors = {}
+        if self.base_revenue < 0:
+            errors["base_revenue"] = "Must be positive"
+        if self.growth_rate < 0 or self.growth_rate > 1:
+            errors["growth_rate"] = "Must be between 0 and 1"
+        if self.churn_rate < 0 or self.churn_rate > 1:
+            errors["churn_rate"] = "Must be between 0 and 1"
+        if self.acquisition_cost < 0:
+            errors["acquisition_cost"] = "Must be positive"
+        return errors
 
 
 def generate_revenue_ideas(
@@ -275,6 +323,72 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def track_revenue_performance(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Automated revenue performance tracking and reporting"""
+    try:
+        # Get all active revenue models
+        res = execute_sql(
+            """
+            SELECT id, model_type, base_revenue, growth_rate,
+                   churn_rate, acquisition_cost, lifetime_value
+            FROM revenue_models
+            WHERE active = true
+            ORDER BY created_at DESC
+            """
+        )
+        models = res.get("rows", []) or []
+        
+        # Track performance metrics
+        performance_data = []
+        for model in models:
+            revenue_model = RevenueModel(
+                model_type=RevenueModelType(model["model_type"]),
+                base_revenue=float(model["base_revenue"]),
+                growth_rate=float(model["growth_rate"]),
+                churn_rate=float(model["churn_rate"]),
+                acquisition_cost=float(model["acquisition_cost"]),
+                lifetime_value=float(model["lifetime_value"])
+            )
+            
+            # Calculate current performance
+            projection = revenue_model.calculate_projection()
+            roi, net_value = revenue_model.calculate_roi(revenue_model.acquisition_cost)
+            
+            performance_data.append({
+                "model_id": model["id"],
+                "model_type": model["model_type"],
+                "current_revenue": projection[1],  # Current month
+                "projected_revenue": projection[12],  # 12 months
+                "roi": roi,
+                "net_value": net_value
+            })
+        
+        # Log performance metrics
+        log_action(
+            "revenue.tracking",
+            "Automated revenue performance tracking completed",
+            level="info",
+            output_data={"models_tracked": len(models), "performance_data": performance_data}
+        )
+        
+        return {
+            "success": True,
+            "models_tracked": len(models),
+            "performance_data": performance_data
+        }
+        
+    except Exception as e:
+        log_action(
+            "revenue.tracking_error",
+            f"Failed to track revenue performance: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],

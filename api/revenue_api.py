@@ -10,8 +10,10 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from dataclasses import asdict
 
 from core.database import query_db
+from core.portfolio_manager import RevenueModel, RevenueModelType
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,6 +221,63 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/models
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "models" and method == "POST":
+        try:
+            if not body:
+                return _error_response(400, "Missing request body")
+            
+            data = json.loads(body)
+            model_type = RevenueModelType(data.get("model_type"))
+            base_revenue = float(data.get("base_revenue", 0))
+            growth_rate = float(data.get("growth_rate", 0))
+            churn_rate = float(data.get("churn_rate", 0))
+            acquisition_cost = float(data.get("acquisition_cost", 0))
+            lifetime_value = float(data.get("lifetime_value", 0))
+            
+            model = RevenueModel(
+                model_type=model_type,
+                base_revenue=base_revenue,
+                growth_rate=growth_rate,
+                churn_rate=churn_rate,
+                acquisition_cost=acquisition_cost,
+                lifetime_value=lifetime_value
+            )
+            
+            validation_errors = model.validate()
+            if validation_errors:
+                return _error_response(400, f"Invalid model parameters: {json.dumps(validation_errors)}")
+            
+            # Save model to database
+            await query_db(
+                f"""
+                INSERT INTO revenue_models (
+                    id, model_type, base_revenue, growth_rate,
+                    churn_rate, acquisition_cost, lifetime_value,
+                    created_at, updated_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    '{model_type.value}',
+                    {base_revenue},
+                    {growth_rate},
+                    {churn_rate},
+                    {acquisition_cost},
+                    {lifetime_value},
+                    NOW(),
+                    NOW()
+                )
+                """
+            )
+            
+            return _make_response(201, {
+                "model": asdict(model),
+                "projection": model.calculate_projection(),
+                "roi": model.calculate_roi(acquisition_cost)
+            })
+            
+        except Exception as e:
+            return _error_response(500, f"Failed to create revenue model: {str(e)}")
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
