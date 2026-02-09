@@ -5,10 +5,14 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/webhooks - Handle payment provider webhooks
+- GET /revenue/invoices - Get invoice history
 """
 
 import json
 from datetime import datetime, timezone, timedelta
+from uuid import uuid4
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -162,6 +166,112 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer_id = str(body.get("customer_id") or "")
+        plan_id = str(body.get("plan_id") or "")
+        payment_method = str(body.get("payment_method") or "card")
+        
+        if not customer_id or not plan_id:
+            return _error_response(400, "Missing required fields")
+            
+        # Generate subscription ID
+        sub_id = str(uuid4())
+        
+        # Create subscription record
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, status, 
+            payment_method, created_at, updated_at
+        ) VALUES (
+            '{sub_id}', '{customer_id}', '{plan_id}', 
+            'active', '{payment_method}', NOW(), NOW()
+        )
+        """
+        await query_db(sql)
+        
+        # Create initial invoice
+        invoice_sql = f"""
+        INSERT INTO invoices (
+            id, subscription_id, amount_cents, 
+            currency, status, created_at
+        ) VALUES (
+            gen_random_uuid(), '{sub_id}', 1000, 
+            'usd', 'pending', NOW()
+        )
+        """
+        await query_db(invoice_sql)
+        
+        return _make_response(201, {
+            "subscription_id": sub_id,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment provider webhooks."""
+    try:
+        event_type = event.get("type")
+        
+        if event_type == "payment_succeeded":
+            # Update invoice status
+            invoice_id = event.get("data", {}).get("invoice_id")
+            if invoice_id:
+                await query_db(f"""
+                    UPDATE invoices 
+                    SET status = 'paid', 
+                        paid_at = NOW() 
+                    WHERE id = '{invoice_id}'
+                """)
+                
+        elif event_type == "subscription_cancelled":
+            # Update subscription status
+            sub_id = event.get("data", {}).get("subscription_id")
+            if sub_id:
+                await query_db(f"""
+                    UPDATE subscriptions 
+                    SET status = 'cancelled', 
+                        updated_at = NOW() 
+                    WHERE id = '{sub_id}'
+                """)
+                
+        return _make_response(200, {"status": "processed"})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
+async def get_invoices(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get invoice history for a customer."""
+    try:
+        customer_id = query_params.get("customer_id")
+        if not customer_id:
+            return _error_response(400, "Missing customer_id")
+            
+        sql = f"""
+        SELECT i.id, i.amount_cents, i.currency, 
+               i.status, i.created_at, i.paid_at,
+               s.plan_id
+        FROM invoices i
+        JOIN subscriptions s ON i.subscription_id = s.id
+        WHERE s.customer_id = '{customer_id}'
+        ORDER BY i.created_at DESC
+        LIMIT 50
+        """
+        
+        result = await query_db(sql)
+        invoices = result.get("rows", [])
+        
+        return _make_response(200, {"invoices": invoices})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch invoices: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +341,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return create_subscription(json.loads(body or "{}"))
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        return handle_webhook(json.loads(body or "{}"))
+    
+    # GET /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "GET":
+        return get_invoices(query_params)
     
     return _error_response(404, "Not found")
 
