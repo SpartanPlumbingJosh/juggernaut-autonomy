@@ -3,8 +3,11 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/forecast - Revenue forecasts and projections
+- GET /revenue/pipeline - Pipeline analysis and conversion rates
+- GET /revenue/alerts - Revenue trajectory alerts
 """
 
 import json
@@ -162,6 +165,138 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def calculate_revenue_forecast() -> Dict[str, Any]:
+    """Calculate revenue forecasts using historical trends."""
+    try:
+        # Get last 12 months of revenue data
+        sql = """
+        SELECT 
+            DATE_TRUNC('month', recorded_at) as month,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '12 months'
+        GROUP BY DATE_TRUNC('month', recorded_at)
+        ORDER BY month DESC
+        """
+        
+        result = await query_db(sql)
+        historical = result.get("rows", [])
+        
+        # Simple linear forecast for next 3 months
+        forecast = []
+        if len(historical) >= 2:
+            last_month = historical[0]
+            prev_month = historical[1]
+            
+            # Calculate monthly growth rate
+            growth_rate = (last_month["revenue_cents"] - prev_month["revenue_cents"]) / prev_month["revenue_cents"]
+            
+            # Project next 3 months
+            for i in range(1, 4):
+                projected_month = {
+                    "month": (datetime.fromisoformat(last_month["month"]) + timedelta(days=30*i)).strftime("%Y-%m"),
+                    "revenue_cents": last_month["revenue_cents"] * (1 + growth_rate)**i,
+                    "growth_rate": growth_rate
+                }
+                forecast.append(projected_month)
+        
+        return _make_response(200, {
+            "historical": historical,
+            "forecast": forecast,
+            "target_path": 800000000,  # $8M annual target
+            "current_trajectory": sum(m["revenue_cents"] for m in historical) * (1 + growth_rate) if forecast else 0
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate forecast: {str(e)}")
+
+
+async def analyze_revenue_pipeline() -> Dict[str, Any]:
+    """Analyze revenue pipeline conversion rates."""
+    try:
+        # Get pipeline stages and conversion rates
+        sql = """
+        SELECT 
+            pipeline_stage,
+            COUNT(*) as count,
+            SUM(CASE WHEN converted_at IS NOT NULL THEN 1 ELSE 0 END) as converted_count,
+            AVG(CASE WHEN converted_at IS NOT NULL THEN amount_cents ELSE NULL END) as avg_deal_size_cents
+        FROM revenue_pipeline
+        GROUP BY pipeline_stage
+        ORDER BY COUNT(*) DESC
+        """
+        
+        result = await query_db(sql)
+        stages = result.get("rows", [])
+        
+        # Calculate conversion rates
+        pipeline_analysis = []
+        total_value = 0
+        for stage in stages:
+            conversion_rate = stage["converted_count"] / stage["count"] if stage["count"] > 0 else 0
+            pipeline_analysis.append({
+                "stage": stage["pipeline_stage"],
+                "count": stage["count"],
+                "conversion_rate": conversion_rate,
+                "avg_deal_size_cents": stage["avg_deal_size_cents"],
+                "projected_value_cents": stage["count"] * conversion_rate * (stage["avg_deal_size_cents"] or 0)
+            })
+            total_value += pipeline_analysis[-1]["projected_value_cents"]
+        
+        return _make_response(200, {
+            "pipeline_analysis": pipeline_analysis,
+            "total_projected_value_cents": total_value,
+            "target_gap_cents": max(0, 800000000 - total_value)  # $8M annual target
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to analyze pipeline: {str(e)}")
+
+
+async def check_revenue_alerts() -> Dict[str, Any]:
+    """Check for revenue trajectory alerts."""
+    try:
+        # Get forecast data
+        forecast_res = await calculate_revenue_forecast()
+        forecast_data = json.loads(forecast_res["body"])
+        
+        # Get pipeline data
+        pipeline_res = await analyze_revenue_pipeline()
+        pipeline_data = json.loads(pipeline_res["body"])
+        
+        # Calculate alerts
+        alerts = []
+        target_path = 800000000  # $8M annual target
+        
+        # Forecast alert
+        forecast_gap = target_path - forecast_data["current_trajectory"]
+        if forecast_gap > 0:
+            alerts.append({
+                "type": "forecast_gap",
+                "message": f"Revenue forecast is ${forecast_gap/100:.2f} below target path",
+                "severity": "high" if forecast_gap > 100000000 else "medium"
+            })
+            
+        # Pipeline alert
+        pipeline_gap = pipeline_data["target_gap_cents"]
+        if pipeline_gap > 0:
+            alerts.append({
+                "type": "pipeline_gap",
+                "message": f"Pipeline value is ${pipeline_gap/100:.2f} below target",
+                "severity": "high" if pipeline_gap > 100000000 else "medium"
+            })
+            
+        return _make_response(200, {
+            "alerts": alerts,
+            "forecast_gap_cents": forecast_gap,
+            "pipeline_gap_cents": pipeline_gap,
+            "target_path_cents": target_path
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to check alerts: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +366,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/forecast
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "forecast" and method == "GET":
+        return await calculate_revenue_forecast()
+        
+    # GET /revenue/pipeline
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "pipeline" and method == "GET":
+        return await analyze_revenue_pipeline()
+        
+    # GET /revenue/alerts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "alerts" and method == "GET":
+        return await check_revenue_alerts()
     
     return _error_response(404, "Not found")
 
