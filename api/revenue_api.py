@@ -12,6 +12,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from gateways.payment_processor import PaymentProcessor
+from services.subscription_manager import SubscriptionManager
+
+payment_processor = PaymentProcessor()
+subscription_manager = SubscriptionManager()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +237,54 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return await handle_create_subscription(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        return await handle_stripe_webhook(body, query_params.get("stripe-signature"))
+    
     return _error_response(404, "Not found")
+
+async def handle_create_subscription(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription"""
+    try:
+        # Process initial payment
+        payment_result = await payment_processor.process_payment(
+            "stripe",
+            {
+                "amount": payload["amount"],
+                "currency": payload.get("currency", "usd"),
+                "payment_method_id": payload["payment_method_id"],
+                "metadata": {
+                    "user_id": payload["user_id"],
+                    "plan_id": payload["plan_id"]
+                }
+            }
+        )
+        
+        # Create subscription
+        subscription_result = await subscription_manager.create_subscription(
+            customer_id=payload["customer_id"],
+            plan_id=payload["plan_id"],
+            trial_days=payload.get("trial_days", 0)
+        )
+        
+        return _make_response(200, {
+            "payment": payment_result,
+            "subscription": subscription_result
+        })
+    except Exception as e:
+        return _error_response(400, str(e))
+
+async def handle_stripe_webhook(payload: bytes, sig_header: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events"""
+    try:
+        result = await payment_processor.handle_webhook("stripe", payload, sig_header)
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(400, str(e))
 
 
 __all__ = ["route_request"]
