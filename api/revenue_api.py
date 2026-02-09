@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.service_delivery import ServiceDelivery
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,7 +136,10 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
             source,
             metadata,
             recorded_at,
-            created_at
+            created_at,
+            status,
+            retry_count,
+            last_attempt_at
         FROM revenue_events
         {where_clause}
         ORDER BY recorded_at DESC
@@ -160,6 +164,23 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
+
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment and fulfill service"""
+    try:
+        delivery = ServiceDelivery()
+        result = await delivery.fulfill_order(body)
+        
+        if result.get("success"):
+            return _make_response(200, {
+                "success": True,
+                "service_id": result["service_id"]
+            })
+        else:
+            return _error_response(400, result.get("error", "Payment processing failed"))
+            
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
 
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
