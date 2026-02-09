@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.delivery_pipeline import DeliveryPipeline
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,6 +233,37 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/services/generate
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "services" and parts[2] == "generate" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            pipeline = DeliveryPipeline(query_db, lambda *args, **kwargs: None)
+            success, result = pipeline.generate_service_code(
+                body_data.get("template"),
+                body_data.get("params", {})
+            )
+            if success:
+                return _make_response(200, {"code": result})
+            return _error_response(400, result)
+        except Exception as e:
+            return _error_response(500, f"Generation failed: {str(e)}")
+
+    # POST /revenue/services/submit
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "services" and parts[2] == "submit" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            pipeline = DeliveryPipeline(query_db, lambda *args, **kwargs: None)
+            success, result = pipeline.submit_for_review(
+                body_data.get("service_name"),
+                body_data.get("code"),
+                body_data.get("requester")
+            )
+            if success:
+                return _make_response(200, {"review_id": result})
+            return _error_response(400, result)
+        except Exception as e:
+            return _error_response(500, f"Submission failed: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
