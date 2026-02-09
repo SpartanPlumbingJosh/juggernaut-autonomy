@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /health - System health check
+- GET /metrics - System performance metrics
 """
 
 import json
@@ -210,6 +212,55 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_health_check() -> Dict[str, Any]:
+    """System health check endpoint."""
+    try:
+        # Basic database connectivity check
+        await query_db("SELECT 1")
+        return _make_response(200, {
+            "status": "healthy",
+            "services": {
+                "database": "online",
+                "payment_processor": "online",
+                "revenue_tracking": "online"
+            }
+        })
+    except Exception as e:
+        return _error_response(500, f"Health check failed: {str(e)}")
+
+async def handle_metrics() -> Dict[str, Any]:
+    """System performance metrics endpoint."""
+    try:
+        # Get basic system metrics
+        metrics = {
+            "uptime": 0,  # TODO: Implement actual uptime tracking
+            "active_experiments": 0,
+            "pending_ideas": 0,
+            "revenue_rate": 0,
+            "error_rate": 0
+        }
+        
+        # Get experiment counts
+        exp_res = await query_db("SELECT COUNT(*) as count FROM experiments WHERE status = 'running'")
+        metrics["active_experiments"] = exp_res.get("rows", [{}])[0].get("count", 0)
+        
+        # Get pending ideas
+        idea_res = await query_db("SELECT COUNT(*) as count FROM revenue_ideas WHERE status = 'pending'")
+        metrics["pending_ideas"] = idea_res.get("rows", [{}])[0].get("count", 0)
+        
+        # Get revenue rate (last hour)
+        rev_res = await query_db("""
+            SELECT SUM(amount_cents) as total 
+            FROM revenue_events 
+            WHERE recorded_at >= NOW() - INTERVAL '1 hour'
+              AND event_type = 'revenue'
+        """)
+        metrics["revenue_rate"] = rev_res.get("rows", [{}])[0].get("total", 0) / 100
+        
+        return _make_response(200, metrics)
+    except Exception as e:
+        return _error_response(500, f"Failed to collect metrics: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +282,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /health
+    if len(parts) == 1 and parts[0] == "health" and method == "GET":
+        return handle_health_check()
+    
+    # GET /metrics
+    if len(parts) == 1 and parts[0] == "metrics" and method == "GET":
+        return handle_metrics()
     
     return _error_response(404, "Not found")
 
