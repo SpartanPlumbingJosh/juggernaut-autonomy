@@ -264,10 +264,23 @@ def start_experiments_from_top_ideas(
             "portfolio.rebalanced",
             "Portfolio rebalance completed",
             level="info",
-            output_data={"new_experiments": created, "candidates": len(ideas)},
+            output_data={
+                "new_experiments": created,
+                "candidates": len(ideas),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "system": "revenue_automation_v2"
+            },
         )
-    except Exception:
-        pass
+    except Exception as e:
+        log_action(
+            "portfolio.rebalance_failed",
+            "Portfolio rebalance logging failed",
+            level="error",
+            error_data={
+                "error": str(e),
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+        )
 
     out = {"success": True, "new_experiments": created, "candidates": len(ideas)}
     if failures:
