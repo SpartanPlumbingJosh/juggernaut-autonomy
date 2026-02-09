@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing capabilities.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment-intent - Create payment intent
+- POST /revenue/subscribe - Create subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
@@ -162,6 +165,60 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        processor = PaymentProcessor(
+            stripe_api_key=os.getenv("STRIPE_API_KEY"),
+            paypal_config={
+                "mode": os.getenv("PAYPAL_MODE", "sandbox"),
+                "client_id": os.getenv("PAYPAL_CLIENT_ID"),
+                "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
+            }
+        )
+        
+        result = await processor.create_payment_intent(
+            amount=body.get("amount"),
+            currency=body.get("currency", "usd"),
+            metadata=body.get("metadata", {})
+        )
+        
+        if result["success"]:
+            await processor.record_transaction(
+                payment_id=result["payment_id"],
+                amount=body.get("amount"),
+                currency=body.get("currency", "usd"),
+                payment_method="stripe",
+                user_id=body.get("user_id")
+            )
+        
+        return result
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a subscription."""
+    try:
+        processor = PaymentProcessor(
+            stripe_api_key=os.getenv("STRIPE_API_KEY"),
+            paypal_config={
+                "mode": os.getenv("PAYPAL_MODE", "sandbox"),
+                "client_id": os.getenv("PAYPAL_CLIENT_ID"),
+                "client_secret": os.getenv("PAYPAL_CLIENT_SECRET")
+            }
+        )
+        
+        manager = SubscriptionManager(processor)
+        result = await manager.subscribe_user(
+            user_id=body.get("user_id"),
+            plan_id=body.get("plan_id"),
+            payment_method=body.get("payment_method")
+        )
+        
+        return result
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -211,6 +268,8 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    from payments.payment_processor import PaymentProcessor
+    from subscriptions.subscription_manager import SubscriptionManager
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +290,21 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        body_data = json.loads(body) if body else {}
+        return handle_payment_intent(body_data)
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        body_data = json.loads(body) if body else {}
+        return handle_subscription(body_data)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        body_data = json.loads(body) if body else {}
+        return handle_webhook(body_data)
     
     return _error_response(404, "Not found")
 
