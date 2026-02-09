@@ -10,6 +10,8 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import hmac
+import hashlib
 
 from core.database import query_db
 
@@ -162,6 +164,54 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    try:
+        # Verify webhook signature
+        secret = "your_webhook_secret"  # Should be from environment variables
+        signature = headers.get("x-webhook-signature", "")
+        payload = json.dumps(body, separators=(",", ":"))
+        
+        expected_signature = hmac.new(
+            secret.encode(),
+            payload.encode(),
+            hashlib.sha256
+        ).hexdigest()
+        
+        if not hmac.compare_digest(signature, expected_signature):
+            return _error_response(401, "Invalid webhook signature")
+        
+        event_type = body.get("event_type")
+        amount_cents = int(float(body.get("amount", 0)) * 100)
+        currency = body.get("currency", "USD")
+        customer_id = body.get("customer_id")
+        metadata = body.get("metadata", {})
+        
+        # Record revenue event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            'payment_webhook',
+            '{json.dumps(metadata)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        
+        await query_db(sql)
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,12 +260,22 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_webhook(body_data, headers or {})
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
