@@ -1,10 +1,11 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payment processing and revenue tracking.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Create new payment
 """
 
 import json
@@ -12,6 +13,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +212,31 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment creation request."""
+    try:
+        amount = float(body.get("amount", 0))
+        currency = body.get("currency", "usd").lower()
+        payment_method = body.get("payment_method", "stripe").lower()
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        if payment_method == "stripe":
+            result = await PaymentProcessor.create_stripe_payment(amount, currency, metadata)
+        elif payment_method == "paypal":
+            result = await PaymentProcessor.create_paypal_order(amount, currency, metadata)
+        else:
+            return _error_response(400, "Unsupported payment method")
+            
+        if "error" in result:
+            return _error_response(400, result["error"])
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +258,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_create_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
