@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.payment_processors import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -112,6 +113,53 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
+
+
+async def process_payment(amount_cents: int, payment_method: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through configured processor."""
+    try:
+        processor = PaymentProcessor.get_default()
+        result = await processor.charge(
+            amount=amount_cents,
+            currency="USD",
+            payment_method=payment_method,
+            idempotency_key=str(uuid.uuid4())
+        )
+        
+        if not result.success:
+            return _error_response(400, result.error_message)
+            
+        # Record successful payment
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                'USD',
+                'payment_processor',
+                '{json.dumps({
+                    'processor': processor.name,
+                    'transaction_id': result.transaction_id,
+                    'payment_method': payment_method.get('type')
+                })}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        
+        return _make_response(200, {
+            "success": True,
+            "transaction_id": result.transaction_id,
+            "amount_cents": amount_cents
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
