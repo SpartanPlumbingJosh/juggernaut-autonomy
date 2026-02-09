@@ -1,17 +1,36 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Autonomous revenue system with Stripe integration.
 
 Endpoints:
+- POST /auth - Get JWT token
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payment - Create payment intent
+- POST /webhook - Stripe webhook handler
 """
 
+import os
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import jwt
+from fastapi import HTTPException
 
 from core.database import query_db
+
+# Initialize Stripe
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+JWT_SECRET = os.getenv('JWT_SECRET', 'your-secret-key')
+
+# User database model
+USERS = {
+    "admin": {
+        "password": os.getenv('ADMIN_PASSWORD', 'securepassword'),
+        "permissions": ["read", "write", "admin"]
+    }
+}
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -26,6 +45,62 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         },
         "body": json.dumps(body)
     }
+
+def _verify_token(token: str) -> Dict[str, Any]:
+    """Verify JWT token."""
+    try:
+        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
+        return payload
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+async def handle_auth(username: str, password: str) -> Dict[str, Any]:
+    """Handle user authentication."""
+    user = USERS.get(username)
+    if not user or user["password"] != password:
+        return _error_response(401, "Invalid credentials")
+    
+    token = jwt.encode(
+        {
+            "sub": username,
+            "permissions": user["permissions"],
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24)
+        },
+        JWT_SECRET,
+        algorithm="HS256"
+    )
+    return _make_response(200, {"token": token})
+
+async def handle_payment(amount: float, currency: str = "usd") -> Dict[str, Any]:
+    """Create Stripe payment intent."""
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=int(amount * 100),  # Convert to cents
+            currency=currency,
+            automatic_payment_methods={"enabled": True},
+        )
+        return _make_response(200, {"client_secret": intent.client_secret})
+    except Exception as e:
+        return _error_response(500, f"Payment failed: {str(e)}")
+
+async def handle_webhook(payload: str, sig_header: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, os.getenv('STRIPE_WEBHOOK_SECRET')
+        )
+        
+        if event['type'] == 'payment_intent.succeeded':
+            payment_intent = event['data']['object']
+            await process_successful_payment(payment_intent)
+            
+        return _make_response(200, {"status": "success"})
+    except ValueError as e:
+        return _error_response(400, f"Invalid payload: {str(e)}")
+    except stripe.error.SignatureVerificationError as e:
+        return _error_response(400, f"Invalid signature: {str(e)}")
 
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
@@ -210,8 +285,9 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -219,6 +295,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /auth
+    if len(parts) == 1 and parts[0] == "auth" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return handle_auth(data.get("username", ""), data.get("password", ""))
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
+    # Verify token for protected routes
+    if not parts or parts[0] != "webhook":
+        auth_header = headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return _error_response(401, "Unauthorized")
+        try:
+            _verify_token(auth_header[7:])
+        except HTTPException as e:
+            return _error_response(e.status_code, e.detail)
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
@@ -231,6 +325,19 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment
+    if len(parts) == 1 and parts[0] == "payment" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return handle_payment(float(data.get("amount", 0)), data.get("currency", "usd"))
+        except (json.JSONDecodeError, ValueError):
+            return _error_response(400, "Invalid amount")
+    
+    # POST /webhook
+    if len(parts) == 1 and parts[0] == "webhook" and method == "POST":
+        sig_header = headers.get("stripe-signature", "")
+        return handle_webhook(body or "", sig_header)
     
     return _error_response(404, "Not found")
 
