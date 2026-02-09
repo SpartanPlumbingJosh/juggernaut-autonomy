@@ -162,6 +162,28 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_automation(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Trigger revenue automation cycle"""
+    try:
+        from automation.revenue_automation import RevenueAutomation
+        
+        # Initialize automation with config from query params
+        config = {
+            'api_key': query_params.get('api_key', [''])[0],
+            'mode': query_params.get('mode', ['test'])[0]
+        }
+        
+        automation = RevenueAutomation(config)
+        results = automation.run_automation_cycle()
+        
+        return _make_response(200, {
+            'success': True,
+            'results': results
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to run automation: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +253,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/automation
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "automation" and method == "POST":
+        return handle_revenue_automation(query_params)
     
     return _error_response(404, "Not found")
 
