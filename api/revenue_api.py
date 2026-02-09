@@ -116,6 +116,18 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
+    
+    # If POST request, process new transaction
+    if method == "POST":
+        try:
+            transaction_data = json.loads(body)
+            engine = TransactionEngine(query_db)
+            result = await engine.process_transaction(transaction_data)
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to process transaction: {str(e)}")
+            
+    # GET request - return transaction history
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
