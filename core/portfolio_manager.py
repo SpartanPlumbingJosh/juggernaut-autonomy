@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from services.text_to_speech import TextToSpeechService
+
+tts_monitor = TextToSpeechService()
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
