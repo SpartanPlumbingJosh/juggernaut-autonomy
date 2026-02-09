@@ -1,9 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue System - Automated payment processing and revenue tracking.
+
+Features:
+- Payment processing via Stripe
+- Automated fulfillment
+- Revenue tracking and reporting
+- Error handling and retries
+- 24/7 operation with monitoring
 
 Endpoints:
+- POST /payment/create - Create payment intent
+- POST /payment/webhook - Stripe webhook handler
+- POST /fulfillment/process - Process order fulfillment
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
 """
 
@@ -162,6 +172,69 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from payment.processor import PaymentProcessor
+from fulfillment.service import FulfillmentService
+
+payment_processor = PaymentProcessor()
+fulfillment_service = FulfillmentService()
+
+async def handle_payment_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        amount = int(body.get('amount', 0))
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        metadata = body.get('metadata', {})
+        currency = body.get('currency', 'usd')
+        
+        result = await payment_processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        
+        if not result.get('success'):
+            return _error_response(500, result.get('error', 'Payment failed'))
+            
+        return _make_response(200, {
+            'client_secret': result['client_secret'],
+            'payment_intent_id': result['payment_intent_id']
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_payment_webhook(body: str, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Process Stripe webhook."""
+    sig_header = headers.get('stripe-signature', '')
+    result = await payment_processor.handle_webhook(body, sig_header)
+    
+    if not result.get('success'):
+        return _error_response(400, result.get('error', 'Webhook processing failed'))
+        
+    return _make_response(200, {'status': 'processed'})
+
+async def handle_fulfillment_process(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process order fulfillment."""
+    try:
+        order_data = body.get('order', {})
+        if not order_data:
+            return _error_response(400, "Missing order data")
+            
+        result = await fulfillment_service.process_order(order_data)
+        
+        if not result.get('success'):
+            return _error_response(500, result.get('error', 'Fulfillment failed'))
+            
+        return _make_response(200, {
+            'order_id': result['order_id'],
+            'status': 'fulfilled'
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Fulfillment failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,8 +283,14 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+def route_request(
+    path: str, 
+    method: str, 
+    query_params: Dict[str, Any], 
+    body: Optional[str] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """Route revenue system requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -219,19 +298,35 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    headers = headers or {}
     
-    # GET /revenue/summary
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
+    try:
+        # Payment endpoints
+        if len(parts) == 2 and parts[0] == "payment":
+            if parts[1] == "create" and method == "POST":
+                return handle_payment_create(json.loads(body or "{}"))
+            elif parts[1] == "webhook" and method == "POST":
+                return handle_payment_webhook(body or "", headers)
+                
+        # Fulfillment endpoints        
+        elif len(parts) == 2 and parts[0] == "fulfillment":
+            if parts[1] == "process" and method == "POST":
+                return handle_fulfillment_process(json.loads(body or "{}"))
+                
+        # Revenue reporting endpoints
+        elif len(parts) == 2 and parts[0] == "revenue":
+            if parts[1] == "summary" and method == "GET":
+                return handle_revenue_summary()
+            elif parts[1] == "transactions" and method == "GET":
+                return handle_revenue_transactions(query_params)
+            elif parts[1] == "charts" and method == "GET":
+                return handle_revenue_charts(query_params)
     
-    # GET /revenue/transactions
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
-    
-    # GET /revenue/charts
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
-    
+    except json.JSONDecodeError:
+        return _error_response(400, "Invalid JSON payload")
+    except Exception as e:
+        return _error_response(500, f"Internal server error: {str(e)}")
+        
     return _error_response(404, "Not found")
 
 
