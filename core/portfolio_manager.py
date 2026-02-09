@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.automation_manager import AutomationManager
 
 
 def generate_revenue_ideas(
@@ -187,6 +188,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    automation_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -244,6 +246,17 @@ def start_experiments_from_top_ideas(
             continue
 
         link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
+
+        # Setup automation if configured
+        if automation_config:
+            automation_manager = AutomationManager(execute_sql, log_action)
+            strategy = idea.get("strategy", "service_arbitrage")
+            automation_result = automation_manager.execute_strategy(strategy, automation_config)
+            if not automation_result.get("success"):
+                failures.append({
+                    "idea_id": idea_id,
+                    "error": f"Automation setup failed: {automation_result.get('error', 'unknown')}"
+                })
 
         try:
             execute_sql(
