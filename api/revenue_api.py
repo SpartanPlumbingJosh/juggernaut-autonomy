@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment.processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,33 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/create
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            processor = PaymentProcessor()
+            
+            if body_data.get("processor") == "stripe":
+                result = await processor.create_payment_intent(
+                    amount=body_data["amount"],
+                    currency=body_data.get("currency", "USD"),
+                    metadata=body_data.get("metadata", {})
+                )
+            elif body_data.get("processor") == "paypal":
+                result = await processor.create_paypal_order(
+                    amount=body_data["amount"],
+                    currency=body_data.get("currency", "USD"),
+                    metadata=body_data.get("metadata", {})
+                )
+            else:
+                return _error_response(400, "Invalid payment processor")
+            
+            if result.get("success"):
+                return _make_response(200, result)
+            return _error_response(400, result.get("error", "Payment creation failed"))
+        except Exception as e:
+            return _error_response(500, str(e))
     
     return _error_response(404, "Not found")
 
