@@ -1,17 +1,22 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payments, delivery and analytics.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
-- GET /revenue/charts - Revenue over time data
+- POST /create-checkout-session - Create Stripe checkout session
+- POST /webhook - Handle Stripe webhooks
+- GET /analytics - Get basic sales analytics
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from email.mime.text import MIMEText
+import smtplib
 
 from core.database import query_db
+
+stripe.api_key = 'YOUR_STRIPE_SECRET_KEY'
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,8 +38,58 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+async def handle_checkout_session() -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': 'YOUR_STRIPE_PRICE_ID',
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url='https://yourdomain.com/success',
+            cancel_url='https://yourdomain.com/cancel',
+        )
+        return _make_response(200, {'id': session.id})
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def handle_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            await deliver_product(session['customer_email'])
+            await record_transaction(session)
+        return _make_response(200, {'success': True})
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def deliver_product(email: str) -> None:
+    """Send product to customer via email."""
+    msg = MIMEText('Thank you for your purchase! Here is your product...')
+    msg['Subject'] = 'Your Product Delivery'
+    msg['From'] = 'no-reply@yourdomain.com'
+    msg['To'] = email
+
+    with smtplib.SMTP('smtp.yourdomain.com') as server:
+        server.login('your@email.com', 'yourpassword')
+        server.sendmail('no-reply@yourdomain.com', [email], msg.as_string())
+
+async def record_transaction(session: Dict[str, Any]) -> None:
+    """Record transaction in database."""
+    await query_db(f"""
+        INSERT INTO revenue_events (
+            event_type, amount_cents, currency, source, metadata, recorded_at
+        ) VALUES (
+            'revenue', {session['amount_total']}, '{session['currency']}', 
+            'stripe', '{json.dumps(session)}', NOW()
+        )
+    """)
+
+async def handle_analytics() -> Dict[str, Any]:
+    """Get basic sales analytics."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -220,17 +275,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
-    # GET /revenue/summary
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
+    # POST /create-checkout-session
+    if len(parts) == 2 and parts[0] == "create-checkout-session" and method == "POST":
+        return handle_checkout_session()
     
-    # GET /revenue/transactions
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
+    # POST /webhook
+    if len(parts) == 1 and parts[0] == "webhook" and method == "POST":
+        return handle_webhook(json.loads(body or '{}'))
     
-    # GET /revenue/charts
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+    # GET /analytics
+    if len(parts) == 1 and parts[0] == "analytics" and method == "GET":
+        return handle_analytics()
     
     return _error_response(404, "Not found")
 
