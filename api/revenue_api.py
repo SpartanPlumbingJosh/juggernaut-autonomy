@@ -8,22 +8,30 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
 
+# Initialize Stripe
+stripe.api_key = "sk_test_..."  # TODO: Move to config
 
-def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
+
+def _make_response(status_code: int, body: Dict[str, Any], auth_token: Optional[str] = None) -> Dict[str, Any]:
     """Create standardized API response."""
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization"
+    }
+    if auth_token:
+        headers["Authorization"] = f"Bearer {auth_token}"
+    
     return {
         "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
-        },
+        "headers": headers,
         "body": json.dumps(body)
     }
 
@@ -37,6 +45,15 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
+        
+        # Track basic usage analytics
+        try:
+            await query_db(f"""
+                INSERT INTO analytics_events (event_type, event_data, created_at)
+                VALUES ('revenue_summary_view', '{{}}', NOW())
+            """)
+        except Exception:
+            pass  # Analytics failures shouldn't break core functionality
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -217,6 +234,50 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if method == "OPTIONS":
         return _make_response(200, {})
     
+    # POST /auth/register
+    if len(parts) == 1 and parts[0] == "auth" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            email = data.get("email")
+            password = data.get("password")
+            
+            if not email or not password:
+                return _error_response(400, "Email and password are required")
+            
+            # TODO: Implement actual user registration
+            auth_token = "generated_jwt_token"  # Replace with actual JWT generation
+            
+            return _make_response(200, {
+                "message": "User registered successfully",
+                "user": {
+                    "email": email
+                }
+            }, auth_token)
+        except Exception as e:
+            return _error_response(500, f"Registration failed: {str(e)}")
+    
+    # POST /auth/login
+    if len(parts) == 1 and parts[0] == "auth" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            email = data.get("email")
+            password = data.get("password")
+            
+            if not email or not password:
+                return _error_response(400, "Email and password are required")
+            
+            # TODO: Implement actual authentication
+            auth_token = "generated_jwt_token"  # Replace with actual JWT generation
+            
+            return _make_response(200, {
+                "message": "Login successful",
+                "user": {
+                    "email": email
+                }
+            }, auth_token)
+        except Exception as e:
+            return _error_response(500, f"Login failed: {str(e)}")
+    
     # Parse path
     parts = [p for p in path.split("/") if p]
     
@@ -231,6 +292,30 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/create-payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-payment-intent" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            amount = int(float(data.get("amount", 0)) * 100)  # Convert to cents
+            
+            intent = stripe.PaymentIntent.create(
+                amount=amount,
+                currency="usd",
+                automatic_payment_methods={"enabled": True},
+                metadata={
+                    "user_id": data.get("user_id"),
+                    "product_id": data.get("product_id")
+                }
+            )
+            
+            return _make_response(200, {
+                "client_secret": intent.client_secret,
+                "amount": intent.amount,
+                "currency": intent.currency
+            })
+        except Exception as e:
+            return _error_response(500, f"Payment processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
