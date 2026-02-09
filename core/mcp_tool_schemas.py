@@ -372,6 +372,149 @@ BRAIN_TOOLS: List[Dict[str, Any]] = [
         },
     },
     # ============================================================
+    # CUSTOMER ACQUISITION TOOLS  
+    # ============================================================
+    {
+        "type": "function",
+        "function": {
+            "name": "create_landing_page",
+            "description": "Create a new landing page with A/B testing variants",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string", "description": "Page title"},
+                    "template": {"type": "string", "description": "Base template to use"},
+                    "variants": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "content": {"type": "string"},
+                                "weight": {"type": "number"}
+                            }
+                        }
+                    },
+                    "tracking_id": {"type": "string", "description": "Analytics tracking ID"}
+                },
+                "required": ["title", "template"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_seo_content",
+            "description": "Generate SEO-optimized content for a given topic",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Content topic"},
+                    "keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Target keywords to include"
+                    },
+                    "word_count": {"type": "number", "description": "Target word count"}
+                },
+                "required": ["topic"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "setup_email_sequence",
+            "description": "Set up an automated email sequence",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Sequence name"},
+                    "triggers": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Trigger events for the sequence"
+                    },
+                    "emails": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "subject": {"type": "string"},
+                                "content": {"type": "string"},
+                                "delay_days": {"type": "number"}
+                            }
+                        }
+                    }
+                },
+                "required": ["name", "emails"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_referral_program",
+            "description": "Create a customer referral program",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Program name"},
+                    "rewards": {
+                        "type": "object",
+                        "properties": {
+                            "referrer": {"type": "string"},
+                            "referee": {"type": "string"}
+                        }
+                    },
+                    "conditions": {
+                        "type": "object",
+                        "properties": {
+                            "min_purchase": {"type": "number"},
+                            "eligible_products": {
+                                "type": "array",
+                                "items": {"type": "string"}
+                            }
+                        }
+                    }
+                },
+                "required": ["name", "rewards"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "track_conversion",
+            "description": "Track a conversion event in analytics",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "event_name": {"type": "string", "description": "Conversion event name"},
+                    "properties": {
+                        "type": "object",
+                        "description": "Additional event properties"
+                    }
+                },
+                "required": ["event_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_acquisition_metrics",
+            "description": "Get customer acquisition metrics and analytics",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "time_period": {"type": "string", "description": "Time period to analyze (e.g. '7d', '30d')"},
+                    "segment": {"type": "string", "description": "Customer segment to filter by"}
+                }
+            }
+        }
+    },
+    # ============================================================
     # COMMUNICATION TOOLS
     # ============================================================
     {
