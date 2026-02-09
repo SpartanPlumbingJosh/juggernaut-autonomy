@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
 
 
 def generate_revenue_ideas(
@@ -184,10 +186,13 @@ def score_pending_ideas(
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
+    stripe_api_key: str,
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
 ) -> Dict[str, Any]:
+    """Start new experiments and handle initial payment authorization."""
+    payment_processor = PaymentProcessor(stripe_api_key)
     try:
         res = execute_sql(
             f"""
@@ -228,11 +233,30 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
+        # Authorize payment for experiment budget
+        payment_result = payment_processor.create_payment_intent(
+            amount_cents=int(budget * 100),
+            metadata={
+                "experiment_id": idea_id,
+                "budget": budget,
+                "idea_title": idea.get("title", "")
+            }
+        )
+        
+        if not payment_result.get("success"):
+            failures.append({
+                "idea_id": idea_id,
+                "error": f"Payment authorization failed: {payment_result.get('error', 'unknown')}"
+            })
+            continue
+
+        # Create experiment
         create_res = create_experiment_from_idea(
             execute_sql=execute_sql,
             log_action=log_action,
             idea=idea,
             budget=budget,
+            payment_intent_id=payment_result["payment_intent_id"]
         )
         if not create_res.get("success"):
             failures.append({"idea_id": idea_id, "error": str(create_res.get("error") or "unknown")[:200]})
