@@ -1180,3 +1180,49 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+"""
+System Monitoring - Tracks system health and performance.
+"""
+
+import asyncio
+import logging
+import psutil
+from typing import Dict, Optional
+
+class SystemMonitor:
+    """Monitors system health and performance."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        
+    async def check_system_health(self) -> bool:
+        """Check overall system health."""
+        try:
+            # Check CPU usage
+            cpu_usage = psutil.cpu_percent(interval=1)
+            if cpu_usage > 90:
+                self.logger.warning(f"High CPU usage: {cpu_usage}%")
+                return False
+                
+            # Check memory usage
+            memory = psutil.virtual_memory()
+            if memory.percent > 90:
+                self.logger.warning(f"High memory usage: {memory.percent}%")
+                return False
+                
+            # Check disk space
+            disk = psutil.disk_usage('/')
+            if disk.percent > 90:
+                self.logger.warning(f"Low disk space: {disk.percent}% used")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"System health check failed: {str(e)}")
+            return False
+
+async def monitor_system_health() -> bool:
+    """Public interface for system monitoring."""
+    monitor = SystemMonitor()
+    return await monitor.check_system_health()
