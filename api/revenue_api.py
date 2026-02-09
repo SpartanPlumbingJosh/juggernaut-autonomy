@@ -1,17 +1,48 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle core revenue operations including payments, subscriptions, and analytics.
 
 Endpoints:
+- POST /revenue/payment - Process payment transactions
+- POST /revenue/subscribe - Create subscription
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException, status
+from jose import JWTError, jwt
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Authentication setup
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+SECRET_KEY = settings.SECRET_KEY
+ALGORITHM = "HS256"
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    return user_id
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +241,82 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment transaction."""
+    try:
+        # Create Stripe charge
+        charge = stripe.Charge.create(
+            amount=int(payment_data["amount"] * 100),  # Convert to cents
+            currency=payment_data.get("currency", "usd"),
+            source=payment_data["token"],
+            description=payment_data.get("description", "")
+        )
+        
+        # Record transaction
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source,
+                metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {int(payment_data["amount"] * 100)},
+                '{payment_data.get("currency", "usd")}',
+                'stripe',
+                '{json.dumps({"charge_id": charge.id})}',
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {"success": True, "charge_id": charge.id})
+        
+    except stripe.error.StripeError as e:
+        return _error_response(400, f"Payment failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
+async def handle_subscription(subscription_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Create subscription."""
+    try:
+        # Create Stripe customer
+        customer = stripe.Customer.create(
+            email=subscription_data["email"],
+            source=subscription_data["token"]
+        )
+        
+        # Create subscription
+        subscription = stripe.Subscription.create(
+            customer=customer.id,
+            items=[{"plan": subscription_data["plan_id"]}]
+        )
+        
+        # Record subscription
+        await query_db(f"""
+            INSERT INTO subscriptions (
+                id, customer_id, plan_id, status,
+                start_date, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{customer.id}',
+                '{subscription_data["plan_id"]}',
+                'active',
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {
+            "success": True,
+            "subscription_id": subscription.id,
+            "customer_id": customer.id
+        })
+        
+    except stripe.error.StripeError as e:
+        return _error_response(400, f"Subscription failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -219,6 +326,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return handle_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_subscription(json.loads(body or "{}"))
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
