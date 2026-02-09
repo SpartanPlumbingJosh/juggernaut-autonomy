@@ -1,15 +1,38 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payment processing and revenue tracking.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- GET /revenue/summary - MTD/QTD/YTD totals 
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payment/checkout - Create payment checkout session
+- POST /payment/webhook - Handle payment webhooks
+- POST /subscription/create - Create subscription
+- POST /subscription/cancel - Cancel subscription
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+
+# Configure Stripe
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
+
+# Product configuration  
+PRODUCTS = {
+    "basic": {
+        "price_id": os.getenv('STRIPE_BASIC_PRICE_ID'),
+        "name": "Basic Plan",
+        "features": ["Feature 1", "Feature 2"]
+    },
+    "premium": {
+        "price_id": os.getenv('STRIPE_PREMIUM_PRICE_ID'), 
+        "name": "Premium Plan",
+        "features": ["All Basic features", "Priority support"] 
+    }
+}
 
 from core.database import query_db
 
@@ -31,6 +54,81 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
+
+async def handle_payment_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        price_id = body.get("price_id")
+        customer_email = body.get("email")
+        metadata = body.get("metadata", {})
+        
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': price_id,
+                'quantity': 1,
+            }],
+            mode='payment',
+            customer_email=customer_email,
+            success_url=os.getenv('PAYMENT_SUCCESS_URL'),
+            cancel_url=os.getenv('PAYMENT_CANCEL_URL'),
+            metadata=metadata
+        )
+        
+        return _make_response(200, {"session_id": session.id, "url": session.url})
+    
+    except stripe.error.StripeError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+async def handle_payment_webhook(payload: bytes, sig_header: str) -> Dict[str, Any]:
+    """Process Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, WEBHOOK_SECRET
+        )
+        
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            await handle_payment_success(session)
+            
+        return _make_response(200, {"status": "success"})
+    
+    except ValueError as e:
+        return _error_response(400, str(e))
+    except stripe.error.SignatureVerificationError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Webhook failed: {str(e)}")
+
+async def handle_payment_success(session: Dict[str, Any]) -> None:
+    """Record successful payment."""
+    try:
+        await query_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {session['amount_total']},
+                '{session['currency']}',
+                'stripe',
+                '{json.dumps({
+                    'session_id': session['id'],
+                    'customer_email': session['customer_email'],
+                    'payment_intent': session['payment_intent'],
+                    'metadata': session['metadata']
+                })}',
+                NOW(),
+                NOW()
+            )
+            """
+        )
+    except Exception as e:
+        log.error(f"Failed to record payment: {str(e)}")
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -210,12 +308,22 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Payment endpoints
+    if path == "payment/checkout" and method == "POST":
+        return await handle_payment_checkout(json.loads(body or "{}"))
+    
+    if path == "payment/webhook" and method == "POST":
+        return await handle_payment_webhook(
+            body.encode() if body else b"",
+            headers.get("Stripe-Signature", "") if headers else ""
+        )
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -234,5 +342,48 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     return _error_response(404, "Not found")
 
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer = stripe.Customer.create(
+            email=body.get("email"),
+            payment_method=body.get("payment_method_id"),
+            invoice_settings={
+                'default_payment_method': body.get("payment_method_id")
+            }
+        )
+
+        subscription = stripe.Subscription.create(
+            customer=customer.id,
+            items=[{
+                'price': body.get("price_id")
+            }],
+            expand=['latest_invoice.payment_intent']
+        )
+        
+        return _make_response(200, {
+            "subscription_id": subscription.id,
+            "status": subscription.status,
+            "client_secret": subscription.latest_invoice.payment_intent.client_secret
+        })
+        
+    except stripe.error.StripeError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
+
+async def handle_cancel_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Cancel a subscription."""
+    try:
+        subscription = stripe.Subscription.modify(
+            body.get("subscription_id"),
+            cancel_at_period_end=True
+        )
+        return _make_response(200, {"status": subscription.status})
+    except stripe.error.StripeError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Cancel failed: {str(e)}")
 
 __all__ = ["route_request"]
