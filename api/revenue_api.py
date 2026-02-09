@@ -162,6 +162,30 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_service_provision(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new service provisioning"""
+    try:
+        customer_id = body.get("customer_id")
+        plan = body.get("plan", "basic")
+        
+        if not customer_id:
+            return _error_response(400, "Missing customer_id")
+            
+        from services.delivery_service import DeliveryService
+        service = DeliveryService()
+        result = await service.provision_service(customer_id, plan)
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, {
+            "success": True,
+            "service_start": result.get("service_start")
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Service provisioning failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +255,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/services
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "services" and method == "POST":
+        return handle_service_provision(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
