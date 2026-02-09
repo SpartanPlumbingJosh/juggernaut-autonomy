@@ -114,6 +114,43 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
+async def handle_payment_webhook(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook from Stripe/PayPal."""
+    try:
+        amount_cents = int(float(payload.get("amount", 0)) * 100)
+        payment_id = str(payload.get("id", ""))
+        currency = str(payload.get("currency", "usd")).lower()
+        source = str(payload.get("source", "unknown"))
+        customer = str(payload.get("customer_email", payload.get("payer_email", "unknown")))
+        
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, experiment_id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            '{source}',
+            jsonb_build_object(
+                'payment_id', '{payment_id}',
+                'customer', '{customer}',
+                'raw_payload', '{json.dumps(payload)}'
+            ),
+            NOW(),
+            NOW()
+        )
+        """
+        
+        await query_db(sql)
+        return _make_response(200, {"status": "processed"})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
+
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
@@ -160,6 +197,33 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
+
+
+async def handle_revenue_goal() -> Dict[str, Any]:
+    """Get progress toward revenue goal."""
+    try:
+        sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+        FROM revenue_events
+        """
+        
+        result = await query_db(sql)
+        data = result.get("rows", [{}])[0]
+        current = data.get("total_revenue_cents", 0)
+        target = 10000
+        
+        return _make_response(200, {
+            "current_cents": current,
+            "target_cents": target,
+            "progress_percent": min(100, (current / target) * 100) if target > 0 else 0,
+            "remaining_cents": max(0, target - current),
+            "transaction_count": data.get("transaction_count", 0)
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch goal progress: {str(e)}")
 
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +295,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook/payment
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "payment" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            return handle_payment_webhook(payload)
+        except Exception as e:
+            return _error_response(400, f"Invalid payload: {str(e)}")
+    
+    # GET /revenue/goal
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "goal" and method == "GET":
+        return handle_revenue_goal()
     
     return _error_response(404, "Not found")
 
