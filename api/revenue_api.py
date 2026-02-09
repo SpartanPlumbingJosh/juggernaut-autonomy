@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from services.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,30 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_payment_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook notifications."""
+    try:
+        processor = PaymentProcessor()
+        
+        # Validate webhook signature
+        if not self._validate_webhook_signature(event):
+            return _error_response(401, "Invalid webhook signature")
+            
+        # Process payment event
+        event_type = event.get("type")
+        if event_type == "payment.succeeded":
+            payment_data = event.get("data", {})
+            result = await processor.process_payment(payment_data)
+            if not result.get("success"):
+                return _error_response(400, f"Payment processing failed: {result.get('error')}")
+                
+            return _make_response(200, {"status": "processed"})
+            
+        return _make_response(200, {"status": "ignored"})
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +256,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
