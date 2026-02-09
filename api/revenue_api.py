@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payment/checkout - Create payment checkout session
+- POST /payment/webhook - Handle payment webhooks
+- GET /customer/orders - Get customer order history
 """
 
 import json
@@ -12,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment.processor import PaymentProcessor
+from payment.models import Customer, Order
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +167,45 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment checkout session."""
+    try:
+        processor = PaymentProcessor()
+        result = await processor.create_checkout_session(
+            product_id=body.get('product_id'),
+            customer_email=body.get('customer_email'),
+            success_url=body.get('success_url'),
+            cancel_url=body.get('cancel_url')
+        )
+        return _make_response(200 if result['success'] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+async def handle_payment_webhook(headers: Dict[str, str], body: bytes) -> Dict[str, Any]:
+    """Process payment webhook."""
+    try:
+        processor = PaymentProcessor()
+        sig_header = headers.get('stripe-signature', '')
+        result = await processor.handle_webhook(body, sig_header)
+        return _make_response(200 if result['success'] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+async def handle_customer_orders(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get customer order history."""
+    try:
+        email = query_params.get("email", [""])[0]
+        if not email:
+            return _error_response(400, "Email parameter required")
+            
+        # Implement order history lookup
+        return _make_response(200, {
+            "orders": [],
+            "customer": {"email": email}
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch orders: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +275,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/checkout
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "checkout" and method == "POST":
+        return handle_payment_checkout(json.loads(body or "{}"))
+    
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(headers or {}, body or b'')
+    
+    # GET /customer/orders
+    if len(parts) == 2 and parts[0] == "customer" and parts[1] == "orders" and method == "GET":
+        return handle_customer_orders(query_params)
     
     return _error_response(404, "Not found")
 
