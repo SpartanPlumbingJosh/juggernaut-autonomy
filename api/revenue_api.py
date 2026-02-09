@@ -210,12 +210,21 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+from services.payment_processor import handle_webhook_event
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Handle Stripe webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing body or headers")
+        sig_header = headers.get("stripe-signature", "")
+        return handle_webhook_event(body, sig_header)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -231,6 +240,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = int(body_data.get("amount", 0))
+            currency = str(body_data.get("currency", "usd"))
+            metadata = body_data.get("metadata", {})
+            
+            if amount <= 0:
+                return _error_response(400, "Invalid amount")
+                
+            from services.payment_processor import create_payment_intent
+            return create_payment_intent(amount, currency, metadata)
+        except Exception as e:
+            return _error_response(500, f"Payment processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
