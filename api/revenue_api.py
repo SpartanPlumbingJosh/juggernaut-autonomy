@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process payments
+- POST /revenue/provision - Provision services
 """
 
 import json
@@ -12,6 +14,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .revenue_service import RevenueService, PaymentProcessor
+
+revenue_service = RevenueService()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +167,61 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = body.get("currency", "USD")
+        payment_method = body.get("payment_method", {})
+        processor = PaymentProcessor[body.get("processor", "STRIPE")]
+        
+        success, payment_id = await revenue_service.process_payment(
+            amount_cents=amount_cents,
+            currency=currency,
+            payment_method=payment_method,
+            processor=processor
+        )
+        
+        if not success:
+            return _error_response(400, f"Payment failed: {payment_id}")
+            
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_id,
+            "amount_cents": amount_cents,
+            "currency": currency
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_service_provisioning(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Provision a service."""
+    try:
+        plan_id = body.get("plan_id")
+        customer_id = body.get("customer_id")
+        
+        if not plan_id or not customer_id:
+            return _error_response(400, "Missing plan_id or customer_id")
+            
+        success, service_id = await revenue_service.provision_service(
+            plan_id=plan_id,
+            customer_id=customer_id
+        )
+        
+        if not success:
+            return _error_response(400, f"Service provisioning failed: {service_id}")
+            
+        return _make_response(200, {
+            "success": True,
+            "service_id": service_id,
+            "plan_id": plan_id,
+            "customer_id": customer_id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Service provisioning error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -232,7 +292,157 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_processing(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/provision
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "provision" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_service_provisioning(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
     return _error_response(404, "Not found")
 
 
 __all__ = ["route_request"]
+"""
+Revenue Service Core - Handles billing, payments, and service delivery.
+
+Features:
+- Payment processor integrations
+- Automated billing cycles
+- Service provisioning
+- Transaction logging
+- Circuit breakers
+"""
+
+import json
+import logging
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional, Tuple
+from enum import Enum, auto
+
+from core.database import query_db
+
+logger = logging.getLogger(__name__)
+
+class PaymentProcessor(Enum):
+    STRIPE = auto()
+    PAYPAL = auto()
+    BRAINTREE = auto()
+
+class RevenueService:
+    """Core revenue generation service."""
+    
+    def __init__(self):
+        self.circuit_breaker_state = "closed"
+        self.last_failure_time = None
+        self.failure_count = 0
+        
+    async def process_payment(self, amount_cents: int, currency: str, payment_method: Dict[str, Any], 
+                            processor: PaymentProcessor = PaymentProcessor.STRIPE) -> Tuple[bool, Optional[str]]:
+        """Process a payment through the selected processor."""
+        if self.circuit_breaker_state == "open":
+            return False, "Circuit breaker open - payments temporarily disabled"
+            
+        try:
+            # Process payment through selected processor
+            payment_id = await self._call_processor(processor, amount_cents, currency, payment_method)
+            
+            # Log successful transaction
+            await self._log_transaction(
+                event_type="revenue",
+                amount_cents=amount_cents,
+                currency=currency,
+                source=f"{processor.name.lower()}_payment",
+                metadata={
+                    "payment_id": payment_id,
+                    "processor": processor.name,
+                    "method": payment_method.get("type")
+                }
+            )
+            
+            return True, payment_id
+            
+        except Exception as e:
+            logger.error(f"Payment processing failed: {str(e)}")
+            self._handle_failure()
+            return False, str(e)
+            
+    async def _call_processor(self, processor: PaymentProcessor, amount_cents: int, 
+                            currency: str, payment_method: Dict[str, Any]) -> str:
+        """Call the actual payment processor API."""
+        # Implementation would integrate with real payment processors
+        # This is a mock implementation
+        return f"pmt_{datetime.now(timezone.utc).timestamp()}"
+        
+    async def _log_transaction(self, event_type: str, amount_cents: int, currency: str,
+                             source: str, metadata: Dict[str, Any]) -> None:
+        """Log revenue transaction to database."""
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                {amount_cents},
+                '{currency}',
+                '{source}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+    def _handle_failure(self) -> None:
+        """Handle failure and manage circuit breaker state."""
+        self.failure_count += 1
+        self.last_failure_time = datetime.now(timezone.utc)
+        
+        if self.failure_count > 10:
+            self.circuit_breaker_state = "open"
+            logger.warning("Circuit breaker opened due to excessive failures")
+            
+    def reset_circuit_breaker(self) -> None:
+        """Reset the circuit breaker to closed state."""
+        self.circuit_breaker_state = "closed"
+        self.failure_count = 0
+        self.last_failure_time = None
+        logger.info("Circuit breaker reset to closed state")
+        
+    async def provision_service(self, plan_id: str, customer_id: str) -> Tuple[bool, Optional[str]]:
+        """Provision a service based on the selected plan."""
+        try:
+            # Implementation would provision actual services
+            # This is a mock implementation
+            service_id = f"svc_{datetime.now(timezone.utc).timestamp()}"
+            
+            await self._log_transaction(
+                event_type="provision",
+                amount_cents=0,
+                currency="USD",
+                source="service_provisioning",
+                metadata={
+                    "plan_id": plan_id,
+                    "customer_id": customer_id,
+                    "service_id": service_id
+                }
+            )
+            
+            return True, service_id
+            
+        except Exception as e:
+            logger.error(f"Service provisioning failed: {str(e)}")
+            return False, str(e)
