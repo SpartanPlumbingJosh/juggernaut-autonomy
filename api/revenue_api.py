@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,34 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment(request_body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment request."""
+    try:
+        amount_cents = int(request_body.get("amount_cents", 0))
+        source = request_body.get("source", "")
+        metadata = request_body.get("metadata", {})
+        
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        if not source:
+            return _error_response(400, "Source is required")
+            
+        processor = PaymentProcessor()
+        result = await processor.process_payment(amount_cents, source, metadata)
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment processing failed"))
+            
+        return _make_response(200, {
+            "transaction_id": result["transaction_id"],
+            "amount_cents": amount_cents,
+            "currency": "USD"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +260,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            request_body = json.loads(body) if body else {}
+            return handle_payment(request_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
