@@ -276,6 +276,69 @@ def start_experiments_from_top_ideas(
     return out
 
 
+async def deliver_product(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    experiment_id: str,
+    customer_data: Dict[str, Any]
+) -> bool:
+    """Automated product/service delivery mechanism."""
+    try:
+        # Get experiment details
+        res = await execute_sql(
+            f"""
+            SELECT metadata->>'delivery_type' as delivery_type,
+                   metadata->>'delivery_details' as delivery_details
+            FROM experiments
+            WHERE id = '{experiment_id}'
+            """
+        )
+        exp = res.get("rows", [{}])[0]
+        
+        delivery_type = exp.get("delivery_type", "digital")
+        delivery_details = json.loads(exp.get("delivery_details", "{}"))
+        
+        # Implement delivery based on type
+        if delivery_type == "digital":
+            # Send digital product via email
+            email_service.send(
+                to=customer_data["email"],
+                subject=f"Your {delivery_details.get('product_name', 'product')} is ready",
+                body=delivery_details.get("delivery_message", "Thank you for your purchase!")
+            )
+        elif delivery_type == "service":
+            # Schedule service delivery
+            scheduling_service.book_appointment(
+                customer=customer_data,
+                service_details=delivery_details
+            )
+        
+        # Record delivery completion
+        await execute_sql(
+            f"""
+            INSERT INTO delivery_events (
+                experiment_id, customer_id, delivery_type,
+                status, delivered_at, metadata
+            ) VALUES (
+                '{experiment_id}',
+                '{customer_data.get('id')}',
+                '{delivery_type}',
+                'completed',
+                NOW(),
+                '{json.dumps(customer_data)}'
+            )
+            """
+        )
+        return True
+    except Exception as e:
+        log_action(
+            "delivery.failed",
+            f"Failed to deliver product: {str(e)}",
+            level="error",
+            error_data={"experiment_id": experiment_id, "error": str(e)}
+        )
+        return False
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
