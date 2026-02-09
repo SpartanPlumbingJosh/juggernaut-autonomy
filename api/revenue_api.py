@@ -215,6 +215,45 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        processor = PaymentProcessor()
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        
+        if not customer_id or not plan_id:
+            return _error_response(400, "Missing customer_id or plan_id")
+            
+        result = await processor.create_subscription(customer_id, plan_id)
+        if result.get("success"):
+            return _make_response(201, result)
+        return _error_response(400, result.get("error", "Subscription creation failed"))
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
+
+async def handle_stripe_webhook(body: Dict[str, Any], headers: Dict[str, str]) -> Dict[str, Any]:
+    """Process Stripe webhook."""
+    try:
+        processor = PaymentProcessor()
+        result = await processor.handle_stripe_webhook(body, headers.get("Stripe-Signature", ""))
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(400, f"Stripe webhook failed: {str(e)}")
+
+
+async def handle_paypal_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process PayPal webhook."""
+    try:
+        processor = PaymentProcessor()
+        result = await processor.handle_paypal_webhook(body)
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(400, f"PayPal webhook failed: {str(e)}")
+
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
