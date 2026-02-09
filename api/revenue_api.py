@@ -5,9 +5,12 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process a payment
+- POST /revenue/cost - Log a cost
 """
 
 import json
+from api.payment_processor import payment_processor
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -162,6 +165,65 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment transaction."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = str(body.get("currency", "USD")).upper()
+        source = str(body.get("source", "unknown"))
+        metadata = body.get("metadata", {})
+        experiment_id = body.get("experiment_id")
+        
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+        
+        result = await payment_processor.process_payment(
+            amount_cents=amount_cents,
+            currency=currency,
+            source=source,
+            metadata=metadata,
+            experiment_id=experiment_id
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment processing failed"))
+            
+        return _make_response(200, {
+            "transaction_id": result["transaction_id"],
+            "amount_cents": amount_cents,
+            "currency": currency
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_cost(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Log a cost transaction."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        source = str(body.get("source", "unknown"))
+        metadata = body.get("metadata", {})
+        experiment_id = body.get("experiment_id")
+        
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+        
+        result = await payment_processor.log_cost(
+            amount_cents=amount_cents,
+            source=source,
+            metadata=metadata,
+            experiment_id=experiment_id
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Cost logging failed"))
+            
+        return _make_response(200, {
+            "transaction_id": result["transaction_id"],
+            "amount_cents": amount_cents
+        })
+    except Exception as e:
+        return _error_response(500, f"Cost logging error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +293,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            request_body = json.loads(body) if body else {}
+            return await handle_payment(request_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/cost
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "cost" and method == "POST":
+        try:
+            request_body = json.loads(body) if body else {}
+            return await handle_cost(request_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
