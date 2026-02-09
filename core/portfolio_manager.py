@@ -17,7 +17,21 @@ def generate_revenue_ideas(
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
-    ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Generate ideas in batches with caching
+    batch_size = min(limit * 2, 20)  # Generate slightly more than needed
+    ideas = []
+    seen_titles = set()
+    
+    while len(ideas) < limit:
+        new_ideas = gen.generate_ideas(context, batch_size=batch_size)
+        for idea in new_ideas:
+            title = str(idea.get("title") or "").strip().lower()
+            if title and title not in seen_titles:
+                ideas.append(idea)
+                seen_titles.add(title)
+                if len(ideas) >= limit:
+                    break
 
     created = 0
     failures: List[Dict[str, Any]] = []
@@ -121,16 +135,27 @@ def score_pending_ideas(
     limit: int = 20,
 ) -> Dict[str, Any]:
     try:
-        res = execute_sql(
-            f"""
-            SELECT id, title, description, hypothesis, estimates
-            FROM revenue_ideas
-            WHERE status IN ('pending')
-            ORDER BY created_at ASC
-            LIMIT {int(limit)}
-            """
-        )
-        rows = res.get("rows", []) or []
+        # Batch process ideas with caching
+        batch_size = min(limit, 10)  # Process in smaller batches
+        rows = []
+        seen_ids = set()
+        
+        while len(rows) < limit:
+            res = execute_sql(
+                f"""
+                SELECT id, title, description, hypothesis, estimates
+                FROM revenue_ideas
+                WHERE status IN ('pending')
+                  AND id NOT IN ({','.join(f"'{id}'" for id in seen_ids) or "''"})
+                ORDER BY created_at ASC
+                LIMIT {batch_size}
+                """
+            )
+            new_rows = res.get("rows", []) or []
+            if not new_rows:
+                break
+            rows.extend(new_rows)
+            seen_ids.update(str(r.get("id")) for r in new_rows)
     except Exception as e:
         return {"success": False, "error": str(e)}
 
@@ -189,14 +214,19 @@ def start_experiments_from_top_ideas(
     budget: float = 20.0,
 ) -> Dict[str, Any]:
     try:
+        # Use window function to rank ideas efficiently
         res = execute_sql(
             f"""
+            WITH ranked_ideas AS (
+                SELECT id, title, description, hypothesis, estimates, score,
+                       ROW_NUMBER() OVER (ORDER BY score DESC NULLS LAST, created_at ASC) as rank
+                FROM revenue_ideas
+                WHERE status = 'scored'
+                  AND COALESCE(score, 0) >= {float(min_score)}
+            )
             SELECT id, title, description, hypothesis, estimates, score
-            FROM revenue_ideas
-            WHERE status = 'scored'
-              AND COALESCE(score, 0) >= {float(min_score)}
-            ORDER BY score DESC NULLS LAST, created_at ASC
-            LIMIT {int(max_new * 3)}
+            FROM ranked_ideas
+            WHERE rank <= {int(max_new * 3)}
             """
         )
         ideas = res.get("rows", []) or []
