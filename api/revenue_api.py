@@ -210,6 +210,48 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment and record revenue event."""
+    try:
+        amount_cents = int(float(payload.get('amount', 0)) * 100)
+        user_id = payload.get('user_id')
+        source = payload.get('source', 'website')
+        
+        if amount_cents <= 0 or not user_id:
+            return _error_response(400, "Invalid payment amount or user")
+            
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, 
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {amount_cents},
+            'USD',
+            '{source}',
+            '{json.dumps({'user_id': user_id})}'::jsonb,
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        tx_id = result.get('rows', [{}])[0].get('id')
+        
+        return _make_response(200, {
+            'transaction_id': tx_id,
+            'amount_cents': amount_cents,
+            'status': 'completed'
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +273,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            payload = json.loads(body) if body else {}
+            return handle_payment(payload)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
