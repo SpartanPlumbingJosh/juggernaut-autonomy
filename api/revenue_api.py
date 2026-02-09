@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.billing_manager import BillingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,50 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        payment_token = body.get("payment_token")
+        
+        if not all([customer_id, plan_id, payment_token]):
+            return _error_response(400, "Missing required fields")
+            
+        billing = BillingManager(query_db, log_action)
+        result = billing.create_subscription(customer_id, plan_id, payment_token)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error"))
+            
+        return _make_response(200, {
+            "subscription_id": result["subscription_id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_usage_track(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Track customer usage."""
+    try:
+        customer_id = body.get("customer_id")
+        usage_type = body.get("usage_type")
+        quantity = int(body.get("quantity", 0))
+        
+        if not all([customer_id, usage_type, quantity > 0]):
+            return _error_response(400, "Missing required fields")
+            
+        billing = BillingManager(query_db, log_action)
+        result = billing.track_usage(customer_id, usage_type, quantity)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error"))
+            
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to track usage: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -219,6 +264,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_create(json.loads(body or "{}"))
+    
+    # POST /revenue/usage
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "usage" and method == "POST":
+        return handle_usage_track(json.loads(body or "{}"))
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":

@@ -1,12 +1,44 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
+import uuid
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+# Subscription plans
+PLANS = {
+    "basic": {
+        "price_cents": 9900,
+        "interval": "month",
+        "features": ["core_features"],
+        "usage_limits": {
+            "api_calls": 10000,
+            "storage_mb": 100
+        }
+    },
+    "pro": {
+        "price_cents": 29900,
+        "interval": "month",
+        "features": ["core_features", "advanced_analytics"],
+        "usage_limits": {
+            "api_calls": 50000,
+            "storage_mb": 500
+        }
+    },
+    "enterprise": {
+        "price_cents": 99900,
+        "interval": "month",
+        "features": ["core_features", "advanced_analytics", "dedicated_support"],
+        "usage_limits": {
+            "api_calls": 200000,
+            "storage_mb": 2000
+        }
+    }
+}
 
 
 def generate_revenue_ideas(
