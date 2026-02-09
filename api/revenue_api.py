@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.billing_service import BillingService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,25 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_billing_setup(customer_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new billing account setup."""
+    try:
+        billing = BillingService()
+        result = await billing.create_subscription(
+            customer_id=customer_data['customer_id'],
+            plan_id=customer_data['plan_id'],
+            payment_method=customer_data.get('payment_method')
+        )
+        if not result['success']:
+            return _error_response(400, result['error'])
+            
+        return _make_response(200, {
+            "subscription_id": result['subscription_id'],
+            "status": "active"
+        })
+    except Exception as e:
+        return _error_response(500, f"Billing setup failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +251,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/billing/setup
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "billing" and parts[2] == "setup" and method == "POST":
+        try:
+            customer_data = json.loads(body or '{}')
+            return await handle_billing_setup(customer_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
