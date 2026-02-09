@@ -276,6 +276,66 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def deploy_service(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    service_id: str,
+    config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Deploy a new service to production."""
+    try:
+        # Validate service config
+        required_fields = ["name", "price_cents", "delivery_type"]
+        if not all(field in config for field in required_fields):
+            return {"success": False, "error": "Missing required fields"}
+            
+        # Create/update service record
+        sql = f"""
+        INSERT INTO revenue_services (
+            id, name, description, price_cents,
+            delivery_type, delivery_config, status,
+            created_at, updated_at
+        ) VALUES (
+            '{service_id}',
+            '{config["name"].replace("'", "''")}',
+            '{config.get("description", "").replace("'", "''")}',
+            {config["price_cents"]},
+            '{config["delivery_type"]}',
+            '{json.dumps(config.get("delivery_config", {})).replace("'", "''")}',
+            'active',
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT (id) DO UPDATE SET
+            name = EXCLUDED.name,
+            description = EXCLUDED.description,
+            price_cents = EXCLUDED.price_cents,
+            delivery_type = EXCLUDED.delivery_type,
+            delivery_config = EXCLUDED.delivery_config,
+            updated_at = NOW()
+        """
+        
+        execute_sql(sql)
+        
+        log_action(
+            "service.deployed",
+            f"Service {config['name']} deployed",
+            level="info",
+            output_data={"service_id": service_id}
+        )
+        
+        return {"success": True, "service_id": service_id}
+        
+    except Exception as e:
+        log_action(
+            "service.deploy_failed",
+            f"Failed to deploy service: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
