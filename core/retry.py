@@ -167,3 +167,51 @@ def calculate_backoff_delay(
         delay = delay * (0.5 + random.random())
     
     return delay
+"""
+Retry utilities with exponential backoff.
+"""
+import time
+import random
+from functools import wraps
+from typing import Callable, Any, TypeVar, Optional
+
+T = TypeVar('T')
+
+def exponential_backoff_retry(
+    max_retries: int = 3,
+    initial_delay: float = 1,
+    max_delay: float = 10,
+    jitter: bool = True
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """
+    Decorator for retrying a function with exponential backoff.
+    
+    Args:
+        max_retries: Maximum number of retry attempts
+        initial_delay: Initial delay between retries in seconds
+        max_delay: Maximum delay between retries in seconds
+        jitter: Whether to add random jitter to delays
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            retries = 0
+            delay = initial_delay
+            
+            while True:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    if retries >= max_retries:
+                        raise
+                    
+                    # Calculate delay with jitter if enabled
+                    current_delay = delay
+                    if jitter:
+                        current_delay = random.uniform(0.5 * delay, 1.5 * delay)
+                    
+                    time.sleep(min(current_delay, max_delay))
+                    delay *= 2  # Exponential backoff
+                    retries += 1
+        return wrapper
+    return decorator
