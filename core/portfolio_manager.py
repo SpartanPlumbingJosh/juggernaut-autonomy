@@ -7,6 +7,13 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_pipelines import (
+    RevenuePipeline,
+    AffiliatePipeline,
+    ContentPipeline,
+    WebhookPipeline,
+    MonitoringDashboard
+)
 
 
 def generate_revenue_ideas(
@@ -14,10 +21,32 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    pipeline_type: Optional[str] = None,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with optional pipeline integration"""
     context = context or {}
     gen = IdeaGenerator()
+    
+    # Initialize appropriate pipeline if specified
+    pipeline = None
+    if pipeline_type == "affiliate":
+        pipeline = AffiliatePipeline(execute_sql, log_action)
+    elif pipeline_type == "content":
+        pipeline = ContentPipeline(execute_sql, log_action)
+    elif pipeline_type == "webhook":
+        pipeline = WebhookPipeline(execute_sql, log_action)
+        
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Enhance ideas with pipeline-specific data
+    if pipeline:
+        for idea in ideas:
+            idea["pipeline"] = pipeline_type
+            idea["metadata"] = idea.get("metadata", {})
+            idea["metadata"]["pipeline_config"] = {
+                "type": pipeline_type,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
 
     created = 0
     failures: List[Dict[str, Any]] = []
