@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and optimization data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/pricing - Update dynamic pricing rules
+- GET /revenue/conversion_funnel - Conversion funnel metrics
 """
 
 import json
@@ -162,6 +164,43 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_conversion_funnel(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get conversion funnel metrics."""
+    try:
+        days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        sql = f"""
+        WITH funnel AS (
+            SELECT
+                COUNT(DISTINCT CASE WHEN event_type = 'page_view' THEN user_id END) as visitors,
+                COUNT(DISTINCT CASE WHEN event_type = 'signup' THEN user_id END) as signups,
+                COUNT(DISTINCT CASE WHEN event_type = 'checkout_start' THEN user_id END) as checkout_starts,
+                COUNT(DISTINCT CASE WHEN event_type = 'purchase' THEN user_id END) as purchases
+            FROM user_events
+            WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        )
+        SELECT
+            visitors,
+            signups,
+            checkout_starts,
+            purchases,
+            ROUND(signups::numeric / NULLIF(visitors, 0), 4) as signup_rate,
+            ROUND(checkout_starts::numeric / NULLIF(signups, 0), 4) as checkout_rate,
+            ROUND(purchases::numeric / NULLIF(checkout_starts, 0), 4) as conversion_rate
+        FROM funnel
+        """
+        
+        result = await query_db(sql)
+        funnel_data = result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "funnel": funnel_data,
+            "period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch funnel data: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,6 +249,42 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_dynamic_pricing(body: Optional[str] = None) -> Dict[str, Any]:
+    """Update dynamic pricing rules."""
+    try:
+        if not body:
+            return _error_response(400, "Missing pricing rules")
+            
+        pricing_data = json.loads(body)
+        
+        # Validate required fields
+        required_fields = ["product_id", "base_price", "rules"]
+        for field in required_fields:
+            if field not in pricing_data:
+                return _error_response(400, f"Missing required field: {field}")
+                
+        # Store pricing rules
+        sql = f"""
+        INSERT INTO pricing_rules (product_id, base_price, rules, updated_at)
+        VALUES (
+            '{pricing_data["product_id"]}',
+            {pricing_data["base_price"]},
+            '{json.dumps(pricing_data["rules"])}',
+            NOW()
+        )
+        ON CONFLICT (product_id) DO UPDATE SET
+            base_price = EXCLUDED.base_price,
+            rules = EXCLUDED.rules,
+            updated_at = NOW()
+        """
+        
+        await query_db(sql)
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to update pricing: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +306,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/conversion_funnel
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "conversion_funnel" and method == "GET":
+        return handle_conversion_funnel(query_params)
+        
+    # POST /revenue/pricing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "pricing" and method == "POST":
+        return handle_dynamic_pricing(body)
     
     return _error_response(404, "Not found")
 

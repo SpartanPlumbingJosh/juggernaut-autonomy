@@ -9,6 +9,56 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+def analyze_upsell_opportunities(execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Identify upsell and cross-sell opportunities."""
+    try:
+        sql = """
+        WITH customer_stats AS (
+            SELECT
+                user_id,
+                COUNT(DISTINCT id) as total_purchases,
+                SUM(amount_cents) as total_spent,
+                MAX(recorded_at) as last_purchase,
+                ARRAY_AGG(DISTINCT product_id) as products
+            FROM revenue_events
+            WHERE event_type = 'purchase'
+            GROUP BY user_id
+        ),
+        product_affinity AS (
+            SELECT
+                p1.product_id as base_product,
+                p2.product_id as related_product,
+                COUNT(DISTINCT p1.user_id) as co_purchases
+            FROM revenue_events p1
+            JOIN revenue_events p2
+              ON p1.user_id = p2.user_id
+             AND p1.product_id != p2.product_id
+            WHERE p1.event_type = 'purchase'
+              AND p2.event_type = 'purchase'
+            GROUP BY p1.product_id, p2.product_id
+        )
+        SELECT
+            cs.user_id,
+            cs.total_purchases,
+            cs.total_spent,
+            cs.last_purchase,
+            cs.products,
+            pa.base_product,
+            pa.related_product,
+            pa.co_purchases
+        FROM customer_stats cs
+        LEFT JOIN product_affinity pa
+          ON pa.base_product = ANY(cs.products)
+        ORDER BY cs.total_spent DESC, pa.co_purchases DESC
+        LIMIT 1000
+        """
+        
+        result = execute_sql(sql)
+        return {"success": True, "opportunities": result.get("rows", [])}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
