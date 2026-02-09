@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscribe - Create new subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
@@ -162,6 +164,69 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_subscribe(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new subscription creation."""
+    try:
+        from api.payment_processor import PaymentProcessor
+        from api.auth import AuthService
+        
+        auth = AuthService()
+        user = await auth.get_current_user(body.get("token"))
+        
+        processor = PaymentProcessor(api_key="your_stripe_key")  # Should be from env
+        
+        # Create customer if needed
+        customer = await processor.create_customer(
+            email=user["email"],
+            name=body.get("name", "")
+        )
+        if not customer.get("success"):
+            return _error_response(400, customer.get("error", "Failed to create customer"))
+        
+        # Create subscription
+        subscription = await processor.create_subscription(
+            customer_id=customer["customer_id"],
+            price_id=body["price_id"],
+            metadata={
+                "user_id": user["id"],
+                "plan": body.get("plan", "standard")
+            }
+        )
+        
+        if not subscription.get("success"):
+            return _error_response(400, subscription.get("error", "Failed to create subscription"))
+            
+        return _make_response(200, {
+            "success": True,
+            "subscription_id": subscription["subscription_id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        from api.payment_processor import PaymentProcessor
+        processor = PaymentProcessor(api_key="your_stripe_key")  # Should be from env
+        
+        event = body.get("event")
+        if not event:
+            return _error_response(400, "Missing event data")
+            
+        # Handle payment succeeded event
+        if event["type"] == "payment_intent.succeeded":
+            result = await processor.record_payment_event(event)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Failed to record payment"))
+                
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +296,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_revenue_subscribe(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
