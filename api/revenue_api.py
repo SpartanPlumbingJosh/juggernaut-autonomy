@@ -10,8 +10,10 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from enum import Enum
 
 from core.database import query_db
+from core.automation import create_automation_system, RevenueModel
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +233,32 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/automation/run
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "automation" and parts[2] == "run" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            model = body_data.get("model", "")
+            automation = create_automation_system(query_db, log_action, model)
+            if not automation:
+                return _error_response(400, "Invalid revenue model")
+            result = automation.run()
+            return _make_response(200 if result.get("success") else 500, result)
+        except Exception as e:
+            return _error_response(500, f"Automation failed: {str(e)}")
+    
+    # POST /revenue/automation/reset
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "automation" and parts[2] == "reset" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            model = body_data.get("model", "")
+            automation = create_automation_system(query_db, log_action, model)
+            if not automation:
+                return _error_response(400, "Invalid revenue model")
+            result = automation.reset_circuit_breaker()
+            return _make_response(200, {"success": result})
+        except Exception as e:
+            return _error_response(500, f"Reset failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
