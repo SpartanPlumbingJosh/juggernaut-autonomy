@@ -1,0 +1,14 @@
+{
+    "strategy": "default",
+    "api_keys": {
+        "payment_processor": "your_api_key_here",
+        "exchange": "your_api_key_here"
+    },
+    "budget": 1000.0,
+    "min_profit_margin": 0.15,
+    "max_risk": 0.25,
+    "monitoring": {
+        "interval_minutes": 15,
+        "alert_threshold": 0.1
+    }
+}

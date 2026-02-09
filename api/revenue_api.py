@@ -5,10 +5,13 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/automation/execute - Execute revenue generation strategy
+- GET /revenue/automation/status - Get automation system status
 """
 
 import json
 from datetime import datetime, timezone, timedelta
+from automation.revenue_generator import RevenueGenerator, initialize_generator
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -219,6 +222,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # Automation endpoints
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "automation":
+        if parts[2] == "execute" and method == "POST":
+            try:
+                generator = initialize_generator()
+                result = generator.execute_strategy()
+                return _make_response(200, result)
+            except Exception as e:
+                return _error_response(500, f"Failed to execute strategy: {str(e)}")
+        
+        if parts[2] == "status" and method == "GET":
+            try:
+                generator = initialize_generator()
+                status = generator.health_check()
+                return _make_response(200, status)
+            except Exception as e:
+                return _error_response(500, f"Failed to get status: {str(e)}")
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
