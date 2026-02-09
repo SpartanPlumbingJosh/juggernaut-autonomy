@@ -33,6 +33,61 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def handle_customer_onboarding(body: Dict) -> Dict[str, Any]:
+    """Handle new customer onboarding flow."""
+    try:
+        from services.payment_processor import PaymentProcessor
+        from services.service_delivery import ServiceDelivery
+        from config import STRIPE_API_KEY
+        
+        # Validate required fields
+        required = ["email", "name", "product_id", "payment_method"]
+        for field in required:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+        
+        # Initialize services
+        payment = PaymentProcessor(STRIPE_API_KEY)
+        delivery = ServiceDelivery()
+        
+        # Step 1: Create customer
+        customer_res = await payment.create_customer(
+            email=body["email"],
+            name=body["name"]
+        )
+        if not customer_res.get("success"):
+            return _error_response(400, f"Customer creation failed: {customer_res.get('error')}")
+        
+        # Step 2: Create payment intent
+        product = await query_db(f"SELECT * FROM products WHERE id = '{body['product_id']}'")
+        if not product.get("rows"):
+            return _error_response(404, "Product not found")
+        
+        product_data = product["rows"][0]
+        payment_res = await payment.create_payment_intent(
+            amount=product_data["price_cents"],
+            currency=product_data["currency"],
+            customer_id=customer_res["customer_id"],
+            metadata={
+                "product_id": body["product_id"],
+                "onboarding": True
+            }
+        )
+        
+        if not payment_res.get("success"):
+            return _error_response(400, f"Payment setup failed: {payment_res.get('error')}")
+        
+        # Step 3: Return client secret for frontend payment completion
+        return _make_response(200, {
+            "success": True,
+            "customer_id": customer_res["customer_id"],
+            "client_secret": payment_res["client_secret"],
+            "product": product_data
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +286,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            body = json.loads(body) if body else {}
+            return await handle_customer_onboarding(body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
