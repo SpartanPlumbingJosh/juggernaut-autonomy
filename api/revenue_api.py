@@ -162,6 +162,46 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment checkout initiation."""
+    try:
+        from api.payment_service import PaymentService
+        
+        product_id = body.get("product_id")
+        price_cents = int(body.get("price_cents", 0))
+        customer_email = body.get("customer_email")
+        
+        if not all([product_id, price_cents > 0, customer_email]):
+            return _error_response(400, "Missing required fields")
+            
+        result = await PaymentService.create_checkout_session(
+            product_id=product_id,
+            price_cents=price_cents,
+            customer_email=customer_email,
+            success_url=body.get("success_url", "https://example.com/success"),
+            cancel_url=body.get("cancel_url", "https://example.com/cancel"),
+            metadata=body.get("metadata", {})
+        )
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+async def handle_payment_webhook(headers: Dict[str, Any], body: bytes) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        from api.payment_service import PaymentService
+        
+        sig_header = headers.get("stripe-signature", "")
+        success, message = await PaymentService.handle_webhook(body, sig_header)
+        
+        if not success:
+            return _error_response(400, message)
+            
+        return _make_response(200, {"status": "success"})
+    except Exception as e:
+        return _error_response(500, f"Webhook failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +271,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/checkout
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "checkout" and method == "POST":
+        return handle_payment_checkout(json.loads(body or "{}"))
+    
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(headers or {}, body or b"")
     
     return _error_response(404, "Not found")
 
