@@ -12,6 +12,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.billing_manager import BillingManager
+from core.customer_manager import CustomerManager
+
+billing_manager = BillingManager()
+customer_manager = CustomerManager()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,10 +38,22 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
+        
+        # Get recurring revenue stats
+        recurring_sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'subscription' THEN amount_cents ELSE 0 END) as mrr_cents,
+            COUNT(DISTINCT customer_id) FILTER (WHERE event_type = 'subscription') as active_customers,
+            SUM(CASE WHEN event_type = 'subscription' AND recorded_at >= NOW() - INTERVAL '30 days' THEN amount_cents ELSE 0 END) as new_mrr_cents
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '1 year'
+        """
+        recurring_result = await query_db(recurring_sql)
+        recurring = recurring_result.get("rows", [{}])[0]
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -107,6 +124,11 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
+            },
+            "recurring": {
+                "mrr_cents": recurring.get("mrr_cents") or 0,
+                "active_customers": recurring.get("active_customers") or 0,
+                "new_mrr_cents": recurring.get("new_mrr_cents") or 0
             }
         })
         
