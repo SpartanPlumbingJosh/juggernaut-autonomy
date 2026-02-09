@@ -162,6 +162,39 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from services.payment_service import PaymentService
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe payment webhook events."""
+    try:
+        event = body.get("event")
+        if event["type"] != "payment_intent.succeeded":
+            return _make_response(200, {"status": "ignored"})
+
+        payment_service = PaymentService(api_key="your_stripe_secret_key")
+        result = await payment_service.record_transaction(event)
+        
+        if not result["success"]:
+            return _error_response(500, "Failed to record transaction")
+            
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+async def handle_create_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new checkout session."""
+    try:
+        payment_service = PaymentService(api_key="your_stripe_secret_key")
+        result = await payment_service.create_checkout_session(
+            price_id=body["price_id"],
+            success_url=body["success_url"],
+            cancel_url=body["cancel_url"],
+            metadata=body.get("metadata", {})
+        )
+        return _make_response(200 if result["success"] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Checkout creation failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +264,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_create_checkout(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
