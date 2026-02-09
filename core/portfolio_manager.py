@@ -9,6 +9,31 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+def track_acquisition_event(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    event_type: str,
+    event_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Track an acquisition funnel event."""
+    try:
+        event_json = json.dumps(event_data).replace("'", "''")
+        
+        execute_sql(f"""
+            INSERT INTO acquisition_events (
+                id, event_type, event_data, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type.replace("'", "''")}',
+                '{event_json}'::jsonb,
+                NOW()
+            )
+        """)
+        
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
