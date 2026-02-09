@@ -6588,3 +6588,35 @@ if __name__ == "__main__":
 
 
 
+from fastapi import FastAPI, Depends, HTTPException
+from auth.auth_service import AuthService
+from payment.stripe_service import StripeService
+from subscription.subscription_service import SubscriptionService
+from provisioning.provisioning_service import ProvisioningService
+from admin.admin_api import router as admin_router
+
+app = FastAPI()
+app.include_router(admin_router)
+
+auth_service = AuthService()
+stripe_service = StripeService()
+subscription_service = SubscriptionService()
+provisioning_service = ProvisioningService()
+
+@app.post("/register")
+async def register(email: str, password: str):
+    # Implement registration logic
+    pass
+
+@app.post("/login")
+async def login(email: str, password: str):
+    # Implement login logic
+    pass
+
+@app.post("/webhook/stripe")
+async def stripe_webhook(payload: bytes, sig_header: str = Depends()):
+    return await stripe_service.handle_webhook(payload, sig_header)
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
