@@ -9,6 +9,25 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+def track_usage(execute_sql: Callable[[str], Dict[str, Any]], event_type: str, metadata: Dict[str, Any] = {}) -> None:
+    """Track system usage"""
+    try:
+        metadata_json = json.dumps(metadata).replace("'", "''")
+        execute_sql(
+            f"""
+            INSERT INTO usage_events (
+                id, event_type, metadata, recorded_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                '{metadata_json}'::jsonb,
+                NOW()
+            )
+            """
+        )
+    except Exception:
+        pass
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
