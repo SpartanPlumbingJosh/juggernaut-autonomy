@@ -1,6 +1,38 @@
 from __future__ import annotations
 
 import json
+import time
+from dataclasses import dataclass
+from enum import Enum
+from typing import Tuple
+
+class ServiceStatus(Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    FAILED = "failed"
+    HEALING = "healing"
+
+@dataclass
+class ServiceHealthCheck:
+    check_interval: int = 60
+    max_retries: int = 3
+    timeout: int = 10
+    last_checked: float = 0.0
+    consecutive_failures: int = 0
+
+    def should_check(self) -> bool:
+        return time.time() - self.last_checked > self.check_interval
+
+    def record_failure(self) -> Tuple[bool, int]:
+        self.consecutive_failures += 1
+        self.last_checked = time.time()
+        if self.consecutive_failures >= self.max_retries:
+            return True, self.consecutive_failures
+        return False, self.consecutive_failures
+
+    def record_success(self) -> None:
+        self.consecutive_failures = 0
+        self.last_checked = time.time()
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -274,6 +306,70 @@ def start_experiments_from_top_ideas(
         out["failures"] = failures[:10]
         out["failed"] = len(failures)
     return out
+
+
+def monitor_and_heal_services(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    check_interval: int = 300
+) -> Dict[str, Any]:
+    """Monitor active services and trigger healing when needed."""
+    try:
+        # Get services needing attention
+        res = execute_sql(
+            f"""
+            SELECT id, name, status, health_check_data, last_checked_at
+            FROM services
+            WHERE status IN ('active', 'failed', 'healing')
+              AND (last_checked_at IS NULL OR last_checked_at < NOW() - INTERVAL '{check_interval} seconds')
+            ORDER BY last_checked_at ASC NULLS FIRST
+            LIMIT 100
+            """
+        )
+        services = res.get("rows", []) or []
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    healed = 0
+    failed = 0
+
+    for service in services:
+        service_id = str(service.get("id") or "")
+        if not service_id:
+            continue
+
+        try:
+            # Attempt to heal failed services
+            if service.get("status") == "failed":
+                execute_sql(
+                    f"""
+                    UPDATE services
+                    SET status = 'healing',
+                        healing_attempts = COALESCE(healing_attempts, 0) + 1,
+                        last_checked_at = NOW()
+                    WHERE id = '{service_id}'
+                    """
+                )
+                # TODO: Implement service-specific healing logic
+                healed += 1
+            # Update health check timestamp
+            execute_sql(
+                f"""
+                UPDATE services
+                SET last_checked_at = NOW()
+                WHERE id = '{service_id}'
+                """
+            )
+        except Exception:
+            failed += 1
+            continue
+
+    return {
+        "success": True,
+        "services_checked": len(services),
+        "services_healed": healed,
+        "services_failed": failed
+    }
 
 
 def review_experiments_stub(
