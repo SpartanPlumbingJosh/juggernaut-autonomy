@@ -276,6 +276,91 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def match_freelance_gigs(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    skills: List[str],
+    min_rate: float = 50.0,
+    max_rate: float = 200.0,
+    limit: int = 5
+) -> Dict[str, Any]:
+    """Match freelance gigs based on skills and rate range."""
+    try:
+        skills_filter = " OR ".join([f"LOWER(description) LIKE '%{skill.lower()}%'" for skill in skills])
+        
+        sql = f"""
+        SELECT id, title, description, budget, platform, posted_at
+        FROM freelance_gigs
+        WHERE ({skills_filter})
+          AND budget BETWEEN {min_rate} AND {max_rate}
+        ORDER BY posted_at DESC
+        LIMIT {limit}
+        """
+        
+        result = await query_db(sql)
+        gigs = result.get("rows", [])
+        
+        return {
+            "success": True,
+            "gigs": gigs,
+            "count": len(gigs)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+def generate_freelance_proposal(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    gig_id: str,
+    rate: float,
+    cover_letter: str
+) -> Dict[str, Any]:
+    """Generate and submit freelance proposal."""
+    try:
+        # Get gig details
+        gig_sql = f"""
+        SELECT id, title, description, budget, platform
+        FROM freelance_gigs
+        WHERE id = '{gig_id}'
+        LIMIT 1
+        """
+        gig_result = await query_db(gig_sql)
+        gig = gig_result.get("rows", [{}])[0]
+        
+        if not gig:
+            return {"success": False, "error": "Gig not found"}
+            
+        # Record proposal
+        proposal_sql = f"""
+        INSERT INTO freelance_proposals (
+            id, gig_id, rate, cover_letter, status, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{gig_id}',
+            {rate},
+            '{cover_letter.replace("'", "''")}',
+            'submitted',
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        proposal_result = await query_db(proposal_sql)
+        proposal_id = proposal_result.get("rows", [{}])[0].get("id")
+        
+        return {
+            "success": True,
+            "proposal_id": proposal_id,
+            "gig_id": gig_id,
+            "rate": rate
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
