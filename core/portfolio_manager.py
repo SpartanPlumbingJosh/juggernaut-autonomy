@@ -187,8 +187,28 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    auto_scale: bool = True,
 ) -> Dict[str, Any]:
     try:
+        # Get revenue performance to adjust scaling
+        if auto_scale:
+            perf = execute_sql("""
+                SELECT 
+                    SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue,
+                    SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as cost
+                FROM revenue_events
+                WHERE recorded_at >= NOW() - INTERVAL '7 days'
+            """)
+            rows = perf.get("rows", [{}])
+            roi = ((rows[0].get("revenue", 0) - rows[0].get("cost", 0)) / rows[0].get("cost", 1)) if rows[0].get("cost", 0) > 0 else 0
+            
+            # Scale up if ROI is positive
+            if roi > 0.2:  # 20% ROI threshold
+                max_new = min(5, max_new * 2)
+                budget = budget * 1.5
+                log_action("portfolio.scaling", "Scaling up experiments due to positive ROI", 
+                          level="info", output_data={"roi": roi, "new_max": max_new, "new_budget": budget})
+
         res = execute_sql(
             f"""
             SELECT id, title, description, hypothesis, estimates, score
