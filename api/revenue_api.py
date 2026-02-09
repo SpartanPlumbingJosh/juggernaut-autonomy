@@ -8,10 +8,21 @@ Endpoints:
 """
 
 import json
+import stripe
+import paypalrestsdk
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize payment processors
+stripe.api_key = settings.STRIPE_SECRET_KEY
+paypalrestsdk.configure({
+    "mode": settings.PAYPAL_MODE,
+    "client_id": settings.PAYPAL_CLIENT_ID,
+    "client_secret": settings.PAYPAL_SECRET
+})
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -209,6 +220,80 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def process_payment(payment_method: str, amount: float, currency: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through selected gateway."""
+    try:
+        amount_cents = int(amount * 100)
+        
+        if payment_method == "stripe":
+            payment_intent = stripe.PaymentIntent.create(
+                amount=amount_cents,
+                currency=currency,
+                metadata=metadata,
+                payment_method_types=["card"]
+            )
+            return {
+                "success": True,
+                "payment_id": payment_intent.id,
+                "client_secret": payment_intent.client_secret
+            }
+        elif payment_method == "paypal":
+            payment = paypalrestsdk.Payment({
+                "intent": "sale",
+                "payer": {"payment_method": "paypal"},
+                "transactions": [{
+                    "amount": {
+                        "total": f"{amount:.2f}",
+                        "currency": currency
+                    },
+                    "description": metadata.get("description", "")
+                }],
+                "redirect_urls": {
+                    "return_url": settings.PAYPAL_RETURN_URL,
+                    "cancel_url": settings.PAYPAL_CANCEL_URL
+                }
+            })
+            if payment.create():
+                return {
+                    "success": True,
+                    "payment_id": payment.id,
+                    "approval_url": next(link.href for link in payment.links if link.rel == "approval_url")
+                }
+            return {"success": False, "error": payment.error}
+        else:
+            return {"success": False, "error": "Invalid payment method"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+async def handle_payment_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        event_type = event.get("type")
+        payment_id = event.get("data", {}).get("object", {}).get("id")
+        
+        if event_type == "payment_intent.succeeded":
+            # Record successful payment
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {event['data']['object']['amount']},
+                    '{event['data']['object']['currency']}',
+                    'stripe',
+                    '{json.dumps(event['data']['object']['metadata'])}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+            return {"success": True}
+            
+        return {"success": False, "error": "Unhandled event type"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
