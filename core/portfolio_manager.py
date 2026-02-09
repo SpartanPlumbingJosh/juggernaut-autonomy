@@ -276,6 +276,74 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def check_service_delivery(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Check and fulfill pending service deliveries."""
+    try:
+        # Get pending deliveries
+        res = execute_sql("""
+            SELECT id, customer_id, service_type, amount_cents, due_at, metadata
+            FROM service_deliveries
+            WHERE status = 'pending' AND due_at <= NOW()
+            ORDER BY due_at ASC
+            LIMIT 100
+        """)
+        deliveries = res.get("rows", [])
+        
+        fulfilled = 0
+        for delivery in deliveries:
+            delivery_id = str(delivery.get("id"))
+            customer_id = str(delivery.get("customer_id"))
+            amount = int(delivery.get("amount_cents", 0))
+            
+            try:
+                # Mark as fulfilled
+                execute_sql(f"""
+                    UPDATE service_deliveries
+                    SET status = 'fulfilled',
+                        fulfilled_at = NOW()
+                    WHERE id = '{delivery_id}'
+                """)
+                
+                # Record revenue
+                execute_sql(f"""
+                    INSERT INTO revenue_events (
+                        id, event_type, amount_cents, currency,
+                        source, metadata, recorded_at, created_at
+                    ) VALUES (
+                        gen_random_uuid(),
+                        'revenue',
+                        {amount},
+                        'usd',
+                        'service_delivery',
+                        '{json.dumps(delivery.get("metadata", {}))}'::jsonb,
+                        NOW(),
+                        NOW()
+                    )
+                """)
+                
+                fulfilled += 1
+                log_action(
+                    "service.fulfilled",
+                    f"Fulfilled service delivery {delivery_id}",
+                    level="info",
+                    output_data={"delivery_id": delivery_id, "amount": amount}
+                )
+            except Exception as e:
+                log_action(
+                    "service.failed",
+                    f"Failed to fulfill delivery {delivery_id}: {str(e)}",
+                    level="error",
+                    error_data={"delivery_id": delivery_id, "error": str(e)}
+                )
+        
+        return {"success": True, "fulfilled": fulfilled, "total": len(deliveries)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
