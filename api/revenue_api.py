@@ -162,6 +162,25 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_acquisition_metrics(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get acquisition funnel metrics."""
+    try:
+        from core.acquisition_manager import AcquisitionFunnelManager
+        manager = AcquisitionFunnelManager(query_db, lambda *args, **kwargs: None)
+        
+        period_days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        metrics = manager.get_funnel_metrics(period_days)
+        
+        if not metrics.get("success"):
+            return _error_response(500, metrics.get("error", "Failed to get metrics"))
+            
+        return _make_response(200, {
+            "metrics": metrics["metrics"],
+            "period_days": period_days
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch acquisition metrics: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +250,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /acquisition/metrics
+    if len(parts) == 2 and parts[0] == "acquisition" and parts[1] == "metrics" and method == "GET":
+        return handle_acquisition_metrics(query_params)
     
     return _error_response(404, "Not found")
 
