@@ -318,6 +318,14 @@ NO asking for permission. NO "shall I proceed?" Just DO IT.
 - browser_type(selector, text)
 - browser_screenshot(full_page?)
 
+### Marketing Automation
+- marketing_seo_generate(keywords, word_count?, tone?) - Generate SEO-optimized content
+- marketing_ad_create(campaign_name, audience, budget, creative_brief) - Create programmatic ads
+- marketing_ad_optimize(campaign_id, metrics) - Optimize running ads
+- marketing_email_sequence_create(name, steps) - Create email nurture sequence
+- marketing_lead_score(lead_data) - Score and qualify leads
+- marketing_conversion_optimize(funnel_data) - Optimize conversion rates
+
 ### Communication
 - email_list(folder?, filter?, top?)
 - email_read(message_id)
@@ -2375,6 +2383,81 @@ class BrainService:
                 return result if isinstance(result, dict) else {"result": result}
             except Exception as e:
                 return {"error": f"opportunity_scan_run failed: {type(e).__name__}: {e}"}
+
+        if tool_name.startswith("marketing_"):
+            try:
+                from core.marketing_automation import marketing
+                
+                if tool_name == "marketing_seo_generate":
+                    keywords = arguments.get("keywords", [])
+                    word_count = arguments.get("word_count", 1000)
+                    tone = arguments.get("tone", "professional")
+                    content = marketing.generate_seo_content(keywords, word_count, tone)
+                    return {
+                        "success": True,
+                        "title": content.title,
+                        "content": content.content,
+                        "readability_score": content.readability_score,
+                        "seo_score": content.seo_score
+                    }
+                
+                elif tool_name == "marketing_ad_create":
+                    campaign = marketing.create_ad_campaign(
+                        arguments["campaign_name"],
+                        arguments["audience"],
+                        arguments["budget"],
+                        arguments["creative_brief"]
+                    )
+                    return {
+                        "success": True,
+                        "campaign_id": campaign.id,
+                        "status": campaign.status,
+                        "budget": campaign.budget
+                    }
+                
+                elif tool_name == "marketing_ad_optimize":
+                    campaign = marketing.optimize_ads(
+                        arguments["campaign_id"],
+                        arguments["metrics"]
+                    )
+                    return {
+                        "success": True,
+                        "improvement": {
+                            "ctr": f"+{((campaign.ctr / arguments['metrics'].get('ctr', 0.01)) - 1) * 100:.1f}%",
+                            "cpc": f"-{((1 - (campaign.cpc / arguments['metrics'].get('cpc', 0.5))) * 100):.1f}%",
+                            "conversions": f"+{((campaign.conversions / max(1, arguments['metrics'].get('conversions', 1))) - 1) * 100:.1f}%"
+                        }
+                    }
+                
+                elif tool_name == "marketing_email_sequence_create":
+                    sequence = marketing.create_email_sequence(
+                        arguments["name"],
+                        arguments["steps"]
+                    )
+                    return {
+                        "success": True,
+                        "sequence_id": sequence.id
+                    }
+                
+                elif tool_name == "marketing_lead_score":
+                    score = marketing.score_lead(arguments["lead_data"])
+                    return {
+                        "success": True,
+                        "score": score["score"],
+                        "confidence": score["confidence"],
+                        "recommended_action": score["recommended_action"]
+                    }
+                
+                elif tool_name == "marketing_conversion_optimize":
+                    optimizations = marketing.optimize_conversions(arguments["funnel_data"])
+                    return {
+                        "success": True,
+                        "recommended_changes": optimizations["recommended_changes"],
+                        "predicted_impact": optimizations["predicted_impact"]
+                    }
+                
+            except Exception as e:
+                return {"error": f"Marketing tool error: {str(e)}"}
 
         if tool_name == "puppeteer_healthcheck":
             try:
