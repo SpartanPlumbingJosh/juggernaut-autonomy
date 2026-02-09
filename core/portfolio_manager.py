@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from services.subscription_manager import SubscriptionManager
+
+subscription_manager = SubscriptionManager()
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
