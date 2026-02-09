@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.transaction_processor import TransactionProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,7 +116,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination and validation."""
+    processor = TransactionProcessor()
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -151,11 +153,19 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         count_result = await query_db(count_sql)
         total = count_result.get("rows", [{}])[0].get("total", 0)
         
+        # Validate all transactions
+        validation_result = processor.batch_process(transactions)
+        
         return _make_response(200, {
-            "transactions": transactions,
+            "transactions": validation_result["processed"],
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "validation": {
+                "valid": validation_result["valid"],
+                "invalid": validation_result["invalid"],
+                "errors": validation_result["errors"]
+            }
         })
         
     except Exception as e:
