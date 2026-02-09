@@ -127,18 +127,21 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
         sql = f"""
         SELECT 
-            id,
-            experiment_id,
-            event_type,
-            amount_cents,
-            currency,
-            source,
-            metadata,
-            recorded_at,
-            created_at
-        FROM revenue_events
+            r.id,
+            r.experiment_id,
+            r.event_type,
+            r.amount_cents,
+            r.currency,
+            r.source,
+            r.metadata,
+            r.recorded_at,
+            r.created_at,
+            f.status as fulfillment_status,
+            f.delivered_at as fulfillment_date
+        FROM revenue_events r
+        LEFT JOIN fulfillment_events f ON r.id = f.transaction_id
         {where_clause}
-        ORDER BY recorded_at DESC
+        ORDER BY r.recorded_at DESC
         LIMIT {limit}
         OFFSET {offset}
         """
