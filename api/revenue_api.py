@@ -1,11 +1,16 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Automated revenue tracking and reporting.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- GET /revenue/summary - MTD/QTD/YTD totals  
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/services - Create new service instance
 """
+
+# Constants for $8M annual revenue capacity 
+MAX_TPS = 10  # Transactions per second target
+DAILY_TARGET = 21918  # $8M / 365 days in cents
 
 import json
 from datetime import datetime, timezone, timedelta
