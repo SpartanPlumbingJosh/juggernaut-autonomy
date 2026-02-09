@@ -200,9 +200,25 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         source_result = await query_db(source_sql)
         by_source = source_result.get("rows", [])
         
+        # Product metrics
+        product_sql = f"""
+        SELECT 
+            metadata->>'product_id' as product_id,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY metadata->>'product_id'
+        ORDER BY revenue_cents DESC
+        """
+        
+        product_result = await query_db(product_sql)
+        by_product = product_result.get("rows", [])
+        
         return _make_response(200, {
             "daily": daily_data,
             "by_source": by_source,
+            "by_product": by_product,
             "period_days": days
         })
         
