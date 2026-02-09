@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /subscriptions/create - Create new subscription
+- POST /subscriptions/cancel - Cancel subscription
+- POST /webhook/stripe - Handle Stripe webhooks
 """
 
 import json
@@ -209,6 +212,78 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new subscription creation."""
+    try:
+        processor = PaymentProcessor(api_key="your_stripe_key")
+        provisioner = ServiceProvisioner()
+        
+        # Create customer
+        customer = await processor.create_customer(
+            email=body.get("email"),
+            name=body.get("name")
+        )
+        if not customer.get("success"):
+            return _error_response(400, customer.get("error"))
+            
+        # Create subscription
+        subscription = await processor.create_subscription(
+            customer_id=customer["customer_id"],
+            price_id=body.get("price_id")
+        )
+        if not subscription.get("success"):
+            return _error_response(400, subscription.get("error"))
+            
+        # Provision service
+        provision = await provisioner.provision_service(
+            customer_id=customer["customer_id"],
+            plan_id=body.get("plan_id")
+        )
+        if not provision.get("success"):
+            return _error_response(400, provision.get("error"))
+            
+        return _make_response(200, {
+            "customer_id": customer["customer_id"],
+            "subscription_id": subscription["subscription_id"],
+            "client_secret": subscription["client_secret"],
+            "resources": provision["resources"]
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+        
+async def handle_subscription_cancel(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription cancellation."""
+    try:
+        processor = PaymentProcessor(api_key="your_stripe_key")
+        provisioner = ServiceProvisioner()
+        
+        # Cancel subscription
+        await stripe.Subscription.delete(body.get("subscription_id"))
+        
+        # Deprovision service
+        await provisioner.deprovision_service(body.get("customer_id"))
+        
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to cancel subscription: {str(e)}")
+        
+async def handle_stripe_webhook(request: Any) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        processor = PaymentProcessor(api_key="your_stripe_key")
+        payload = await request.body()
+        sig_header = request.headers.get("stripe-signature")
+        result = await processor.handle_webhook(
+            payload=payload,
+            sig_header=sig_header,
+            webhook_secret="your_webhook_secret"
+        )
+        if not result.get("success"):
+            return _error_response(400, result.get("error"))
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook error: {str(e)}")
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
