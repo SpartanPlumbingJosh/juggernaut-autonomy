@@ -1,39 +1,90 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
-
-Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
-- GET /revenue/charts - Revenue over time data
+FastAPI Revenue API with authentication and rate limiting.
 """
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Annotated
+
+from fastapi import FastAPI, Depends, HTTPException, Request, status
+from fastapi.security import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from pydantic import BaseModel
 
 from core.database import query_db
 
+# Initialize FastAPI app
+app = FastAPI(
+    title="Revenue API",
+    description="Expose revenue tracking data with authentication and rate limiting",
+    version="1.0.0"
+)
 
-def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Create standardized API response."""
-    return {
-        "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
-        },
-        "body": json.dumps(body)
-    }
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Rate limiting setup
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, lambda request, exc: HTTPException(
+    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+    detail="Rate limit exceeded"
+))
+
+# Authentication setup
+API_KEY_NAME = "X-API-KEY"
+api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False)
+
+# In production, use a proper secrets manager
+VALID_API_KEYS = {
+    "spartan-hq": "Full access",
+    "dashboard": "Read-only access"
+}
+
+async def get_api_key(api_key: str = Depends(api_key_header)):
+    if api_key not in VALID_API_KEYS:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid API Key"
+        )
+    return api_key
+
+# Response models
+class RevenueSummaryResponse(BaseModel):
+    mtd: Dict[str, Any]
+    qtd: Dict[str, Any]
+    ytd: Dict[str, Any]
+    all_time: Dict[str, Any]
+
+class TransactionResponse(BaseModel):
+    transactions: List[Dict[str, Any]]
+    total: int
+    limit: int
+    offset: int
+
+class ChartResponse(BaseModel):
+    daily: List[Dict[str, Any]]
+    by_source: List[Dict[str, Any]]
+    period_days: int
+
+class ErrorResponse(BaseModel):
+    error: str
 
 
-def _error_response(status_code: int, message: str) -> Dict[str, Any]:
-    """Create error response."""
-    return _make_response(status_code, {"error": message})
-
-
-async def handle_revenue_summary() -> Dict[str, Any]:
+@app.get("/revenue/summary", 
+         response_model=RevenueSummaryResponse,
+         responses={401: {"model": ErrorResponse}, 429: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+@limiter.limit("10/minute")
+async def handle_revenue_summary(request: Request, api_key: str = Depends(get_api_key)) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -114,7 +165,17 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
-async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+@app.get("/revenue/transactions", 
+         response_model=TransactionResponse,
+         responses={401: {"model": ErrorResponse}, 429: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+@limiter.limit("30/minute")
+async def handle_revenue_transactions(
+    request: Request,
+    limit: int = 50,
+    offset: int = 0,
+    event_type: Optional[str] = None,
+    api_key: str = Depends(get_api_key)
+) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -162,7 +223,15 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
-async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
+@app.get("/revenue/charts", 
+         response_model=ChartResponse,
+         responses={401: {"model": ErrorResponse}, 429: {"model": ErrorResponse}, 500: {"model": ErrorResponse}})
+@limiter.limit("20/minute")
+async def handle_revenue_charts(
+    request: Request,
+    days: int = 30,
+    api_key: str = Depends(get_api_key)
+) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
@@ -210,29 +279,11 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
-    
-    # Handle CORS preflight
-    if method == "OPTIONS":
-        return _make_response(200, {})
-    
-    # Parse path
-    parts = [p for p in path.split("/") if p]
-    
-    # GET /revenue/summary
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
-    
-    # GET /revenue/transactions
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
-    
-    # GET /revenue/charts
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
-    
-    return _error_response(404, "Not found")
+# Add health check endpoint
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
 
-
-__all__ = ["route_request"]
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
