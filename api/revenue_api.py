@@ -114,6 +114,26 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
+async def record_revenue_event(event_type: str, amount_cents: int, currency: str, 
+                             source: str, metadata: Dict[str, Any]) -> None:
+    """Record a revenue or cost event."""
+    sql = f"""
+    INSERT INTO revenue_events (
+        id, event_type, amount_cents, currency, 
+        source, metadata, recorded_at, created_at
+    ) VALUES (
+        gen_random_uuid(),
+        '{event_type.replace("'", "''")}',
+        {amount_cents},
+        '{currency.replace("'", "''")}',
+        '{source.replace("'", "''")}',
+        '{json.dumps(metadata).replace("'", "''")}'::jsonb,
+        NOW(),
+        NOW()
+    )
+    """
+    await query_db(sql)
+
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
@@ -231,6 +251,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/events
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "events" and method == "POST":
+        body = json.loads(body) if body else {}
+        return await record_revenue_event(
+            event_type=body.get("event_type"),
+            amount_cents=int(body.get("amount_cents")),
+            currency=body.get("currency", "usd"),
+            source=body.get("source", "api"),
+            metadata=body.get("metadata", {})
+        )
     
     return _error_response(404, "Not found")
 
