@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment checkout session
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_service import PaymentService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,6 +222,28 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            result = await PaymentService.create_checkout_session(
+                product_id=data.get("product_id"),
+                price_id=data.get("price_id"),
+                customer_email=data.get("customer_email"),
+                success_url=data.get("success_url"),
+                cancel_url=data.get("cancel_url"),
+                metadata=data.get("metadata", {})
+            )
+            return _make_response(200 if result['success'] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Checkout error: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        result = await PaymentService.handle_webhook(body.encode(), sig_header)
+        return _make_response(200 if result['success'] else 400, result)
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
