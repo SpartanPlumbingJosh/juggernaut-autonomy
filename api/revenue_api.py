@@ -162,6 +162,66 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment and record revenue event."""
+    try:
+        required_fields = ['amount_cents', 'currency', 'source', 'customer_id']
+        for field in required_fields:
+            if field not in payment_data:
+                return _error_response(400, f"Missing required field: {field}")
+
+        amount_cents = int(payment_data['amount_cents'])
+        if amount_cents <= 0:
+            return _error_response(400, "Amount must be positive")
+
+        # Record revenue event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            customer_id,
+            metadata,
+            recorded_at,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {amount_cents},
+            '{payment_data['currency']}',
+            '{payment_data['source']}',
+            '{payment_data['customer_id']}',
+            '{json.dumps(payment_data.get('metadata', {}))}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id, recorded_at
+        """
+        
+        result = await query_db(sql)
+        if not result.get('rows'):
+            return _error_response(500, "Failed to record payment")
+
+        # Here you would integrate with actual payment processor
+        # For MVP we'll just simulate successful payment
+        payment_id = result['rows'][0]['id']
+        
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_id,
+            "recorded_at": result['rows'][0]['recorded_at'],
+            "amount_cents": amount_cents,
+            "message": "Payment processed successfully"
+        })
+        
+    except ValueError as e:
+        return _error_response(400, f"Invalid amount: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +291,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return await process_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
