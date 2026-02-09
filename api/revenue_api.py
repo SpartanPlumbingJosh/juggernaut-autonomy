@@ -5,11 +5,14 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments/create - Create payment intent
+- POST /revenue/payments/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from api.payment_handler import create_payment_intent, handle_stripe_webhook
 
 from core.database import query_db
 
@@ -231,6 +234,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return await create_payment_intent(
+                amount=body_data.get("amount"),
+                currency=body_data.get("currency", "usd"),
+                metadata=body_data.get("metadata", {})
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/payments/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "webhook" and method == "POST":
+        try:
+            event = json.loads(body or "{}")
+            return await handle_stripe_webhook(event)
+        except Exception as e:
+            return _error_response(400, f"Invalid webhook: {str(e)}")
     
     return _error_response(404, "Not found")
 
