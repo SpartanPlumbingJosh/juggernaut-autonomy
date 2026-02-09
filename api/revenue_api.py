@@ -3,8 +3,11 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/payments - Process payment
+- POST /revenue/webhooks - Handle payment webhooks
 """
 
 import json
@@ -162,6 +165,131 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_id", "plan_id", "payment_method_id"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+        
+        # Create subscription in database
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, status, 
+            payment_method_id, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["customer_id"]}',
+            '{body["plan_id"]}',
+            'active',
+            '{body["payment_method_id"]}',
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        subscription_id = result.get("rows", [{}])[0].get("id")
+        
+        if not subscription_id:
+            return _error_response(500, "Failed to create subscription")
+            
+        return _make_response(201, {
+            "subscription_id": subscription_id,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment."""
+    try:
+        # Validate required fields
+        required_fields = ["subscription_id", "amount_cents", "currency"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+        
+        # Record payment in database
+        sql = f"""
+        INSERT INTO payments (
+            id, subscription_id, amount_cents, currency,
+            status, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["subscription_id"]}',
+            {body["amount_cents"]},
+            '{body["currency"]}',
+            'pending',
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        payment_id = result.get("rows", [{}])[0].get("id")
+        
+        if not payment_id:
+            return _error_response(500, "Failed to process payment")
+            
+        # TODO: Integrate with payment gateway
+        # For MVP, just mark as succeeded
+        await query_db(f"""
+            UPDATE payments
+            SET status = 'succeeded',
+                updated_at = NOW()
+            WHERE id = '{payment_id}'
+        """)
+        
+        return _make_response(201, {
+            "payment_id": payment_id,
+            "status": "succeeded"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhook."""
+    try:
+        # Validate webhook signature
+        # TODO: Implement proper signature verification
+        
+        event_type = body.get("type")
+        payment_id = body.get("data", {}).get("id")
+        
+        if not event_type or not payment_id:
+            return _error_response(400, "Invalid webhook payload")
+            
+        # Update payment status based on webhook event
+        if event_type == "payment.succeeded":
+            await query_db(f"""
+                UPDATE payments
+                SET status = 'succeeded',
+                    updated_at = NOW()
+                WHERE id = '{payment_id}'
+            """)
+        elif event_type == "payment.failed":
+            await query_db(f"""
+                UPDATE payments
+                SET status = 'failed',
+                    updated_at = NOW()
+                WHERE id = '{payment_id}'
+            """)
+            
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +359,36 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_create_subscription(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_process_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_webhook(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
