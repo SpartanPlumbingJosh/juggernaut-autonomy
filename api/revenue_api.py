@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/dashboard - Revenue targets, runway and forecasts
 """
 
 import json
@@ -162,6 +163,86 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_dashboard() -> Dict[str, Any]:
+    """Get revenue dashboard metrics including targets, runway, and forecasts."""
+    try:
+        now = datetime.now(timezone.utc)
+        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        # Get YTD revenue and costs
+        ytd_sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as cost_cents
+        FROM revenue_events
+        WHERE recorded_at >= '{year_start.isoformat()}'
+        """
+        ytd_result = await query_db(ytd_sql)
+        ytd = ytd_result.get("rows", [{}])[0]
+        ytd_revenue = (ytd.get("revenue_cents") or 0) / 100
+        ytd_cost = (ytd.get("cost_cents") or 0) / 100
+        
+        # Get monthly revenue for velocity calculation
+        monthly_sql = f"""
+        SELECT 
+            DATE_TRUNC('month', recorded_at) as month,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= '{year_start.isoformat()}'
+        GROUP BY DATE_TRUNC('month', recorded_at)
+        ORDER BY month
+        """
+        monthly_result = await query_db(monthly_sql)
+        monthly_data = monthly_result.get("rows", [])
+        
+        # Calculate velocity (avg monthly revenue growth)
+        velocities = []
+        for i in range(1, len(monthly_data)):
+            prev = monthly_data[i-1].get("revenue_cents", 0) / 100
+            curr = monthly_data[i].get("revenue_cents", 0) / 100
+            if prev > 0:
+                velocities.append((curr - prev) / prev)
+        
+        avg_growth = sum(velocities) / len(velocities) if velocities else 0
+        
+        # Forecast end-of-year revenue
+        months_remaining = 12 - now.month
+        forecast = ytd_revenue
+        for _ in range(months_remaining):
+            forecast *= (1 + avg_growth)
+        
+        # Calculate runway (months until $0 at current burn rate)
+        burn_rate = ytd_cost / now.month
+        cash_balance = 5_000_000  # TODO: Get from accounting system
+        runway = cash_balance / burn_rate if burn_rate > 0 else float('inf')
+        
+        # Target metrics ($12M annual goal)
+        target = 12_000_000
+        target_percent = (ytd_revenue / target) * 100
+        required_monthly = (target - ytd_revenue) / months_remaining if months_remaining > 0 else 0
+        
+        # Alert if growth rate is insufficient
+        alert = False
+        if forecast < target * 0.9:  # 10% buffer
+            alert = True
+        
+        return _make_response(200, {
+            "ytd_revenue": ytd_revenue,
+            "ytd_cost": ytd_cost,
+            "net_income": ytd_revenue - ytd_cost,
+            "monthly_growth_rate": avg_growth,
+            "forecast_eoy": forecast,
+            "runway_months": runway,
+            "target_percent": target_percent,
+            "required_monthly": required_monthly,
+            "alert": alert,
+            "target": target
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to generate dashboard metrics: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +312,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/dashboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "dashboard" and method == "GET":
+        return handle_revenue_dashboard()
     
     return _error_response(404, "Not found")
 
