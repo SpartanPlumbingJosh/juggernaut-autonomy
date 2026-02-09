@@ -10,8 +10,17 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from enum import Enum
 
 from core.database import query_db
+from billing.payment_service import PaymentService, handle_webhook
+
+
+class RevenueEventType(str, Enum):
+    RECURRING = "recurring"
+    ONE_TIME = "one_time"
+    ADJUSTMENT = "adjustment"
+    REFUND = "refund"
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,6 +124,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get transaction history with subscription status."""
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -127,16 +137,19 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
         sql = f"""
         SELECT 
-            id,
-            experiment_id,
-            event_type,
-            amount_cents,
-            currency,
-            source,
-            metadata,
-            recorded_at,
-            created_at
-        FROM revenue_events
+            rev.id,
+            rev.experiment_id,
+            rev.event_type,
+            rev.amount_cents,
+            rev.currency,
+            rev.source,
+            rev.metadata,
+            rev.recorded_at,
+            rev.created_at,
+            sub.status as subscription_status,
+            sub.next_billing_date
+        FROM revenue_events rev
+        LEFT JOIN subscriptions sub ON rev.metadata->>'subscription_id' = sub.id::text
         {where_clause}
         ORDER BY recorded_at DESC
         LIMIT {limit}
