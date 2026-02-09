@@ -469,3 +469,100 @@ def get_tool_schemas(categories: List[str] = None) -> List[Dict[str, Any]]:
 def get_tool_names() -> List[str]:
     """Get list of available tool names."""
     return [tool["function"]["name"] for tool in BRAIN_TOOLS]
+"""MCP Tool Schemas for Autonomous Lead Generation and Sales Systems."""
+from typing import List, Dict, Optional
+
+def get_tool_schemas() -> List[Dict[str, Any]]:
+    """Get all available tool schemas including new lead generation tools."""
+    schemas = [
+        # ... existing tool schemas ...
+
+        # Lead Generation Tools
+        {
+            "type": "function",
+            "function": {
+                "name": "landing_page_generate",
+                "description": "Generate a high-converting landing page with SEO optimization and analytics automatically.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "product_name": {"type": "string", "description": "Name of product/service"},
+                        "value_proposition": {"type": "string", "description": "Primary value prop message"},
+                        "features": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "description": "Key features/benefits to highlight"
+                            }
+                        },
+                        "call_to_action": {"type": "string", "description": "Primary CTA text"},
+                        "target_keywords": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "SEO target keywords"
+                        }
+                    },
+                    "required": ["product_name", "value_proposition", "call_to_action"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "email_sequence_create",
+                "description": "Create an automated email sequence for lead nurturing.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "sequence_name": {"type": "string", "description": "Name for this sequence"},
+                        "trigger_event": {"type": "string", "description": "What triggers the sequence start"},
+                        "emails": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "days_after_trigger": {"type": "number"},
+                                    "subject": {"type": "string"},
+                                    "content": {"type": "string"}
+                                },
+                                "required": ["days_after_trigger", "subject", "content"]
+                            }
+                        }
+                    },
+                    "required": ["sequence_name", "trigger_event", "emails"]
+                }
+            }
+        },
+        {
+            "type": "function",
+            "function": {
+                "name": "chatbot_conversation_create",
+                "description": "Design a sales chatbot conversation flow.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "bot_name": {"type": "string", "description": "Identifier for the bot"},
+                        "initial_message": {"type": "string", "description": "Opening greeting"},
+                        "qualification_questions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "question": {"type": "string"},
+                                    "followups": {
+                                        "type": "object",
+                                        "description": "Conditional responses based on answer",
+                                        "additionalProperties": {
+                                            "type": "string"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    "required": ["bot_name", "initial_message", "qualification_questions"]
+                }
+            }
+        }
+    ]
+    return schemas
