@@ -30,3 +30,8 @@ langfuse>=2.0.0
 # Optional (uncomment if needed):
 # psycopg2-binary==2.9.9  # Direct PostgreSQL (optional)
 # schedule==1.2.1         # Cron scheduling (optional)
+fastapi==0.95.2
+uvicorn==0.22.0
+stripe==5.4.0
+paypal-checkout-sdk==1.0.1
+python-dotenv==1.0.0
