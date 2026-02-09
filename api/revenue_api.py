@@ -12,6 +12,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from pricing.engine import PricingEngine
+
+# Initialize pricing engine with product defaults
+PRICING_ENGINE = PricingEngine(
+    base_price=49.99,  # Starting price
+    min_price=29.99,   # Minimum allowed price
+    max_price=99.99    # Maximum allowed price
+)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,6 +240,36 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # GET /revenue/optimize-price
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "optimize-price" and method == "GET":
+        # Get recent transactions
+        txns_result = await query_db("""
+            SELECT event_type, recorded_at, metadata 
+            FROM revenue_events 
+            WHERE recorded_at >= NOW() - INTERVAL '7 days'
+            ORDER BY recorded_at DESC
+            LIMIT 1000
+        """)
+        transactions = txns_result.get("rows", [])
+        
+        # Get inventory level (0-1.0)
+        inventory_result = await query_db("""
+            SELECT COALESCE(remaining_capacity / total_capacity, 0.5) as level
+            FROM inventory
+            WHERE product_id = 'premium_subscription'
+            LIMIT 1
+        """)
+        inventory_level = float(inventory_result.get("rows", [{}])[0].get("level", 0.5))
+        
+        optimized_price = PRICING_ENGINE.adjust_price(transactions, inventory_level)
+        
+        return _make_response(200, {
+            "optimized_price": optimized_price,
+            "base_price": PRICING_ENGINE.base_price,
+            "inventory_level": inventory_level,
+            "last_updated": datetime.now(timezone.utc).isoformat()
+        })
+
     return _error_response(404, "Not found")
 
 
