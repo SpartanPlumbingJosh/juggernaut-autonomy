@@ -9,6 +9,39 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+from typing import Tuple
+import stripe
+import paypalrestsdk
+
+# Configure payment gateways
+stripe.api_key = 'YOUR_STRIPE_SECRET_KEY'
+paypalrestsdk.configure({
+    "mode": "live",  # or "sandbox"
+    "client_id": "YOUR_PAYPAL_CLIENT_ID",
+    "client_secret": "YOUR_PAYPAL_SECRET"
+})
+
+def process_payment(payment_method: str, amount: int, currency: str) -> Tuple[bool, str]:
+    """Process payment through Stripe or PayPal"""
+    try:
+        if payment_method.startswith('pm_'):
+            # Stripe payment
+            intent = stripe.PaymentIntent.create(
+                amount=amount,
+                currency=currency,
+                payment_method=payment_method,
+                confirm=True
+            )
+            return intent.status == 'succeeded', intent.id
+        else:
+            # PayPal payment
+            payment = paypalrestsdk.Payment.find(payment_method)
+            if payment.execute({"payer_id": payment.payer.payer_info.payer_id}):
+                return True, payment.id
+            return False, payment.failure_reason
+    except Exception as e:
+        return False, str(e)
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

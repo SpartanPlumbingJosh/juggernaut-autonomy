@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Admin Dashboard</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+</head>
+<body>
+    <h1>Admin Dashboard</h1>
+    
+    <div id="sales-stats">
+        <h2>Sales Statistics</h2>
+        <div id="sales-chart"></div>
+        <div id="revenue-stats"></div>
+    </div>
+
+    <div id="user-management">
+        <h2>User Management</h2>
+        <table id="users-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Email</th>
+                    <th>Signup Date</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+
+    <script>
+        async function fetchData() {
+            const [salesRes, usersRes] = await Promise.all([
+                fetch('/api/sales'),
+                fetch('/api/users')
+            ]);
+
+            const salesData = await salesRes.json();
+            const usersData = await usersRes.json();
+
+            // Update sales chart
+            Plotly.newPlot('sales-chart', [{
+                x: salesData.dates,
+                y: salesData.amounts,
+                type: 'bar'
+            }]);
+
+            // Update users table
+            const tbody = document.querySelector('#users-table tbody');
+            tbody.innerHTML = usersData.map(user => `
+                <tr>
+                    <td>${user.id}</td>
+                    <td>${user.email}</td>
+                    <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                    <td>${user.status}</td>
+                </tr>
+            `).join('');
+        }
+
+        // Refresh data every 60 seconds
+        fetchData();
+        setInterval(fetchData, 60000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Product Landing Page</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://www.paypal.com/sdk/js?client-id=YOUR_PAYPAL_CLIENT_ID"></script>
+</head>
+<body>
+    <h1>Welcome to Our Product</h1>
+    <div id="payment-form">
+        <div id="stripe-payment" style="display: none;">
+            <div id="card-element"></div>
+            <button id="stripe-submit">Pay with Stripe</button>
+        </div>
+        <div id="paypal-button-container"></div>
+    </div>
+
+    <script>
+        // Stripe integration
+        const stripe = Stripe('YOUR_STRIPE_PUBLIC_KEY');
+        const elements = stripe.elements();
+        const cardElement = elements.create('card');
+        cardElement.mount('#card-element');
+
+        document.getElementById('stripe-submit').addEventListener('click', async () => {
+            const {error, paymentMethod} = await stripe.createPaymentMethod({
+                type: 'card',
+                card: cardElement,
+            });
+
+            if (error) {
+                alert(error.message);
+            } else {
+                // Send paymentMethod.id to your server
+                fetch('/process-payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        payment_method: paymentMethod.id,
+                        amount: 1000, // Amount in cents
+                        currency: 'usd'
+                    }),
+                });
+            }
+        });
+
+        // PayPal integration
+        paypal.Buttons({
+            createOrder: function(data, actions) {
+                return actions.order.create({
+                    purchase_units: [{
+                        amount: {
+                            value: '10.00'
+                        }
+                    }]
+                });
+            },
+            onApprove: function(data, actions) {
+                return actions.order.capture().then(function(details) {
+                    // Send payment details to your server
+                    fetch('/process-payment', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            payment_id: details.id,
+                            amount: 1000, // Amount in cents
+                            currency: 'usd'
+                        }),
+                    });
+                });
+            }
+        }).render('#paypal-button-container');
+    </script>
+</body>
+</html>
