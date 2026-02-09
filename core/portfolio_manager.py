@@ -283,8 +283,15 @@ def review_experiments_stub(
     """Review running experiments and trigger learning loop for completed ones."""
     try:
         from core.learning_loop import on_experiment_complete
-    except ImportError:
+        from core.revenue_validator import RevenueValidator
+    except ImportError as e:
+        log_action(
+            "import.error",
+            f"Failed to import module: {str(e)}",
+            level="error"
+        )
         on_experiment_complete = None
+        RevenueValidator = None
     
     try:
         res = execute_sql(
@@ -308,6 +315,10 @@ def review_experiments_stub(
     running_count = 0
     completed_count = 0
     learning_triggered = 0
+    models_validated = 0
+    
+    # Initialize validator if available
+    validator = RevenueValidator(execute_sql, log_action) if RevenueValidator else None
     
     for exp in rows:
         exp_id = exp.get("id")
@@ -342,8 +353,23 @@ def review_experiments_stub(
                         error_data={"experiment_id": exp_id, "error": str(e)}
                     )
         
-        if status == "completed" and on_experiment_complete:
+        if status == "completed":
             completed_count += 1
+                
+            # Validate associated revenue model if exists
+            if validator and exp.get("model_id"):
+                try:
+                    validation_result = await validator.validate_model(exp["model_id"])
+                    if validation_result.get("success"):
+                        models_validated += 1
+                except Exception as e:
+                    log_action(
+                        "validation.error",
+                        f"Failed to validate model {exp.get('model_id')}: {str(e)}",
+                        level="error"
+                    )
+                
+            if on_experiment_complete:
             
             revenue = float(exp.get("revenue_generated") or 0)
             cost = float(exp.get("actual_cost") or exp.get("budget_spent") or 0)
@@ -407,5 +433,6 @@ def review_experiments_stub(
         "success": True,
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "models_validated": models_validated
     }
