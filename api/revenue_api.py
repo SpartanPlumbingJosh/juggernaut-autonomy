@@ -10,8 +10,11 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import stripe
+import paypalrestsdk
 
 from core.database import query_db
+from core.onboarding import create_customer_account, deliver_service
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,6 +222,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/payment/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "stripe" and method == "POST":
+        return handle_stripe_payment(body)
+    
+    # POST /revenue/payment/paypal
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "paypal" and method == "POST":
+        return handle_paypal_payment(body)
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
