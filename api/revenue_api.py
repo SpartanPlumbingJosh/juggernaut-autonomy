@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing data.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process payment
+- POST /revenue/subscriptions - Manage subscriptions
+- GET /revenue/metering - Usage metering data
 """
 
 import json
@@ -162,6 +165,52 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment event from payment provider."""
+    try:
+        event_type = event_data.get("type")
+        data = event_data.get("data", {})
+        
+        # Handle different payment event types
+        if event_type in ["payment_intent.succeeded", "charge.succeeded"]:
+            # Record successful payment
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, 
+                    source, metadata, recorded_at
+                ) VALUES (
+                    '{data.get("id")}',
+                    'payment',
+                    {int(float(data.get("amount")) * 100)},
+                    '{data.get("currency")}',
+                    '{os.getenv("PAYMENT_PROVIDER", "stripe")}',
+                    '{json.dumps(data)}',
+                    NOW()
+                )
+            """)
+            
+        elif event_type in ["payment_intent.failed", "charge.failed"]:
+            # Record failed payment
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, 
+                    source, metadata, recorded_at
+                ) VALUES (
+                    '{data.get("id")}',
+                    'payment_failed',
+                    {int(float(data.get("amount")) * 100)},
+                    '{data.get("currency")}',
+                    '{os.getenv("PAYMENT_PROVIDER", "stripe")}',
+                    '{json.dumps(data)}',
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment event: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,6 +259,52 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_subscription_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process subscription event from payment provider."""
+    try:
+        event_type = event_data.get("type")
+        data = event_data.get("data", {})
+        
+        # Handle different subscription events
+        if event_type in ["subscription.created", "subscription.updated"]:
+            # Record subscription creation/update
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, 
+                    source, metadata, recorded_at
+                ) VALUES (
+                    '{data.get("id")}',
+                    'subscription',
+                    {int(float(data.get("amount")) * 100)},
+                    '{data.get("currency")}',
+                    '{os.getenv("PAYMENT_PROVIDER", "stripe")}',
+                    '{json.dumps(data)}',
+                    NOW()
+                )
+            """)
+            
+        elif event_type == "subscription.deleted":
+            # Record subscription cancellation
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, 
+                    source, metadata, recorded_at
+                ) VALUES (
+                    '{data.get("id")}',
+                    'subscription_cancelled',
+                    {int(float(data.get("amount")) * 100)},
+                    '{data.get("currency")}',
+                    '{os.getenv("PAYMENT_PROVIDER", "stripe")}',
+                    '{json.dumps(data)}',
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process subscription event: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +326,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "webhook" and method == "POST":
+        return handle_payment_event(json.loads(body or "{}"))
+    
+    # POST /revenue/subscriptions/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "webhook" and method == "POST":
+        return handle_subscription_event(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
