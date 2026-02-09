@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process payment
+- POST /revenue/delivery - Complete service delivery
+- POST /revenue/onboard - Handle customer onboarding
 """
 
 import json
@@ -12,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_engine import RevenueEngine
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,6 +224,9 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # Initialize revenue engine
+    engine = RevenueEngine(query_db, lambda *args, **kwargs: None)
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
@@ -231,6 +238,33 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            payment_data = json.loads(body or "{}")
+            result = engine.process_payment(payment_data)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Payment processing failed: {str(e)}")
+    
+    # POST /revenue/delivery
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "delivery" and method == "POST":
+        try:
+            delivery_data = json.loads(body or "{}")
+            result = engine.deliver_service(delivery_data)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Service delivery failed: {str(e)}")
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            customer_data = json.loads(body or "{}")
+            result = engine.onboard_customer(customer_data)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Customer onboarding failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
