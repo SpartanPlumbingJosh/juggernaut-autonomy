@@ -162,6 +162,48 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment checkout request."""
+    try:
+        from api.payment_processor import PaymentProcessor
+        processor = PaymentProcessor(query_db)
+        
+        required_fields = ['price_id', 'customer_email']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+            
+        result = await processor.create_checkout_session(
+            body['price_id'],
+            body['customer_email'],
+            body.get('metadata', {})
+        )
+        
+        if not result.get('success'):
+            return _error_response(500, result.get('error', 'Payment processing failed'))
+            
+        return _make_response(200, {
+            'checkout_url': result['url'],
+            'session_id': result['session_id']
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_payment_webhook(headers: Dict[str, Any], body: bytes) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        from api.payment_processor import PaymentProcessor
+        processor = PaymentProcessor(query_db)
+        
+        sig_header = headers.get('stripe-signature', '')
+        result = await processor.handle_webhook(body, sig_header)
+        
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Webhook processing failed'))
+            
+        return _make_response(200, {'status': 'processed'})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +273,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_payment_checkout(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(query_params, body.encode() if body else b'')
     
     return _error_response(404, "Not found")
 
