@@ -469,3 +469,109 @@ def get_tool_schemas(categories: List[str] = None) -> List[Dict[str, Any]]:
 def get_tool_names() -> List[str]:
     """Get list of available tool names."""
     return [tool["function"]["name"] for tool in BRAIN_TOOLS]
+"""
+MCP Tool Schemas for Customer Acquisition Pipeline
+"""
+from typing import List, Dict, Any
+
+def get_tool_schemas() -> List[Dict[str, Any]]:
+    """Get all tool schemas including customer acquisition tools."""
+    base_tools = [
+        # ... existing tools ...
+    ]
+    
+    acquisition_tools = [
+        {
+            "name": "seo_content_generate",
+            "description": "Generate SEO-optimized content for customer acquisition",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "topic": {"type": "string", "description": "Primary topic/keyword"},
+                    "target_keywords": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of target keywords to include"
+                    },
+                    "word_count": {
+                        "type": "integer",
+                        "description": "Target word count",
+                        "default": 1500
+                    },
+                    "tone": {
+                        "type": "string",
+                        "enum": ["professional", "conversational", "authoritative"],
+                        "default": "professional"
+                    }
+                },
+                "required": ["topic", "target_keywords"]
+            }
+        },
+        {
+            "name": "ad_campaign_manage",
+            "description": "Create or optimize ad campaigns",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "campaign_name": {"type": "string", "description": "Campaign identifier"},
+                    "platform": {
+                        "type": "string",
+                        "enum": ["google", "facebook", "linkedin", "twitter"],
+                        "description": "Advertising platform"
+                    },
+                    "daily_budget": {
+                        "type": "number",
+                        "description": "Daily budget in USD"
+                    },
+                    "target_metrics": {
+                        "type": "object",
+                        "description": "Key performance targets",
+                        "properties": {
+                            "cpa": {"type": "number", "description": "Target cost per acquisition"},
+                            "roas": {"type": "number", "description": "Target return on ad spend"},
+                            "ctr": {"type": "number", "description": "Target click-through rate"}
+                        }
+                    },
+                    "creative_assets": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "URLs to creative assets"
+                    }
+                },
+                "required": ["campaign_name", "platform", "daily_budget"]
+            }
+        },
+        {
+            "name": "onboarding_flow_optimize",
+            "description": "Optimize self-serve onboarding flow with A/B tests",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "flow_name": {"type": "string", "description": "Onboarding flow identifier"},
+                    "variants": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string"},
+                                "changes": {"type": "string"}
+                            }
+                        },
+                        "description": "Test variants to compare"
+                    },
+                    "primary_metric": {
+                        "type": "string",
+                        "enum": ["conversion_rate", "time_to_value", "activation_rate"],
+                        "default": "conversion_rate"
+                    },
+                    "sample_size": {
+                        "type": "integer",
+                        "description": "Number of users to include in test"
+                    }
+                },
+                "required": ["flow_name", "variants"]
+            }
+        }
+    ]
+    
+    return base_tools + acquisition_tools
