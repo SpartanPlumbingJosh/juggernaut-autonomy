@@ -33,6 +33,57 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+from auth.users import create_user, authenticate_user
+from payment.stripe import create_checkout_session
+from fastapi import Request, HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+def get_current_user(token: str = Depends(oauth2_scheme)):
+    """Get current authenticated user."""
+    # Verify and decode user token
+    # Implementation depends on your auth system
+    pass
+
+async def handle_create_account(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new user account creation."""
+    email = body.get("email")
+    password = body.get("password")
+    if not email or not password:
+        return _error_response(400, "Email and password required")
+
+    result = await create_user(email, password)
+    if "error" in result:
+        return _error_response(400, result["error"])
+
+    return _make_response(201, {"success": True, "user_id": result["user_id"]})
+
+async def handle_login(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle user login."""
+    email = body.get("email")
+    password = body.get("password")
+    if not email or not password:
+        return _error_response(400, "Email and password required")
+
+    user = await authenticate_user(email, password)
+    if not user:
+        return _error_response(401, "Invalid credentials")
+
+    # Generate and return auth token
+    return _make_response(200, {"success": True, "token": "generated_token"})
+
+async def handle_create_subscription(
+    user_id: str, 
+    product_id: str, 
+    price_id: str
+) -> Dict[str, Any]:
+    """Create Stripe subscription checkout session."""
+    result = await create_checkout_session(product_id, price_id, user_id)
+    if "error" in result:
+        return _error_response(400, result["error"])
+    return _make_response(200, result)
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
