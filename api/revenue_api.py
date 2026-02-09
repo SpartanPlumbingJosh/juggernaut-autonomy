@@ -162,6 +162,31 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_order(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create and process a new order."""
+    try:
+        from fulfillment.automation import FulfillmentAutomation
+        
+        # Validate required fields
+        required_fields = ["customer_email", "items", "total_cents"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+            
+        # Process order
+        automation = FulfillmentAutomation()
+        result = await automation.process_order(body)
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Order processing failed"))
+            
+        return _make_response(200, {
+            "order_id": result["order_id"],
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Order processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +256,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /orders
+    if len(parts) == 1 and parts[0] == "orders" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return await handle_create_order(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
