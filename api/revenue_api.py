@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Manage subscriptions
+- POST /revenue/invoices - Generate invoices
+- POST /revenue/payments - Process payments
 """
 
 import json
@@ -162,6 +165,93 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_management(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation/updates."""
+    try:
+        from payment.payment_processor import PaymentProcessor
+        
+        action = body.get("action")
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        payment_method_id = body.get("payment_method_id")
+        
+        if not all([action, customer_id, plan_id, payment_method_id]):
+            return _error_response(400, "Missing required fields")
+            
+        processor = PaymentProcessor(api_key="your_stripe_api_key")
+        
+        if action == "create":
+            result = processor.create_subscription(
+                customer_id=customer_id,
+                plan_id=plan_id,
+                payment_method_id=payment_method_id,
+                trial_days=body.get("trial_days", 0)
+            )
+        elif action == "cancel":
+            # Implementation for cancel would go here
+            result = {"success": False, "error": "Not implemented"}
+        else:
+            return _error_response(400, "Invalid action")
+            
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Subscription operation failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription operation failed: {str(e)}")
+
+
+async def handle_invoice_generation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate and retrieve invoices."""
+    try:
+        from payment.payment_processor import PaymentProcessor
+        
+        subscription_id = body.get("subscription_id")
+        if not subscription_id:
+            return _error_response(400, "Missing subscription_id")
+            
+        processor = PaymentProcessor(api_key="your_stripe_api_key")
+        result = processor.generate_invoice(subscription_id)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Invoice generation failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Invoice generation failed: {str(e)}")
+
+
+async def handle_payment_processing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process one-time payments."""
+    try:
+        from payment.payment_processor import PaymentProcessor
+        
+        amount = body.get("amount")
+        currency = body.get("currency", "usd")
+        payment_method_id = body.get("payment_method_id")
+        
+        if not all([amount, payment_method_id]):
+            return _error_response(400, "Missing required fields")
+            
+        processor = PaymentProcessor(api_key="your_stripe_api_key")
+        result = processor.process_payment(
+            amount=int(amount),
+            currency=currency,
+            payment_method_id=payment_method_id,
+            customer_id=body.get("customer_id")
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment processing failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +321,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_management(json.loads(body or "{}"))
+    
+    # POST /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "POST":
+        return handle_invoice_generation(json.loads(body or "{}"))
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_payment_processing(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
