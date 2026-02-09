@@ -5,16 +5,37 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
+from core.content_generator import ContentGenerator
+from core.delivery_system import DeliverySystem
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
-def generate_revenue_ideas(
-    execute_sql: Callable[[str], Dict[str, Any]],
-    log_action: Callable[..., Any],
-    context: Optional[Dict[str, Any]] = None,
-    limit: int = 5,
-) -> Dict[str, Any]:
+class RevenueAutomation:
+    """Automated revenue generation system"""
+    
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]):
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        self.max_retries = 3
+        self.retry_delay = 5  # seconds
+        
+    async def _execute_with_retry(self, sql: str) -> Dict[str, Any]:
+        """Execute SQL with retry logic"""
+        for attempt in range(self.max_retries):
+            try:
+                return await self.execute_sql(sql)
+            except Exception as e:
+                if attempt == self.max_retries - 1:
+                    raise
+                time.sleep(self.retry_delay)
+        return {}
+        
+    def generate_revenue_ideas(
+        self,
+        context: Optional[Dict[str, Any]] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
