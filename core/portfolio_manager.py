@@ -276,6 +276,72 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def generate_revenue_report(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Generate automated revenue report."""
+    try:
+        # Get current month revenue
+        month_start = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        result = await query_db(f"""
+            SELECT 
+                SUM(amount_cents) as revenue_cents,
+                COUNT(*) as transaction_count
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+            AND recorded_at >= '{month_start.isoformat()}'
+        """)
+        month_data = result.get("rows", [{}])[0]
+        
+        # Get subscription metrics
+        subs_result = await query_db("""
+            SELECT 
+                COUNT(*) as active_subscriptions,
+                SUM((metadata->>'amount')::numeric) as mrr_cents
+            FROM subscriptions
+            WHERE status = 'active'
+        """)
+        subs_data = subs_result.get("rows", [{}])[0]
+        
+        # Get top performing experiments
+        experiments_result = await query_db("""
+            SELECT 
+                e.name,
+                SUM(re.amount_cents) as revenue_cents
+            FROM experiments e
+            JOIN revenue_events re ON re.attribution->>'experiment_id' = e.id::text
+            WHERE re.event_type = 'revenue'
+            GROUP BY e.name
+            ORDER BY revenue_cents DESC
+            LIMIT 5
+        """)
+        top_experiments = experiments_result.get("rows", [])
+        
+        report = {
+            "monthly_revenue": month_data.get("revenue_cents", 0) / 100,
+            "transaction_count": month_data.get("transaction_count", 0),
+            "active_subscriptions": subs_data.get("active_subscriptions", 0),
+            "mrr": subs_data.get("mrr_cents", 0) / 100,
+            "top_experiments": top_experiments,
+            "report_date": datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Store report
+        await query_db(f"""
+            INSERT INTO revenue_reports (
+                id, report_data, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{json.dumps(report)}'::jsonb,
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, report)
+    except Exception as e:
+        return _error_response(500, f"Failed to generate revenue report: {str(e)}")
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

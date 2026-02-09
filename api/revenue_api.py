@@ -5,10 +5,14 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Payment processor webhook handler
+- GET /revenue/goal-progress - Progress toward $8M goal
+- GET /revenue/subscriptions - Active subscriptions overview
 """
 
 import json
 from datetime import datetime, timezone, timedelta
+from dateutil.relativedelta import relativedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -162,6 +166,91 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_webhook_event(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    try:
+        event_type = event_data.get("type")
+        payload = event_data.get("data", {})
+        
+        # Handle different event types
+        if event_type == "payment.succeeded":
+            amount_cents = int(float(payload.get("amount")) * 100)
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {amount_cents},
+                    '{payload.get("currency", "USD")}',
+                    '{payload.get("source", "payment_processor")}',
+                    '{json.dumps(payload)}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+        elif event_type == "subscription.created":
+            await query_db(f"""
+                INSERT INTO subscriptions (
+                    id, customer_id, plan_id, status,
+                    current_period_start, current_period_end,
+                    created_at, updated_at, metadata
+                ) VALUES (
+                    gen_random_uuid(),
+                    '{payload.get("customer_id")}',
+                    '{payload.get("plan_id")}',
+                    'active',
+                    NOW(),
+                    NOW() + INTERVAL '1 month',
+                    NOW(),
+                    NOW(),
+                    '{json.dumps(payload)}'::jsonb
+                )
+            """)
+            
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+async def handle_goal_progress() -> Dict[str, Any]:
+    """Get progress toward $8M revenue goal."""
+    try:
+        # Get total revenue
+        result = await query_db("""
+            SELECT SUM(amount_cents) as total_revenue_cents
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+        """)
+        total_revenue = result.get("rows", [{}])[0].get("total_revenue_cents", 0) / 100
+        
+        # Calculate progress
+        goal = 8000000
+        progress = (total_revenue / goal) * 100
+        remaining = goal - total_revenue
+        
+        # Get monthly breakdown
+        monthly_result = await query_db("""
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) as revenue_cents
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+            GROUP BY DATE_TRUNC('month', recorded_at)
+            ORDER BY month DESC
+        """)
+        monthly_data = monthly_result.get("rows", [])
+        
+        return _make_response(200, {
+            "total_revenue": total_revenue,
+            "goal": goal,
+            "progress": progress,
+            "remaining": remaining,
+            "monthly_breakdown": monthly_data
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch goal progress: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +320,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook_event(json.loads(body or "{}"))
+    
+    # GET /revenue/goal-progress
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "goal-progress" and method == "GET":
+        return handle_goal_progress()
+    
+    # GET /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        return handle_subscriptions_overview()
     
     return _error_response(404, "Not found")
 
