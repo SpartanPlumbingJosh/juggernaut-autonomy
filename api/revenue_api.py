@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from auth.auth_service import create_access_token, decode_token, verify_password
+from payment.payment_service import PaymentService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +35,21 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_auth(email: str, password: str) -> Dict[str, Any]:
+    """Handle user authentication"""
+    # Verify user credentials
+    user = await query_db(f"SELECT * FROM users WHERE email = '{email}'")
+    if not user or not verify_password(password, user.get("password_hash")):
+        return _error_response(401, "Invalid credentials")
+    
+    # Create access token
+    access_token = create_access_token(
+        data={"sub": user["email"]},
+        expires_delta=timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
+    return _make_response(200, {"access_token": access_token, "token_type": "bearer"})
+
+async def handle_revenue_summary(token: Optional[str] = None) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -209,6 +225,31 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def handle_create_subscription(user_id: str, plan_id: str) -> Dict[str, Any]:
+    """Create a new subscription"""
+    payment_service = PaymentService()
+    
+    # Get user details
+    user = await query_db(f"SELECT * FROM users WHERE id = '{user_id}'")
+    if not user:
+        return _error_response(404, "User not found")
+    
+    # Create Stripe customer if not exists
+    if not user.get("stripe_customer_id"):
+        customer = payment_service.create_customer(user["email"], user["name"])
+        await query_db(f"UPDATE users SET stripe_customer_id = '{customer.id}' WHERE id = '{user_id}'")
+    
+    # Create subscription
+    subscription = payment_service.create_subscription(
+        user["stripe_customer_id"],
+        plan_id
+    )
+    
+    return _make_response(200, {
+        "subscription_id": subscription.id,
+        "status": subscription.status
+    })
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
