@@ -3,8 +3,9 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/marketing - Marketing campaign metrics
 """
 
 import json
@@ -162,6 +163,59 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_marketing(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get marketing campaign ROI and conversion metrics."""
+    try:
+        days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        # Marketing campaign performance
+        sql = f"""
+        SELECT 
+            mc.id as campaign_id,
+            mc.name as campaign_name,
+            COUNT(l.id) as leads_generated,
+            COUNT(c.id) as conversions,
+            COALESCE(SUM(c.revenue_cents), 0) as revenue_cents,
+            COALESCE(SUM(c.revenue_cents)/100.0/NULLIF(COUNT(l.id),0), 0) as rev_per_lead,
+            mc.budget as spend_cents,
+            COALESCE(SUM(c.revenue_cents)/NULLIF(mc.budget,0), 0) as roi
+        FROM marketing_campaigns mc
+        LEFT JOIN leads l ON l.campaign_id = mc.id
+        LEFT JOIN conversions c ON c.lead_id = l.id
+        WHERE mc.created_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY mc.id, mc.name, mc.budget
+        ORDER BY roi DESC NULLS LAST
+        """
+        
+        result = await query_db(sql)
+        campaign_data = result.get("rows", [])
+        
+        # Lead funnel metrics
+        funnel_sql = f"""
+        SELECT 
+            status,
+            COUNT(*) as count,
+            COUNT(*) FILTER (WHERE created_at >= date_trunc('day', NOW())) as today,
+            ROUND(COUNT(*)/NULLIF(SUM(COUNT(*)) OVER(), 0)*100, 1) as pct
+        FROM leads
+        WHERE created_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY status
+        ORDER BY count DESC
+        """
+        
+        funnel_result = await query_db(funnel_sql)
+        funnel_data = funnel_result.get("rows", [])
+        
+        return _make_response(200, {
+            "campaigns": campaign_data,
+            "funnel": funnel_data,
+            "period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch marketing data: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +285,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/marketing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "marketing" and method == "GET":
+        return handle_revenue_marketing(query_params)
     
     return _error_response(404, "Not found")
 
