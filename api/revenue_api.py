@@ -8,10 +8,16 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize payment processor
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -114,8 +120,22 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+async def capture_payment(payment_intent_id: str) -> Dict[str, Any]:
+    """Securely capture payment with retry logic."""
+    try:
+        payment = stripe.PaymentIntent.capture(payment_intent_id)
+        return {
+            "status": payment.status,
+            "amount": payment.amount,
+            "currency": payment.currency,
+            "payment_method": payment.payment_method
+        }
+    except stripe.error.StripeError as e:
+        raise e
+
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get and process transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
