@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.stripe_payments import StripePaymentService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,8 +211,45 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment creation request."""
+    try:
+        amount = int(body.get('amount') * 100)  # Convert to cents
+        currency = body.get('currency', 'usd')
+        metadata = body.get('metadata', {})
+        
+        payment_service = StripePaymentService()
+        result = await payment_service.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        
+        if result.get('success'):
+            return _make_response(200, {
+                "client_secret": result['client_secret'],
+                "payment_id": result['payment_intent_id']
+            })
+        return _error_response(400, result.get('error'))
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_payment_webhook(body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        sig_header = headers.get('stripe-signature', '')
+        payment_service = StripePaymentService()
+        result = await payment_service.handle_webhook(body, sig_header)
+        
+        if result.get('success'):
+            return _make_response(200, {"status": "processed"})
+        return _error_response(400, result.get('error'))
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,6 +269,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "create" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_dict = json.loads(body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+        return handle_create_payment(body_dict)
+    
+    # POST /revenue/payment/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_payment_webhook(body.encode(), headers)
     
     return _error_response(404, "Not found")
 
