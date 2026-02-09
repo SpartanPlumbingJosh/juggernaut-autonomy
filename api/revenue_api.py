@@ -39,6 +39,17 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         now = datetime.now(timezone.utc)
         
         # Calculate period boundaries
+        # Get subscription metrics
+        sub_metrics = await query_db("""
+            SELECT 
+                COUNT(*) as active_subscriptions,
+                SUM(p.amount_cents) as mrr_cents
+            FROM subscriptions s
+            JOIN billing_plans p ON s.plan_id = p.id
+            WHERE s.status = 'active'
+              AND s.end_date >= NOW()
+        """)
+        subs = sub_metrics.get("rows", [{}])[0]
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         quarter_month = ((now.month - 1) // 3) * 3 + 1
         quarter_start = now.replace(month=quarter_month, day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -107,6 +118,10 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
+            },
+            "subscriptions": {
+                "active_count": subs.get("active_subscriptions") or 0,
+                "mrr_cents": subs.get("mrr_cents") or 0
             }
         })
         
