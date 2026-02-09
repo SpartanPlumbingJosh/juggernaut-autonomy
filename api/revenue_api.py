@@ -1,15 +1,20 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /payment/customer - Create payment customer
+- POST /payment/subscription - Create subscription
+- POST /payment/invoice - Generate invoice
+- POST /payment/webhook - Process payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from .payment_processor import PaymentProcessor
 
 from core.database import query_db
 
@@ -232,7 +237,84 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # Payment processing endpoints
+    if len(parts) == 2 and parts[0] == "payment":
+        if parts[1] == "customer" and method == "POST":
+            return await handle_create_customer(json.loads(body or "{}"))
+        if parts[1] == "subscription" and method == "POST":
+            return await handle_create_subscription(json.loads(body or "{}"))
+        if parts[1] == "invoice" and method == "POST":
+            return await handle_generate_invoice(json.loads(body or "{}"))
+        if parts[1] == "webhook" and method == "POST":
+            return await handle_payment_webhook(json.loads(body or "{}"), query_params)
+    
     return _error_response(404, "Not found")
+
+async def handle_create_customer(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new payment customer."""
+    try:
+        required = ['email', 'name', 'payment_method']
+        if not all(payload.get(field) for field in required):
+            return _error_response(400, "Missing required fields")
+        
+        customer = await PaymentProcessor.create_customer(
+            email=payload['email'],
+            name=payload['name'],
+            payment_method=payload['payment_method']
+        )
+        return _make_response(201, customer)
+    except Exception as e:
+        return _error_response(500, f"Failed to create customer: {str(e)}")
+
+async def handle_create_subscription(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        required = ['customer_id', 'plan_id', 'payment_method']
+        if not all(payload.get(field) for field in required):
+            return _error_response(400, "Missing required fields")
+        
+        subscription = await PaymentProcessor.create_subscription(
+            customer_id=payload['customer_id'],
+            plan_id=payload['plan_id'],
+            payment_method=payload['payment_method'],
+            metadata=payload.get('metadata')
+        )
+        return _make_response(201, subscription)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_generate_invoice(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate an invoice."""
+    try:
+        required = ['customer_id', 'items', 'payment_method']
+        if not all(payload.get(field) for field in required):
+            return _error_response(400, "Missing required fields")
+        
+        invoice = await PaymentProcessor.generate_invoice(
+            customer_id=payload['customer_id'],
+            items=payload['items'],
+            payment_method=payload['payment_method']
+        )
+        return _make_response(201, invoice)
+    except Exception as e:
+        return _error_response(500, f"Failed to generate invoice: {str(e)}")
+
+async def handle_payment_webhook(payload: Dict[str, Any], query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook."""
+    try:
+        sig_header = query_params.get('stripe-signature', [''])[0]
+        endpoint_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+        
+        success = await PaymentProcessor.handle_webhook(
+            payload=payload,
+            sig_header=sig_header,
+            endpoint_secret=endpoint_secret
+        )
+        if success:
+            return _make_response(200, {"status": "processed"})
+        return _error_response(400, "Webhook processing failed")
+    except Exception as e:
+        return _error_response(500, f"Webhook error: {str(e)}")
 
 
 __all__ = ["route_request"]
