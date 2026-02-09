@@ -1,13 +1,17 @@
 """
 Revenue API - Expose revenue tracking data to Spartan HQ.
+Now integrated with automated billing system.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /billing/charge - Process payment
+- POST /billing/subscription - Manage subscriptions
 """
 
 import json
+from billing.service import BillingService
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -162,6 +166,38 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_billing_charge(event: Dict) -> Dict[str, Any]:
+    """Process a payment charge."""
+    try:
+        bs = BillingService()
+        result = await bs.create_charge(
+            amount=event['amount'],
+            customer_id=event['customer_id'],
+            description=event.get('description', '')
+        )
+        return _make_response(200 if result['success'] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Payment failed: {str(e)}")
+
+async def handle_subscription(event: Dict) -> Dict[str, Any]:
+    """Handle subscription management."""
+    try:
+        bs = BillingService()
+        action = event.get('action', 'create')
+        
+        if action == 'create':
+            result = await bs.create_subscription(
+                plan_id=event['plan_id'],
+                customer_id=event['customer_id'],
+                payment_method_id=event['payment_method_id']
+            )
+        else:
+            result = {'error': 'Invalid action'}
+            
+        return _make_response(200 if result.get('success') else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +267,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /billing/charge
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "charge" and method == "POST":
+        return handle_billing_charge(json.loads(body or '{}'))
+
+    # POST /billing/subscription
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscription" and method == "POST":
+        return handle_subscription(json.loads(body or '{}'))
     
     return _error_response(404, "Not found")
 
