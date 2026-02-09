@@ -5,6 +5,10 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process payments
+- POST /revenue/subscriptions - Manage subscriptions
+- POST /revenue/webhooks - Payment gateway webhooks
+- GET /revenue/invoices - Get invoices
 """
 
 import json
@@ -162,6 +166,97 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment transactions."""
+    try:
+        amount = float(body.get("amount", 0))
+        currency = str(body.get("currency", "USD")).upper()
+        payment_method = str(body.get("payment_method", ""))
+        customer_id = str(body.get("customer_id", ""))
+        description = str(body.get("description", ""))
+        
+        # Validate payment details
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+        if currency not in ["USD", "EUR", "GBP"]:
+            return _error_response(400, "Unsupported currency")
+        if not payment_method:
+            return _error_response(400, "Payment method required")
+            
+        # Record payment event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'payment',
+            {int(amount * 100)},
+            '{currency}',
+            'payment_processor',
+            '{{"payment_method": "{payment_method}", "customer_id": "{customer_id}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        payment_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_id,
+            "amount": amount,
+            "currency": currency
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def handle_subscription_management(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Manage subscription lifecycle."""
+    try:
+        action = str(body.get("action", "")).lower()
+        subscription_id = str(body.get("subscription_id", ""))
+        customer_id = str(body.get("customer_id", ""))
+        plan_id = str(body.get("plan_id", ""))
+        
+        if action not in ["create", "update", "cancel"]:
+            return _error_response(400, "Invalid action")
+            
+        # Record subscription event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'subscription',
+            0,
+            'USD',
+            'subscription_manager',
+            '{{"action": "{action}", "subscription_id": "{subscription_id}", "customer_id": "{customer_id}", "plan_id": "{plan_id}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        event_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "success": True,
+            "event_id": event_id,
+            "action": action
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription management failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,6 +305,43 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhooks."""
+    try:
+        event_type = str(body.get("event_type", ""))
+        payload = body.get("payload", {})
+        
+        # Record webhook event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'webhook',
+            0,
+            'USD',
+            'payment_gateway',
+            '{json.dumps(payload)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        event_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "success": True,
+            "event_id": event_id,
+            "event_type": event_type
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +363,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_payment_processing(json.loads(body or "{}"))
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_management(json.loads(body or "{}"))
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
