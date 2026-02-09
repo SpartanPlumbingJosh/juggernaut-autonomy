@@ -9,6 +9,8 @@ Endpoints:
 
 import json
 from datetime import datetime, timezone, timedelta
+import hmac
+import hashlib
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -210,12 +212,69 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+def _verify_webhook_signature(signature: str, payload: str, secret: str) -> bool:
+    """Verify payment webhook signature."""
+    if not signature or not payload or not secret:
+        return False
+    expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(signature, expected)
+
+def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    try:
+        # Verify signature
+        signature = body.get("signature")
+        payload = body.get("payload")
+        if not _verify_webhook_signature(signature, payload, os.getenv("PAYMENT_WEBHOOK_SECRET")):
+            return _error_response(401, "Invalid signature")
+            
+        # Parse payment event
+        event = json.loads(payload)
+        amount_cents = int(float(event.get("amount")) * 100)
+        currency = event.get("currency", "USD")
+        source = event.get("source", "payment_processor")
+        metadata = {
+            "payment_id": event.get("id"),
+            "customer": event.get("customer"),
+            "product": event.get("product"),
+            "timestamp": event.get("timestamp")
+        }
+        
+        # Record revenue event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            '{source}',
+            '{json.dumps(metadata)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Handle payment webhooks
+    if path == "/webhooks/payments" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing webhook payload")
+        return handle_payment_webhook(json.loads(body))
     
     # Parse path
     parts = [p for p in path.split("/") if p]
