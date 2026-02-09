@@ -228,6 +228,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
         return handle_revenue_transactions(query_params)
     
+    # GET /revenue/dashboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "dashboard" and method == "GET":
+        return handle_revenue_dashboard()
+    
+    # GET /revenue/projection
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "projection" and method == "GET":
+        return handle_revenue_projection()
+    
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
