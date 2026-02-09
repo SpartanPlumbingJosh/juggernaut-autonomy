@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.strategy_executor import StrategyExecutor
 
 
 def generate_revenue_ideas(
@@ -181,7 +182,7 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
-def start_experiments_from_top_ideas(
+async def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     max_new: int = 1,
@@ -228,12 +229,24 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
-        create_res = create_experiment_from_idea(
-            execute_sql=execute_sql,
-            log_action=log_action,
-            idea=idea,
-            budget=budget,
-        )
+        strategy_executor = StrategyExecutor(execute_sql, log_action)
+        
+        # Execute appropriate strategy based on idea type
+        strategy_type = idea.get("strategy_type", "experiment")
+        if strategy_type == "freelance":
+            strategy_result = await strategy_executor.execute_freelance_strategy(idea)
+        elif strategy_type == "arbitrage":
+            strategy_result = await strategy_executor.execute_arbitrage_strategy(idea)
+        elif strategy_type == "digital_product":
+            strategy_result = await strategy_executor.execute_digital_product_strategy(idea)
+        else:
+            # Default to experiment strategy
+            strategy_result = create_experiment_from_idea(
+                execute_sql=execute_sql,
+                log_action=log_action,
+                idea=idea,
+                budget=budget,
+            )
         if not create_res.get("success"):
             failures.append({"idea_id": idea_id, "error": str(create_res.get("error") or "unknown")[:200]})
             continue
