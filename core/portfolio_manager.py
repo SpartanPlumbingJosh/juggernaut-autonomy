@@ -276,6 +276,47 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def monitor_system_health(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Monitor and heal system components."""
+    try:
+        # Check payment processing health
+        payment_health = execute_sql("""
+            SELECT COUNT(*) as count,
+                   SUM(CASE WHEN recorded_at > NOW() - INTERVAL '1 hour' THEN 1 ELSE 0 END) as recent_count
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+        """).get("rows", [{}])[0]
+        
+        if payment_health.get("recent_count", 0) == 0:
+            log_action("system.health.payment", "No recent payments detected", level="warning")
+            # TODO: Implement auto-remediation for payment processing
+
+        # Check experiment throughput
+        experiment_health = execute_sql("""
+            SELECT COUNT(*) as active_count,
+                   AVG(EXTRACT(EPOCH FROM (NOW() - start_date))/3600) as avg_age_hours
+            FROM experiments
+            WHERE status = 'running'
+        """).get("rows", [{}])[0]
+        
+        if experiment_health.get("active_count", 0) < 3:
+            log_action("system.health.experiments", "Low experiment count, generating new ideas", level="info")
+            generate_revenue_ideas(execute_sql, log_action, limit=5)
+            score_pending_ideas(execute_sql, log_action, limit=5)
+            start_experiments_from_top_ideas(execute_sql, log_action, max_new=3)
+
+        return {
+            "success": True,
+            "payment_health": payment_health,
+            "experiment_health": experiment_health
+        }
+    except Exception as e:
+        log_action("system.health.error", f"Health check failed: {str(e)}", level="error")
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
