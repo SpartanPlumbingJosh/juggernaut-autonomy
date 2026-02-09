@@ -162,6 +162,52 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_autonomous_revenue_status() -> Dict[str, Any]:
+    """Get status of autonomous revenue systems."""
+    try:
+        # Get trading stats
+        trading_result = await query_db("""
+            SELECT 
+                SUM(CASE WHEN event_type = 'trade' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+                COUNT(*) FILTER (WHERE event_type = 'trade') as trade_count,
+                MIN(recorded_at) as first_trade,
+                MAX(recorded_at) as last_trade
+            FROM revenue_events
+            WHERE source = 'trading'
+        """)
+        trading_stats = trading_result.get("rows", [{}])[0]
+        
+        # Get data marketplace stats
+        data_result = await query_db("""
+            SELECT 
+                SUM(CASE WHEN event_type = 'data_sale' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+                COUNT(*) FILTER (WHERE event_type = 'data_sale') as sale_count,
+                MIN(recorded_at) as first_sale,
+                MAX(recorded_at) as last_sale
+            FROM revenue_events
+            WHERE source = 'data_marketplace'
+        """)
+        data_stats = data_result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "trading": {
+                "total_revenue_cents": trading_stats.get("total_revenue_cents") or 0,
+                "trade_count": trading_stats.get("trade_count") or 0,
+                "first_trade": trading_stats.get("first_trade"),
+                "last_trade": trading_stats.get("last_trade")
+            },
+            "data_marketplace": {
+                "total_revenue_cents": data_stats.get("total_revenue_cents") or 0,
+                "sale_count": data_stats.get("sale_count") or 0,
+                "first_sale": data_stats.get("first_sale"),
+                "last_sale": data_stats.get("last_sale")
+            }
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch autonomous revenue status: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +277,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/autonomous
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "autonomous" and method == "GET":
+        return handle_autonomous_revenue_status()
     
     return _error_response(404, "Not found")
 
