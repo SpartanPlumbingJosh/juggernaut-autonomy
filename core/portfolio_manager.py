@@ -3,10 +3,16 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import logging
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from services.stripe_integration import StripeService
+from services.user_auth import UserAuthService
+from services.delivery_service import DeliveryService
+
+logger = logging.getLogger(__name__)
 
 
 def generate_revenue_ideas(
