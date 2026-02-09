@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.billing_system import BillingSystem
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -216,6 +217,9 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Initialize billing system
+    billing_system = BillingSystem()
     
     # Parse path
     parts = [p for p in path.split("/") if p]

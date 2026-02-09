@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.acquisition_pipeline import AcquisitionPipeline
 
 
 def generate_revenue_ideas(
@@ -14,10 +15,19 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    acquisition_pipeline: Optional[AcquisitionPipeline] = None,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Enhance ideas with acquisition pipeline data
+    if acquisition_pipeline:
+        for idea in ideas:
+            acquisition_data = acquisition_pipeline.analyze_idea(idea)
+            idea['acquisition_strategy'] = acquisition_data.get('strategy')
+            idea['acquisition_channels'] = acquisition_data.get('channels')
+            idea['estimated_cac'] = acquisition_data.get('cac')
 
     created = 0
     failures: List[Dict[str, Any]] = []
