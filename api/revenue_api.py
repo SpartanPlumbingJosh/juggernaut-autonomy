@@ -1,15 +1,20 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- GET /revenue/subscriptions - List subscriptions
+- POST /revenue/webhook/{gateway} - Handle payment gateway webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from core.payment_processor import PaymentProcessor
+from core.subscription_manager import SubscriptionManager
 
 from core.database import query_db
 
@@ -213,6 +218,17 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
+    # Initialize payment processor and subscription manager
+    payment_processor = PaymentProcessor({
+        'stripe_secret_key': 'sk_test_...',
+        'stripe_webhook_secret': 'whsec_...',
+        'paypal_client_id': '...',
+        'paypal_secret': '...',
+        'paypal_mode': 'live'
+    })
+    
+    subscription_manager = SubscriptionManager({}, payment_processor)
+    
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
@@ -231,6 +247,41 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return await subscription_manager.create_subscription(
+                data.get('customer_id'),
+                data.get('plan_id'),
+                data.get('payment_method')
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # GET /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        try:
+            customer_id = query_params.get('customer_id')
+            if customer_id:
+                subscriptions = await subscription_manager.get_customer_subscriptions(customer_id)
+                return _make_response(200, {'subscriptions': subscriptions})
+            return _error_response(400, "Missing customer_id")
+        except Exception as e:
+            return _error_response(500, f"Failed to get subscriptions: {str(e)}")
+    
+    # POST /revenue/webhook/{gateway}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        gateway = parts[2]
+        try:
+            payload = json.loads(body or "{}")
+            success = await payment_processor.handle_webhook(gateway, payload)
+            if success:
+                return _make_response(200, {'success': True})
+            return _error_response(400, 'Webhook processing failed')
+        except Exception as e:
+            return _error_response(500, f"Webhook error: {str(e)}")
     
     return _error_response(404, "Not found")
 
