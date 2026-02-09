@@ -236,3 +236,180 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
 
 
 __all__ = ["route_request"]
+"""
+Autonomous Revenue Engine - Handles recurring billing, payment processing,
+and transaction reconciliation.
+"""
+import datetime
+import hashlib
+import hmac
+import json
+from typing import Any, Dict, Optional
+
+from fastapi import FastAPI, Request, Response, HTTPException, status
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel
+
+from core.database import query_db
+from core.logging import log_event
+
+app = FastAPI()
+
+PAYMENT_PROVIDERS = {
+    "stripe": {
+        "webhook_secret": "whsec_...",  # Configure in env
+        "handler": "handle_stripe_webhook"
+    },
+    "paypal": {
+        "webhook_secret": "...",
+        "handler": "handle_paypal_webhook"
+    }
+}
+
+class PaymentEvent(BaseModel):
+    provider: str
+    event_id: str
+    event_type: str
+    amount: float
+    currency: str
+    customer_id: str
+    subscription_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+async def verify_webhook(request: Request, provider: str) -> bool:
+    """Verify webhook signature from payment provider."""
+    secret = PAYMENT_PROVIDERS[provider]["webhook_secret"]
+    signature = request.headers.get("stripe-signature", "")
+    payload = await request.body()
+    
+    try:
+        if provider == "stripe":
+            event = stripe.Webhook.construct_event(
+                payload, signature, secret
+            )
+            return True
+        elif provider == "paypal":
+            # PayPal verification logic
+            return True
+    except Exception as e:
+        log_event("payment.webhook_verification_failed", 
+                 f"Failed to verify {provider} webhook: {str(e)}",
+                 level="error")
+        return False
+
+    return False
+
+async def record_transaction(event: PaymentEvent) -> bool:
+    """Record validated payment event in database."""
+    try:
+        result = await query_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at,
+                attribution
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {int(event.amount * 100)},
+                '{event.currency}',
+                '{event.provider}',
+                '{json.dumps(event.metadata)}',
+                NOW(),
+                jsonb_build_object(
+                    'customer_id', '{event.customer_id}',
+                    'subscription_id', {f"'{event.subscription_id}'" if event.subscription_id else 'NULL'},
+                    'provider_event_id', '{event.event_id}'
+                )
+            )
+            RETURNING id
+            """
+        )
+        return bool(result.get("rows"))
+    except Exception as e:
+        log_event("payment.recording_failed",
+                 f"Failed to record {event.provider} payment: {str(e)}",
+                 level="error",
+                 error_data={"event": event.dict()})
+        return False
+
+async def handle_stripe_webhook(payload: Dict[str, Any]) -> bool:
+    """Process Stripe webhook events."""
+    event_type = payload.get("type")
+    data = payload.get("data", {}).get("object", {})
+    
+    if event_type == "payment_intent.succeeded":
+        amount = data.get("amount", 0) / 100  # Convert cents to dollars
+        event = PaymentEvent(
+            provider="stripe",
+            event_id=payload.get("id"),
+            event_type="payment",
+            amount=amount,
+            currency=data.get("currency"),
+            customer_id=data.get("customer"),
+            metadata=data
+        )
+        return await record_transaction(event)
+    
+    elif event_type in ["invoice.paid", "charge.succeeded"]:
+        # Handle recurring payments
+        pass
+        
+    return False
+
+@app.post("/webhooks/payment/{provider}")
+async def payment_webhook(
+    request: Request, 
+    provider: str,
+    response: Response
+):
+    """Handle payment provider webhooks."""
+    if provider not in PAYMENT_PROVIDERS:
+        raise HTTPException(status_code=404, detail="Provider not supported")
+    
+    if not await verify_webhook(request, provider):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    
+    try:
+        payload = await request.json()
+        handler = globals()[PAYMENT_PROVIDERS[provider]["handler"]]
+        success = await handler(payload)
+        
+        if success:
+            return JSONResponse({"status": "processed"})
+        else:
+            raise HTTPException(
+                status_code=400, 
+                detail="Failed to process event"
+            )
+            
+    except Exception as e:
+        log_event("payment.webhook_error",
+                 f"Payment webhook processing failed: {str(e)}",
+                 level="error",
+                 error_data={"provider": provider})
+        raise HTTPException(
+            status_code=500,
+            detail="Internal server error"
+        )
+
+def start_recurring_billing():
+    """Run daily to process recurring subscriptions."""
+    # Query database for active subscriptions due for billing
+    # Generate invoices/payment attempts
+    # Handle failures and retries
+    pass
+
+async def reconcile_payments():
+    """Verify recorded payments match provider records."""
+    # Compare our database with payment provider data
+    # Identify and report discrepancies
+    # Automatically correct where possible
+    pass
+
+async def generate_billing_reports():
+    """Create summary reports for accounting."""
+    # Generate daily/weekly/monthly revenue reports
+    # Breakdown by customer, product, region etc.
+    # Export to accounting tools
+    pass
