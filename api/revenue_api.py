@@ -162,6 +162,16 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_automated_billing() -> Dict[str, Any]:
+    """Trigger automated billing process."""
+    try:
+        from core.automated_billing import AutomatedBillingSystem
+        billing = AutomatedBillingSystem()
+        result = await billing.generate_invoices()
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process automated billing: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +241,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/automated-billing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "automated-billing" and method == "POST":
+        return handle_automated_billing()
     
     return _error_response(404, "Not found")
 

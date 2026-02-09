@@ -276,6 +276,34 @@ def start_experiments_from_top_ideas(
     return out
 
 
+async def process_automated_billing(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Process automated billing for all active subscriptions."""
+    try:
+        from core.automated_billing import AutomatedBillingSystem
+        billing = AutomatedBillingSystem()
+        result = await billing.generate_invoices()
+        
+        await log_action(
+            "billing.processed",
+            f"Processed {result.get('processed', 0)} invoices",
+            level="info",
+            output_data=result
+        )
+        
+        return result
+        
+    except Exception as e:
+        await log_action(
+            "billing.failed",
+            f"Failed to process billing: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
