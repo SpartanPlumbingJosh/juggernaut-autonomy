@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.marketing_funnel import MarketingFunnel
 
 
 def generate_revenue_ideas(
@@ -14,10 +15,40 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    include_marketing: bool = True,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    if include_marketing:
+        # Generate marketing-specific ideas
+        funnel = MarketingFunnel(execute_sql, log_action)
+        marketing_ideas = [
+            {
+                "title": "Automated Lead Nurturing Campaign",
+                "description": "AI-driven email sequences for lead conversion",
+                "hypothesis": "Automated nurturing will increase conversion by 20%",
+                "estimates": {
+                    "revenue_impact": 5000,
+                    "cost": 500,
+                    "time_to_implement": 7
+                },
+                "tags": ["marketing", "automation"]
+            },
+            {
+                "title": "Self-Service Onboarding Flow",
+                "description": "Automated onboarding to reduce sales team workload",
+                "hypothesis": "Self-service will reduce onboarding time by 50%",
+                "estimates": {
+                    "revenue_impact": 3000,
+                    "cost": 1000,
+                    "time_to_implement": 14
+                },
+                "tags": ["onboarding", "automation"]
+            }
+        ]
+        ideas.extend(marketing_ideas[:max(0, limit - len(ideas))])
 
     created = 0
     failures: List[Dict[str, Any]] = []
