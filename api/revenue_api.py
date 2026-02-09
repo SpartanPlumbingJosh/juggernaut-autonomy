@@ -1,10 +1,14 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and management data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/streams - Register new revenue stream
+- POST /revenue/onboard - Onboard new customer
+- POST /revenue/invoices - Generate invoice
+- POST /revenue/payments - Process payment
 """
 
 import json
@@ -12,6 +16,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_system import RevenueSystem
+
+revenue_system = RevenueSystem()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +238,31 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/streams
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "streams" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            revenue_system.register_stream(
+                stream_id=body_data.get("stream_id"),
+                stream_type=body_data.get("stream_type"),
+                config=body_data.get("config", {})
+            )
+            return _make_response(200, {"success": True})
+        except Exception as e:
+            return _error_response(500, f"Failed to register stream: {str(e)}")
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            stream = revenue_system.get_stream(body_data.get("stream_id"))
+            if not stream:
+                return _error_response(404, "Stream not found")
+            result = stream.onboard_customer(body_data.get("customer_data", {}))
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to onboard customer: {str(e)}")
     
     return _error_response(404, "Not found")
 
