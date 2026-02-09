@@ -162,6 +162,39 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_monitor(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get real-time monitoring data for revenue system."""
+    try:
+        # Get active experiments
+        experiments_sql = """
+        SELECT COUNT(*) as total,
+               SUM(budget_limit) as total_budget,
+               AVG(score) as avg_score
+        FROM experiments
+        WHERE status = 'running'
+        """
+        exp_result = await query_db(experiments_sql)
+        running_exps = exp_result.get("rows", [{}])[0]
+
+        # Get recent transactions
+        recent_sql = """
+        SELECT SUM(amount_cents) as revenue_cents
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+          AND recorded_at >= NOW() - INTERVAL '1 hour'
+        """
+        hourly_result = await query_db(recent_sql)
+        hourly = hourly_result.get("rows", [{}])[0]
+
+        return _make_response(200, {
+            "running_experiments": running_exps.get("total", 0),
+            "hourly_revenue_cents": hourly.get("revenue_cents", 0),
+            "total_budget": running_exps.get("total_budget", 0),
+            "average_score": running_exps.get("avg_score", 0)
+        })
+    except Exception as e:
+        return _error_response(500, f"Monitor error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -229,6 +262,9 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
         return handle_revenue_transactions(query_params)
     
     # GET /revenue/charts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitor" and method == "GET":
+        return handle_revenue_monitor(query_params)
+    
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     

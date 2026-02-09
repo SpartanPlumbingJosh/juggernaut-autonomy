@@ -276,8 +276,42 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def initialize_revenue_system(
     execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Initialize and automate the revenue generation system."""
+    try:
+        # Generate seed ideas
+        gen_result = generate_revenue_ideas(execute_sql, log_action, limit=50)
+        log_action("system.init", f"Generated {gen_result['created']} revenue ideas", level="info")
+
+        # Score automatically
+        score_result = score_pending_ideas(execute_sql, log_action, limit=50)
+        log_action("system.init", f"Scored {score_result['scored']} ideas", level="info")
+
+        # Start top experiments 
+        exp_result = start_experiments_from_top_ideas(
+            execute_sql,
+            log_action,
+            max_new=5,
+            min_score=70.0,
+            budget=1000.0
+        )
+        log_action("system.init", f"Started {exp_result['new_experiments']} experiments", level="info")
+
+        return {
+            "success": True,
+            "ideas_generated": gen_result["created"],
+            "ideas_scored": score_result["scored"],
+            "experiments_started": exp_result["new_experiments"]
+        }
+    except Exception as e:
+        log_action("system.init.error", f"Revenue system initialization failed: {str(e)}", level="error")
+        return {"success": False, "error": str(e)}
+
+def review_experiments_stub(
+    execute_sql: Callable[[str], Dict[str, Any]], 
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
     """Review running experiments and trigger learning loop for completed ones."""
