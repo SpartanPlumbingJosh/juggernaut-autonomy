@@ -34,7 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals and current automation status."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -112,6 +112,27 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
+
+async def handle_automation_status() -> Dict[str, Any]:
+    """Get current automation system status and metrics."""
+    try:
+        from automation.revenue_manager import RevenueManager
+        manager = RevenueManager()
+        
+        status = {
+            "automation_status": "paused" if manager.is_paused else "active",
+            "available_capital": manager.available_capital,
+            "uptime_minutes": (datetime.now(timezone.utc) - manager.start_time).total_seconds() / 60
+        }
+        
+        # Get latest profit metrics
+        profit_data = await manager.get_current_profit()
+        status.update(profit_data)
+        
+        return _make_response(200, status)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to get automation status: {str(e)}")
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +252,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # GET /revenue/automation/status
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "automation" and parts[2] == "status" and method == "GET":
+        return await handle_automation_status()
     
     return _error_response(404, "Not found")
 
