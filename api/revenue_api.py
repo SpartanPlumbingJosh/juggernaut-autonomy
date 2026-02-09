@@ -11,7 +11,21 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+import stripe
+import paypalrestsdk
+from dateutil.relativedelta import relativedelta
+from typing import AsyncGenerator
+from core.database import query_db, execute_db
+from core.exceptions import PaymentProcessingError
+from core.auth import validate_api_key
+
+# Configure payment processors
+stripe.api_key = os.getenv('STRIPE_API_KEY')
+paypalrestsdk.configure({
+    "mode": os.getenv('PAYPAL_MODE', 'sandbox'),
+    "client_id": os.getenv('PAYPAL_CLIENT_ID'),
+    "client_secret": os.getenv('PAYPAL_CLIENT_SECRET')
+})
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +176,87 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payments and record transactions."""
+    try:
+        # Validate API key from headers
+        api_key = payload.get('headers', {}).get('Authorization', '').replace('Bearer ', '')
+        if not validate_api_key(api_key):
+            return _error_response(401, "Unauthorized")
+
+        payment_data = json.loads(payload.get('body', '{}'))
+        processor = payment_data.get('processor', 'stripe')
+        amount = int(float(payment_data.get('amount', 0)) * 100)  # Convert to cents
+        currency = payment_data.get('currency', 'usd').lower()
+        customer_id = payment_data.get('customer_id')
+        description = payment_data.get('description', '')
+        metadata = payment_data.get('metadata', {})
+
+        if processor == 'stripe':
+            try:
+                payment = stripe.PaymentIntent.create(
+                    amount=amount,
+                    currency=currency,
+                    customer=customer_id,
+                    description=description,
+                    metadata=metadata,
+                    confirm=True,
+                    off_session=True
+                )
+                transaction_id = payment.id
+            except stripe.error.StripeError as e:
+                raise PaymentProcessingError(f"Stripe error: {str(e)}")
+                
+        elif processor == 'paypal':
+            try:
+                payment = paypalrestsdk.Payment({
+                    "intent": "sale",
+                    "payer": {"payment_method": "paypal"},
+                    "transactions": [{
+                        "amount": {
+                            "total": amount/100,
+                            "currency": currency.upper()
+                        },
+                        "description": description
+                    }],
+                    "redirect_urls": {
+                        "return_url": os.getenv('PAYPAL_RETURN_URL'),
+                        "cancel_url": os.getenv('PAYPAL_CANCEL_URL')
+                    }
+                })
+                if payment.create():
+                    transaction_id = payment.id
+                else:
+                    raise PaymentProcessingError(str(payment.error))
+            except Exception as e:
+                raise PaymentProcessingError(f"PayPal error: {str(e)}")
+
+        # Record transaction in database
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at
+            ) VALUES (
+                gen_random_uuid(), 'payment', {amount},
+                '{currency}', 'online_payment',
+                '{json.dumps(metadata)}'::jsonb, NOW()
+            )
+            """
+        )
+
+        return _make_response(200, {
+            "success": True,
+            "transaction_id": transaction_id,
+            "amount": amount/100,
+            "currency": currency
+        })
+    except PaymentProcessingError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -230,6 +325,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
+        return handle_revenue_charts(query_params)
+    
+    # POST /revenue/process-payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process-payment" and method == "POST":
+        return await handle_payment_processing({
+            "headers": headers,
+            "queryParams": query_params,
+            "body": body or "{}"
+        })
         return handle_revenue_charts(query_params)
     
     return _error_response(404, "Not found")
