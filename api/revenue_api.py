@@ -1,17 +1,22 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/customers - Create payment customer
+- POST /revenue/payments - Process payment
+- POST /revenue/subscriptions - Create subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+from payment.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +215,97 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_payment_webhook(body: str, headers: Dict) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        payload = json.loads(body) if isinstance(body, str) else body
+        sig_header = headers.get('stripe-signature', '')
+        processor = PaymentProcessor(execute_sql)
+        return await processor.handle_webhook(
+            payload=payload,
+            sig_header=sig_header,
+            webhook_secret=os.getenv('STRIPE_WEBHOOK_SECRET')
+        )
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+async def handle_create_customer(body: Dict) -> Dict[str, Any]:
+    """Create a new payment customer."""
+    try:
+        required_fields = ['email', 'name']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields: email, name")
+            
+        processor = PaymentProcessor(execute_sql)
+        result = await processor.create_customer(
+            email=body['email'],
+            name=body['name']
+        )
+        
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Failed to create customer'))
+            
+        return _make_response(200, {'customer_id': result['customer_id']})
+    except Exception as e:
+        return _error_response(500, f"Customer creation failed: {str(e)}")
+
+async def handle_create_payment(body: Dict) -> Dict[str, Any]:
+    """Process a payment."""
+    try:
+        required_fields = ['amount', 'currency', 'customer_id', 'description']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields: amount, currency, customer_id, description")
+            
+        processor = PaymentProcessor(execute_sql)
+        result = await processor.create_payment_intent(
+            amount=int(body['amount']),
+            currency=body['currency'],
+            customer_id=body['customer_id'],
+            description=body['description'],
+            metadata=body.get('metadata', {})
+        )
+        
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Payment processing failed'))
+            
+        return _make_response(200, {
+            'payment_intent_id': result['payment_intent_id'],
+            'client_secret': stripe.PaymentIntent.retrieve(
+                result['payment_intent_id']
+            ).client_secret
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_create_subscription(body: Dict) -> Dict[str, Any]:
+    """Create a subscription."""
+    try:
+        required_fields = ['customer_id', 'price_id']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields: customer_id, price_id")
+            
+        processor = PaymentProcessor(execute_sql)
+        result = await processor.create_subscription(
+            customer_id=body['customer_id'],
+            price_id=body['price_id'],
+            metadata=body.get('metadata', {})
+        )
+        
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Subscription creation failed'))
+            
+        return _make_response(200, {
+            'subscription_id': result['subscription_id'],
+            'payment_intent_id': result['payment_intent_id'],
+            'client_secret': stripe.PaymentIntent.retrieve(
+                result['payment_intent_id']
+            ).client_secret
+        })
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], 
+                 body: Optional[str] = None, headers: Optional[Dict] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +326,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(body, headers or {})
+    
+    # POST /revenue/customers
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customers" and method == "POST":
+        return handle_create_customer(json.loads(body) if isinstance(body, str) else body)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_create_payment(json.loads(body) if isinstance(body, str) else body)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body) if isinstance(body, str) else body)
     
     return _error_response(404, "Not found")
 
