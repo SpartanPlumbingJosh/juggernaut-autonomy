@@ -10,6 +10,9 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import logging
+
+logger = logging.getLogger(__name__)
 
 from core.database import query_db
 
@@ -32,6 +35,31 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def emit_revenue_event(event_type: str, amount_cents: int, currency: str, source: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Emit a revenue event."""
+    try:
+        event = {
+            "event_type": event_type,
+            "amount_cents": amount_cents,
+            "currency": currency,
+            "source": source,
+            "metadata": metadata,
+            "recorded_at": datetime.now(timezone.utc).isoformat()
+        }
+        
+        await query_db(f"""
+            INSERT INTO revenue_events (id, event_type, amount_cents, currency, source, metadata, recorded_at)
+            VALUES (gen_random_uuid(), '{event_type}', {amount_cents}, 
+                    '{currency}', '{source}', 
+                    '{json.dumps(metadata)}'::jsonb, 
+                    '{event["recorded_at"]}')
+        """)
+        
+        return {"success": True, "event": event}
+    except Exception as e:
+        logger.error(f"Failed to emit revenue event: {str(e)}", exc_info=True)
+        return {"success": False, "error": str(e)}
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
