@@ -162,6 +162,31 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation webhook"""
+    try:
+        from billing.payment_processor import PaymentProcessor
+        processor = PaymentProcessor()
+        result = await processor.handle_webhook(event["payload"], event["sig_header"], event["endpoint_secret"])
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process subscription: {str(e)}")
+
+async def handle_billing_portal(request_body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle customer billing portal access"""
+    try:
+        customer_id = request_body.get("customer_id")
+        if not customer_id:
+            return _error_response(400, "customer_id required")
+
+        session = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=os.getenv("BILLING_PORTAL_RETURN_URL")
+        )
+        return _make_response(200, {"url": session.url})
+    except Exception as e:
+        return _error_response(500, f"Failed to create billing portal session: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
