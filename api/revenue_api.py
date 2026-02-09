@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and monetization features.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscriptions
+- POST /revenue/payments - Record direct payments
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .revenue_service import handle_create_subscription, handle_record_payment
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +235,163 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return await handle_create_subscription(
+            headers.get("Authorization", ""),
+            json.loads(body) if body else {}
+        )
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return await handle_record_payment(
+            headers.get("Authorization", ""),
+            json.loads(body) if body else {}
+        )
+    
     return _error_response(404, "Not found")
 
 
 __all__ = ["route_request"]
+"""
+Revenue Service - Core business logic for monetization features.
+Handles subscriptions, billing, and customer management.
+"""
+
+import uuid
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+
+from core.database import query_db
+from core.auth import validate_api_key
+
+
+class RevenueService:
+    """Core service for handling revenue operations."""
+    
+    def __init__(self, db_conn):
+        self.db = db_conn
+
+    async def create_subscription(self, customer_id: str, plan_id: str, payment_method: str) -> Dict:
+        """Create a new paid subscription."""
+        sub_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        
+        try:
+            await query_db(f"""
+                INSERT INTO subscriptions (
+                    id, customer_id, plan_id, 
+                    status, created_at, updated_at,
+                    payment_method, billing_cycle_start
+                ) VALUES (
+                    '{sub_id}', '{customer_id}', '{plan_id}',
+                    'active', '{now}', '{now}',
+                    '{payment_method}', '{now}'
+                )
+            """)
+            
+            # Record initial payment event
+            plan = await self.get_plan(plan_id)
+            await self.record_payment(
+                customer_id=customer_id,
+                amount_cents=int(plan['price_cents']),
+                currency=plan['currency'],
+                source='subscription',
+                reference_id=sub_id
+            )
+            
+            return {"success": True, "subscription_id": sub_id}
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def get_plan(self, plan_id: str) -> Dict:
+        """Get pricing plan details."""
+        result = await query_db(f"""
+            SELECT id, name, price_cents, currency, billing_interval 
+            FROM pricing_plans 
+            WHERE id = '{plan_id}'
+        """)
+        return result.get("rows", [{}])[0]
+
+    async def record_payment(
+        self,
+        customer_id: str,
+        amount_cents: int,
+        currency: str,
+        source: str,
+        reference_id: str
+    ) -> Dict:
+        """Record a successful payment."""
+        payment_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        
+        try:
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency,
+                    source, customer_id, reference_id,
+                    recorded_at, created_at
+                ) VALUES (
+                    '{payment_id}', 'revenue', {amount_cents}, '{currency}',
+                    '{source}', '{customer_id}', '{reference_id}',
+                    '{now}', '{now}'
+                )
+            """)
+            return {"success": True, "payment_id": payment_id}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    async def cancel_subscription(self, subscription_id: str) -> Dict:
+        """Cancel an existing subscription."""
+        try:
+            await query_db(f"""
+                UPDATE subscriptions
+                SET status = 'canceled',
+                    updated_at = NOW()
+                WHERE id = '{subscription_id}'
+            """)
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+
+async def handle_create_subscription(auth_header: str, body: Dict) -> Dict:
+    """API handler for creating subscriptions."""
+    auth = validate_api_key(auth_header)
+    if not auth.get("valid"):
+        return {"statusCode": 401, "body": {"error": "Unauthorized"}}
+    
+    service = RevenueService(query_db)
+    customer_id = body.get("customer_id")
+    plan_id = body.get("plan_id")
+    payment_method = body.get("payment_method", "stripe")
+    
+    if not all([customer_id, plan_id]):
+        return {"statusCode": 400, "body": {"error": "Missing required fields"}}
+    
+    result = await service.create_subscription(customer_id, plan_id, payment_method)
+    status_code = 200 if result["success"] else 400
+    return {"statusCode": status_code, "body": result}
+
+
+async def handle_record_payment(auth_header: str, body: Dict) -> Dict:
+    """API handler for recording payments."""
+    auth = validate_api_key(auth_header)
+    if not auth.get("valid"):
+        return {"statusCode": 401, "body": {"error": "Unauthorized"}}
+    
+    service = RevenueService(query_db)
+    required = ["customer_id", "amount_cents", "currency", "source"]
+    if not all(field in body for field in required):
+        return {"statusCode": 400, "body": {"error": "Missing required fields"}}
+    
+    result = await service.record_payment(
+        customer_id=body["customer_id"],
+        amount_cents=body["amount_cents"],
+        currency=body["currency"],
+        source=body["source"],
+        reference_id=body.get("reference_id", "")
+    )
+    status_code = 200 if result["success"] else 400
+    return {"statusCode": status_code, "body": result}
