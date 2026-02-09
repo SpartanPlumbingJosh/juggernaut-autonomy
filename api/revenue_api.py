@@ -12,6 +12,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from revenue_engine.core import RevenueEngine
+from services.payment_gateway import PaymentGateway
+from services.notifications import NotificationService
+
+# Initialize revenue engine
+payment_gateway = PaymentGateway()
+notification_service = NotificationService()
+revenue_engine = RevenueEngine(query_db, payment_gateway, notification_service)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +239,37 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            customer_data = json.loads(body or "{}")
+            return await revenue_engine.onboard_customer(customer_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            payment_data = json.loads(body or "{}")
+            return await revenue_engine.process_payment(
+                payment_data['customer_id'],
+                payment_data['amount'],
+                payment_data['currency']
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/deliver
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "deliver" and method == "POST":
+        try:
+            delivery_data = json.loads(body or "{}")
+            return await revenue_engine.deliver_service(
+                delivery_data['customer_id'],
+                delivery_data
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
     
     return _error_response(404, "Not found")
 
