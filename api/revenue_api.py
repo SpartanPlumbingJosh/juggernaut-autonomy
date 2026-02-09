@@ -12,6 +12,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.rate_limiter import RateLimiter
+from core.failover import FailoverManager
+from core.logger import get_logger
+
+# Initialize rate limiter (100 requests per minute)
+limiter = RateLimiter(max_requests=100, period=60)
+failover = FailoverManager()
+logger = get_logger(__name__)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +224,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Rate limiting check
+    client_ip = query_params.get('client_ip', 'unknown')
+    if not limiter.allow_request(client_ip):
+        logger.warning(f"Rate limit exceeded for IP: {client_ip}")
+        return _error_response(429, "Too many requests")
+    
+    # Failover check
+    if failover.is_active():
+        logger.warning("Failover mode active - returning cached responses")
+        return failover.get_cached_response(path)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
