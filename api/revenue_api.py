@@ -34,6 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
+    """Get MTD/QTD/YTD revenue totals including subscriptions."""
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
