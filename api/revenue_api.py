@@ -162,6 +162,35 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_product_delivery(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle product/service delivery endpoint."""
+    try:
+        from api.fulfillment_service import FulfillmentService
+        
+        payment_id = body.get("payment_id")
+        customer = body.get("customer", {})
+        items = body.get("items", [])
+        amount = float(body.get("amount", 0))
+        
+        if not payment_id or not items or amount <= 0:
+            return _error_response(400, "Missing required fields")
+            
+        success = await FulfillmentService.process_order(
+            payment_id=payment_id,
+            customer=customer,
+            items=items,
+            amount=amount
+        )
+        
+        if not success:
+            return _error_response(500, "Failed to process order")
+            
+        return _make_response(200, {"status": "success"})
+        
+    except Exception as e:
+        return _error_response(500, f"Delivery failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +260,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/deliver
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "deliver" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return handle_product_delivery(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
