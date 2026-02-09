@@ -232,6 +232,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # GET /revenue/health
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "health" and method == "GET":
+        return _make_response(200, {
+            "status": "ok",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "components": {
+                "database": "ok",
+                "api": "ok"
+            }
+        })
+    
     return _error_response(404, "Not found")
 
 
