@@ -280,7 +280,8 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    Also manages automated service delivery workflows."""
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
@@ -308,6 +309,47 @@ def review_experiments_stub(
     running_count = 0
     completed_count = 0
     learning_triggered = 0
+    services_delivered = 0
+    
+    # Process pending service deliveries
+    try:
+        deliveries = execute_sql("""
+            SELECT id, service_type, product_id, customer_email
+            FROM service_deliveries
+            WHERE status = 'pending'
+            LIMIT 50
+        """).get("rows", [])
+        
+        for delivery in deliveries:
+            delivery_id = delivery.get("id")
+            service_type = delivery.get("service_type")
+            product_id = delivery.get("product_id")
+            
+            # Execute delivery workflow
+            workflow_result = trigger_delivery_workflow(
+                delivery_id, service_type, product_id
+            )
+            
+            if workflow_result.get("success"):
+                execute_sql(f"""
+                    UPDATE service_deliveries
+                    SET status = 'completed',
+                        updated_at = NOW()
+                    WHERE id = '{delivery_id}'
+                """)
+                services_delivered += 1
+                log_action(
+                    "service.delivered",
+                    f"Successfully delivered service {service_type}",
+                    level="info",
+                    output_data={"delivery_id": delivery_id}
+                )
+    except Exception as e:
+        log_action(
+            "service.delivery_failed",
+            f"Failed to process service deliveries: {str(e)}",
+            level="error"
+        )
     
     for exp in rows:
         exp_id = exp.get("id")
