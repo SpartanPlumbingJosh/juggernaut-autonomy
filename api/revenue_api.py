@@ -2,12 +2,14 @@
 Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- GET /revenue/summary - MTD/QTD/YTD totals  
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/stripe/webhook - Stripe webhook handler
 """
 
 import json
+from core.stripe_integration import StripeIntegration
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -220,6 +222,19 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /revenue/stripe/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "stripe" and parts[2] == "webhook" and method == "POST":
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        try:
+            result = StripeIntegration.handle_webhook(
+                body or "",
+                sig_header,
+                os.getenv("STRIPE_WEBHOOK_SECRET")
+            )
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(400, f"Webhook error: {str(e)}")
+            
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
