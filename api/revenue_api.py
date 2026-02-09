@@ -10,6 +10,8 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from fastapi import HTTPException
+from api.services.payment_service import PaymentService
 
 from core.database import query_db
 
@@ -211,7 +213,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue API requests including payment endpoints."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,7 +233,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
-    
+
+    # POST /revenue/payment/create_intent
+    if (len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" 
+        and parts[2] == "create_intent" and method == "POST"):
+        try:
+            body_dict = json.loads(body) if body else {}
+            return PaymentService.create_payment_intent(
+                body_dict.get("amount_cents", 0),
+                body_dict.get("currency", "usd"),
+                body_dict.get("metadata", {})
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid payment request: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
