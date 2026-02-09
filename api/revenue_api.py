@@ -5,13 +5,22 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/process - Process new payment
+- POST /revenue/webhook - Payment provider webhook
 """
 
 import json
+import uuid
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.delivery import deliver_product
+from core.monitoring import log_transaction_event
+
+# Initialize Stripe
+stripe.api_key = "sk_test_..."  # Should be from environment variables
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +219,82 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment and trigger product delivery."""
+    try:
+        # Create payment intent
+        intent = stripe.PaymentIntent.create(
+            amount=int(float(payment_data['amount']) * 100),
+            currency=payment_data.get('currency', 'usd'),
+            payment_method=payment_data['payment_method_id'],
+            confirmation_method='manual',
+            confirm=True,
+            metadata={
+                'product_id': payment_data['product_id'],
+                'customer_email': payment_data['customer_email']
+            }
+        )
+
+        # Record transaction
+        transaction_id = str(uuid.uuid4())
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                '{transaction_id}',
+                'revenue',
+                {int(float(payment_data['amount']) * 100)},
+                '{payment_data.get('currency', 'usd')}',
+                'stripe',
+                '{json.dumps({
+                    'product_id': payment_data['product_id'],
+                    'customer_email': payment_data['customer_email'],
+                    'payment_intent_id': intent.id
+                })}',
+                NOW(),
+                NOW()
+            )
+        """)
+
+        # Trigger delivery
+        await deliver_product(
+            product_id=payment_data['product_id'],
+            customer_email=payment_data['customer_email'],
+            transaction_id=transaction_id
+        )
+
+        return _make_response(200, {
+            'status': 'succeeded',
+            'transaction_id': transaction_id
+        })
+
+    except stripe.error.CardError as e:
+        log_transaction_event('payment_failed', str(e), payment_data)
+        return _error_response(402, str(e))
+    except Exception as e:
+        log_transaction_event('payment_error', str(e), payment_data)
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_webhook(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment provider webhooks."""
+    try:
+        event = stripe.Event.construct_from(event_data, stripe.api_key)
+        
+        if event.type == 'payment_intent.succeeded':
+            intent = event.data.object
+            await query_db(f"""
+                UPDATE revenue_events
+                SET status = 'completed',
+                    metadata = metadata || '{"stripe_webhook_received": true}'::jsonb
+                WHERE metadata->>'payment_intent_id' = '{intent.id}'
+            """)
+            
+        return _make_response(200, {'status': 'processed'})
+    except Exception as e:
+        log_transaction_event('webhook_error', str(e), event_data)
+        return _error_response(400, str(e))
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -232,6 +317,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/process
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process" and method == "POST":
+        try:
+            payment_data = json.loads(body or "{}")
+            return process_payment(payment_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
+
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            event_data = json.loads(body or "{}")
+            return handle_webhook(event_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
+
     return _error_response(404, "Not found")
 
 

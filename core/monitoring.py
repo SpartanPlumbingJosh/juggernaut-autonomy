@@ -1180,3 +1180,50 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+import logging
+from typing import Dict, Any
+from core.database import query_db
+
+def log_transaction_event(event_type: str, message: str, data: Dict[str, Any], level: str = 'info') -> None:
+    """Log transaction-related events."""
+    try:
+        log_method = getattr(logging, level, logging.info)
+        log_method(f"[Transaction] {event_type}: {message}")
+        
+        await query_db(f"""
+            INSERT INTO transaction_events (
+                id, event_type, message, data, 
+                created_at, severity
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                '{message.replace("'", "''")}',
+                '{json.dumps(data)}',
+                NOW(),
+                '{level}'
+            )
+        """)
+    except Exception:
+        pass
+
+def log_delivery_event(event_type: str, message: str, data: Dict[str, Any], level: str = 'info') -> None:
+    """Log delivery-related events."""
+    try:
+        log_method = getattr(logging, level, logging.info)
+        log_method(f"[Delivery] {event_type}: {message}")
+        
+        await query_db(f"""
+            INSERT INTO delivery_events (
+                id, event_type, message, data, 
+                created_at, severity
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                '{message.replace("'", "''")}',
+                '{json.dumps(data)}',
+                NOW(),
+                '{level}'
+            )
+        """)
+    except Exception:
+        pass
