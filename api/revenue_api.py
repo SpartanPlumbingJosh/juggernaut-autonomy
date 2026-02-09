@@ -162,6 +162,61 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_automated_service(body: Optional[str]) -> Dict[str, Any]:
+    """Handle automated service delivery and revenue capture."""
+    try:
+        if not body:
+            return _error_response(400, "Request body required")
+            
+        data = json.loads(body)
+        service_type = data.get("service_type")
+        customer_id = data.get("customer_id")
+        amount_cents = int(data.get("amount_cents", 0))
+        
+        if not service_type or not customer_id or amount_cents <= 0:
+            return _error_response(400, "Invalid request parameters")
+            
+        # Record the revenue event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, 
+            experiment_id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {amount_cents},
+            'USD',
+            'automated_service',
+            '{json.dumps({"service_type": service_type, "customer_id": customer_id})}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        if not result.get("rows"):
+            return _error_response(500, "Failed to record revenue event")
+            
+        return _make_response(200, {
+            "success": True,
+            "service_id": result["rows"][0]["id"],
+            "amount_cents": amount_cents,
+            "service_type": service_type
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Automated service failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +286,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/automated
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "automated" and method == "POST":
+        return handle_automated_service(body)
     
     return _error_response(404, "Not found")
 
