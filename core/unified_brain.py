@@ -300,6 +300,15 @@ NO asking for permission. NO "shall I proceed?" Just DO IT.
 - github_merge_pr(pr_number, merge_method?)
 - github_list_prs(state?)
 
+### Customer Acquisition Tools
+- create_landing_page(title, template, variants, tracking_id)
+- update_landing_page(page_id, changes)
+- generate_seo_content(topic, keywords, word_count)
+- setup_email_sequence(name, triggers, emails)
+- create_referral_program(name, rewards, conditions)
+- track_conversion(event_name, properties)
+- get_acquisition_metrics(time_period, segment)
+
 ### Database (Neon PostgreSQL)
 - sql_query(sql) - Execute any SQL query
 
