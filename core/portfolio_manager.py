@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_engine import RevenueEngine
 
 
 def generate_revenue_ideas(
@@ -275,6 +277,15 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+async def run_revenue_generation(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Run the autonomous revenue generation engine."""
+    engine = RevenueEngine()
+    executed = await engine.run_cycle()
+    return {"success": True, "executed": executed}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
