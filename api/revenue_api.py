@@ -11,7 +11,70 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+import hashlib
+import secrets
+from datetime import datetime, timedelta
+
+# Authentication functions
+def hash_password(password: str) -> str:
+    salt = secrets.token_hex(16)
+    return f"{salt}${hashlib.sha256((salt + password).encode()).hexdigest()}"
+
+def verify_password(stored_password: str, provided_password: str) -> bool:
+    salt, hashed = stored_password.split('$')
+    return hashlib.sha256((salt + provided_password).encode()).hexdigest() == hashed
+
+async def handle_login(email: str, password: str) -> Dict[str, Any]:
+    """Handle user login"""
+    try:
+        user = await query_db(f"SELECT * FROM users WHERE email = '{email}'")
+        if not user.get('rows'):
+            return _error_response(401, "Invalid credentials")
+        
+        user_data = user['rows'][0]
+        if not verify_password(user_data['password'], password):
+            return _error_response(401, "Invalid credentials")
+        
+        # Generate session token
+        token = secrets.token_urlsafe(64)
+        expires_at = datetime.utcnow() + timedelta(days=7)
+        
+        await execute_db(f"""
+            INSERT INTO sessions (user_id, token, expires_at)
+            VALUES ('{user_data['id']}', '{token}', '{expires_at.isoformat()}')
+        """)
+        
+        return _make_response(200, {
+            "token": token,
+            "user": {
+                "id": user_data['id'],
+                "email": user_data['email'],
+                "role": user_data['role']
+            }
+        })
+    except Exception as e:
+        return _error_response(500, f"Login failed: {str(e)}")
+
+async def handle_register(email: str, password: str) -> Dict[str, Any]:
+    """Handle user registration"""
+    try:
+        # Check if user exists
+        existing = await query_db(f"SELECT id FROM users WHERE email = '{email}'")
+        if existing.get('rows'):
+            return _error_response(400, "User already exists")
+        
+        # Create new user
+        user_id = secrets.token_urlsafe(16)
+        hashed_pw = hash_password(password)
+        await execute_db(f"""
+            INSERT INTO users (id, email, password, role, created_at)
+            VALUES ('{user_id}', '{email}', '{hashed_pw}', 'user', NOW())
+        """)
+        
+        return _make_response(201, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Registration failed: {str(e)}")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
