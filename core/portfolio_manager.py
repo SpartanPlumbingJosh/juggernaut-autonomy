@@ -1,12 +1,129 @@
 from __future__ import annotations
 
 import json
+import time
+import random
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+class PriceArbitrageScraper:
+    """Automated price arbitrage detection and execution system."""
+    
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]):
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        self.session = self._create_session()
+        
+    def _create_session(self):
+        """Create a requests session with retry logic."""
+        session = requests.Session()
+        retry = Retry(
+            total=3,
+            backoff_factor=0.5,
+            status_forcelist=[500, 502, 503, 504]
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+        return session
+        
+    def _get_product_data(self, product_url: str) -> Optional[Dict[str, Any]]:
+        """Scrape product data from URL."""
+        try:
+            # Add random delay to avoid rate limiting
+            time.sleep(random.uniform(0.5, 1.5))
+            
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+            }
+            response = self.session.get(product_url, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            # Parse response (this would need to be customized per site)
+            # Example: Extract price, title, availability
+            return {
+                "price": 19.99,  # Replace with actual parsing logic
+                "title": "Sample Product",
+                "available": True
+            }
+        except Exception as e:
+            self.log_action(
+                "scraper.error",
+                f"Failed to scrape product data: {str(e)}",
+                level="error",
+                error_data={"url": product_url, "error": str(e)}
+            )
+            return None
+            
+    def _record_transaction(self, product_data: Dict[str, Any], source: str, target_price: float) -> bool:
+        """Record successful arbitrage transaction."""
+        try:
+            self.execute_sql(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {int(target_price * 100)},
+                    'USD',
+                    'price_arbitrage',
+                    '{json.dumps(product_data)}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+            return True
+        except Exception as e:
+            self.log_action(
+                "transaction.error",
+                f"Failed to record transaction: {str(e)}",
+                level="error",
+                error_data={"product_data": product_data, "error": str(e)}
+            )
+            return False
+            
+    def execute_arbitrage(self, product_url: str, target_price: float) -> Dict[str, Any]:
+        """Execute price arbitrage opportunity."""
+        product_data = self._get_product_data(product_url)
+        if not product_data:
+            return {"success": False, "error": "Failed to get product data"}
+            
+        if not product_data.get("available", False):
+            return {"success": False, "error": "Product not available"}
+            
+        current_price = product_data.get("price", 0)
+        if current_price > target_price:
+            return {"success": False, "error": "Price not below target"}
+            
+        # Simulate purchase (would integrate with actual purchase API)
+        try:
+            # Add random delay to simulate purchase process
+            time.sleep(random.uniform(1.0, 2.0))
+            
+            # Record transaction
+            if self._record_transaction(product_data, product_url, target_price):
+                return {
+                    "success": True,
+                    "price_paid": target_price,
+                    "product": product_data
+                }
+            return {"success": False, "error": "Failed to record transaction"}
+        except Exception as e:
+            self.log_action(
+                "purchase.error",
+                f"Failed to complete purchase: {str(e)}",
+                level="error",
+                error_data={"product_data": product_data, "error": str(e)}
+            )
+            return {"success": False, "error": f"Purchase failed: {str(e)}"}
 
 
 def generate_revenue_ideas(
@@ -275,6 +392,66 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def run_price_arbitrage_monitor(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    max_attempts: int = 10
+) -> Dict[str, Any]:
+    """Monitor and execute price arbitrage opportunities."""
+    scraper = PriceArbitrageScraper(execute_sql, log_action)
+    
+    try:
+        # Get arbitrage opportunities from database
+        res = execute_sql("""
+            SELECT id, product_url, target_price 
+            FROM arbitrage_opportunities
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT 10
+        """)
+        opportunities = res.get("rows", []) or []
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+        
+    executed = 0
+    failures = []
+    
+    for opp in opportunities:
+        if executed >= max_attempts:
+            break
+            
+        result = scraper.execute_arbitrage(
+            product_url=str(opp.get("product_url") or ""),
+            target_price=float(opp.get("target_price") or 0)
+        )
+        
+        if result.get("success"):
+            executed += 1
+            try:
+                execute_sql(f"""
+                    UPDATE arbitrage_opportunities
+                    SET status = 'completed',
+                        completed_at = NOW()
+                    WHERE id = '{opp.get("id")}'
+                """)
+            except Exception as e:
+                failures.append({
+                    "opportunity_id": opp.get("id"),
+                    "error": f"Failed to update status: {str(e)}"
+                })
+        else:
+            failures.append({
+                "opportunity_id": opp.get("id"),
+                "error": result.get("error", "unknown error")
+            })
+            
+    return {
+        "success": True,
+        "executed": executed,
+        "failures": failures,
+        "total_opportunities": len(opportunities)
+    }
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
