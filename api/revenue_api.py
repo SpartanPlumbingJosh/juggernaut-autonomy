@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from autonomous_revenue.engine import RevenueEngine
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,12 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/run-cycle - Trigger autonomous billing cycle
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "run-cycle" and method == "POST":
+        engine = RevenueEngine()
+        result = await engine.run_billing_cycle()
+        return _make_response(200 if result["success"] else 500, result)
     
     return _error_response(404, "Not found")
 
