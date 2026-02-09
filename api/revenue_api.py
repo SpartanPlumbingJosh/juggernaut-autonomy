@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payments.service import PaymentService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,31 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent"""
+    try:
+        service = PaymentService()
+        result = await service.create_payment_intent(
+            amount=int(body.get('amount', 0) * 100),
+            currency=body.get('currency', 'usd'),
+            metadata=body.get('metadata', {})
+        )
+        return _make_response(200 if result['success'] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_payment_webhook(headers: Dict[str, str], body: bytes) -> Dict[str, Any]:
+    """Handle payment webhook"""
+    try:
+        service = PaymentService()
+        result = await service.handle_webhook(
+            payload=body,
+            sig_header=headers.get('stripe-signature', '')
+        )
+        return _make_response(200 if result['success'] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +257,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /payments/create
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "create" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+
+    # POST /payments/webhook
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(headers={k.lower(): v for k, v in headers.items()}, body=body)
     
     return _error_response(404, "Not found")
 
