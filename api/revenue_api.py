@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +217,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # POST /revenue/process
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process" and method == "POST":
+        try:
+            request_data = json.loads(body or "{}")
+            processor = PaymentProcessor(query_db, lambda *a, **kw: None)
+            result = await processor.process_payment(
+                amount=request_data.get("amount"),
+                currency=request_data.get("currency", "USD"),
+                customer_id=request_data["customer_id"],
+                service_id=request_data["service_id"],
+                description=request_data.get("description", "")
+            )
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
