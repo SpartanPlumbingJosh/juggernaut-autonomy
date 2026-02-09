@@ -9,6 +9,7 @@ Endpoints:
 
 import json
 from datetime import datetime, timezone, timedelta
+import math
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -210,6 +211,77 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def calculate_target_progress() -> Dict[str, Any]:
+    """Calculate progress toward $14M annual revenue target."""
+    try:
+        TARGET_CENTS = 14_000_000 * 100  # $14M in cents
+        
+        # Get YTD revenue
+        now = datetime.now(timezone.utc)
+        year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= '{year_start.isoformat()}'
+        """
+        
+        ytd_result = await query_db(sql)
+        ytd_revenue = ytd_result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        # Calculate progress
+        progress = ytd_revenue / TARGET_CENTS
+        remaining_cents = TARGET_CENTS - ytd_revenue
+        
+        # Calculate monthly growth rate
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_month_start = (month_start - timedelta(days=1)).replace(day=1)
+        
+        # Get current month revenue
+        month_sql = sql.replace(year_start.isoformat(), month_start.isoformat())
+        month_result = await query_db(month_sql)
+        month_revenue = month_result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        # Get previous month revenue
+        prev_month_sql = sql.replace(year_start.isoformat(), prev_month_start.isoformat())
+        prev_month_result = await query_db(prev_month_sql)
+        prev_month_revenue = prev_month_result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        growth_rate = 0.0
+        if prev_month_revenue > 0:
+            growth_rate = (month_revenue - prev_month_revenue) / prev_month_revenue
+        
+        # Project completion date
+        months_remaining = 0
+        projected_date = None
+        if month_revenue > 0:
+            months_remaining = math.ceil(remaining_cents / month_revenue)
+            projected_date = (now + timedelta(days=30*months_remaining)).date().isoformat()
+        
+        # Alert status
+        alert = None
+        if months_remaining > (12 - now.month):
+            alert = "behind_target"
+        elif months_remaining > (12 - now.month - 1):
+            alert = "at_risk"
+        
+        return _make_response(200, {
+            "target_cents": TARGET_CENTS,
+            "ytd_revenue_cents": ytd_revenue,
+            "progress": progress,
+            "remaining_cents": remaining_cents,
+            "monthly_growth_rate": growth_rate,
+            "projected_completion_date": projected_date,
+            "alert_status": alert,
+            "current_month_revenue_cents": month_revenue,
+            "previous_month_revenue_cents": prev_month_revenue
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate target progress: {str(e)}")
+
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +303,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/target-progress
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "target-progress" and method == "GET":
+        return calculate_target_progress()
     
     return _error_response(404, "Not found")
 
