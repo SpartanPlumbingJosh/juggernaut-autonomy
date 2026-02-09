@@ -1,10 +1,14 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing operations.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /billing/customer - Create billing customer
+- POST /billing/subscription - Create subscription
+- POST /billing/invoice - Generate invoice
+- POST /billing/webhook - Payment webhook handler
 """
 
 import json
@@ -162,6 +166,68 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_billing_customer(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new billing customer."""
+    from billing_service import BillingService
+    
+    try:
+        email = body.get("email", "")
+        name = body.get("name", "")
+        if not email or not name:
+            return _error_response(400, "Email and name are required")
+            
+        customer = await BillingService.create_customer(email, name)
+        return _make_response(201, {"customer": customer})
+    except Exception as e:
+        return _error_response(500, f"Failed to create customer: {str(e)}")
+
+async def handle_billing_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    from billing_service import BillingService
+    
+    try:
+        customer_id = body.get("customer_id", "")
+        price_id = body.get("price_id", "")
+        if not customer_id or not price_id:
+            return _error_response(400, "Customer ID and price ID are required")
+            
+        result = await BillingService.create_subscription(customer_id, price_id)
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_billing_invoice(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate an invoice."""
+    from billing_service import BillingService
+    
+    try:
+        customer_id = body.get("customer_id", "")
+        items = body.get("items", [])
+        if not customer_id or not items:
+            return _error_response(400, "Customer ID and items are required")
+            
+        invoice = await BillingService.generate_invoice(items, customer_id)
+        return _make_response(201, {"invoice": invoice})
+    except Exception as e:
+        return _error_response(500, f"Failed to generate invoice: {str(e)}")
+
+async def handle_billing_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    from billing_service import BillingService
+    
+    try:
+        event_type = body.get("type", "")
+        if not event_type:
+            return _error_response(400, "Event type missing")
+            
+        success, error = await BillingService.record_payment_event(body)
+        if not success:
+            return _error_response(400, error.get("error", "Payment handling failed"))
+            
+        return _make_response(200, {"processed": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -211,7 +277,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue and billing API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,6 +297,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /billing/customer
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "customer" and method == "POST":
+        return handle_billing_customer(body)
+    
+    # POST /billing/subscription
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscription" and method == "POST":
+        return handle_billing_subscription(body)
+    
+    # POST /billing/invoice
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "invoice" and method == "POST":
+        return handle_billing_invoice(body)
+    
+    # POST /billing/webhook
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        return handle_billing_webhook(body)
     
     return _error_response(404, "Not found")
 
