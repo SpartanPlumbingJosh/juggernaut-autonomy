@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,10 +34,17 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
+        
+        # Get payment processor instance
+        payment_processor = PaymentProcessor(
+            stripe_api_key="sk_test_...",  # Should be from config
+            paypal_client_id="...",       # Should be from config
+            paypal_secret="..."           # Should be from config
+        )
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
