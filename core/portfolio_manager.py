@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from datetime import timedelta
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -274,6 +276,64 @@ def start_experiments_from_top_ideas(
         out["failures"] = failures[:10]
         out["failed"] = len(failures)
     return out
+
+
+def start_revenue_automation(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    interval_minutes: int = 60
+) -> threading.Thread:
+    """Start automated revenue generation monitoring thread."""
+    def automation_loop():
+        """Check for and process recurring billing events."""
+        import time
+        while True:
+            try:
+                # Get active subscriptions due for billing
+                subscriptions = execute_sql(f"""
+                    SELECT s.*, p.price_cents 
+                    FROM saas_subscriptions s
+                    JOIN saas_products p ON s.product_code = p.code
+                    WHERE s.status = 'active'
+                      AND NOW() >= s.next_billing_date
+                      AND p.price_cents > 0
+                    LIMIT 100
+                """).get('rows', [])
+
+                for sub in subscriptions:
+                    billing_data = {
+                        'customer_id': sub['customer_id'],
+                        'amount_cents': sub['price_cents'],
+                        'service_period': sub['billing_cycle'],
+                        'product_code': sub['product_code']
+                    }
+                    
+                    execute_sql(f"""
+                        UPDATE saas_subscriptions
+                        SET next_billing_date = 
+                            CASE billing_cycle
+                                WHEN 'monthly' THEN NOW() + INTERVAL '1 month'
+                                WHEN 'yearly' THEN NOW() + INTERVAL '1 year'
+                                ELSE NOW() + INTERVAL '1 month'
+                            END
+                        WHERE id = '{sub['id']}'
+                    """)
+
+                time.sleep(interval_minutes * 60)
+
+            except Exception as e:
+                log_action(
+                    "revenue.automation_error",
+                    f"Automated billing error: {str(e)}",
+                    level="error",
+                    error_data={"error": str(e)}
+                )
+                time.sleep(300)  # Wait 5 minutes on error
+
+    # Start daemon thread
+    thread = threading.Thread(target=automation_loop, daemon=True)
+    thread.start()
+    return thread
 
 
 def review_experiments_stub(
