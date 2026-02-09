@@ -8,8 +8,10 @@ Endpoints:
 """
 
 import json
+import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from revenue.revenue_automation import RevenueAutomation
 
 from core.database import query_db
 
@@ -32,6 +34,15 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def start_revenue_automation() -> Dict[str, Any]:
+    """Start the revenue automation system."""
+    try:
+        automation = RevenueAutomation()
+        asyncio.create_task(automation.run())
+        return _make_response(200, {"status": "started"})
+    except Exception as e:
+        return _error_response(500, f"Failed to start automation: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -220,6 +231,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /revenue/start
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "start" and method == "POST":
+        return await start_revenue_automation()
+        
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
