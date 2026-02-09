@@ -1,13 +1,18 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Monetization and Billing System
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /billing/subscribe - Create subscription
+- POST /billing/charge - Process payment
+- GET /billing/invoices - List invoices
+- POST /billing/webhook - Payment processor webhook
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +21,8 @@ from core.database import query_db
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
+    # Initialize Stripe client
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
     return {
         "statusCode": status_code,
         "headers": {
