@@ -1,12 +1,22 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from api.billing import process_payment
+
+# Revenue targets (in dollars)
+REVENUE_TARGETS = {
+    "initial": 1000,      # First $1k
+    "growth": 10000,      # $10k milestone 
+    "scaling": 100000,    # $100k level
+    "enterprise": 1000000 # $1M+ 
+}
 
 
 def generate_revenue_ideas(

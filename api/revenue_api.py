@@ -1,10 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Autonomous Revenue Generation System
+
+Core Components:
+- Billing & Payments: Handle all financial transactions
+- Service Delivery: Automated fulfillment pipelines  
+- Monitoring: Real-time performance tracking
+- Scaling: Built-in horizontal scaling support
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/charge - Process new payment
+- GET /revenue/subscriptions - Active subscriptions
+- POST /revenue/webhook - Payment provider webhooks
 """
 
 import json
