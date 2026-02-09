@@ -162,6 +162,68 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_service_fulfillment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle service fulfillment after successful payment."""
+    try:
+        payment_id = body.get("payment_id")
+        service_id = body.get("service_id")
+        customer_email = body.get("customer_email")
+        
+        if not all([payment_id, service_id, customer_email]):
+            return _error_response(400, "Missing required fields")
+            
+        # Get service details
+        sql = f"""
+        SELECT id, name, delivery_type, delivery_config 
+        FROM revenue_services 
+        WHERE id = '{service_id}'
+        """
+        result = await query_db(sql)
+        service = result.get("rows", [{}])[0]
+        
+        if not service.get("id"):
+            return _error_response(404, "Service not found")
+            
+        # Record the purchase
+        purchase_sql = f"""
+        INSERT INTO service_purchases (
+            id, service_id, payment_id, customer_email,
+            status, created_at, fulfilled_at
+        ) VALUES (
+            gen_random_uuid(), '{service_id}', '{payment_id}',
+            '{customer_email}', 'pending', NOW(), NULL
+        )
+        """
+        await query_db(purchase_sql)
+        
+        # Fulfill based on service type
+        delivery_type = service.get("delivery_type")
+        if delivery_type == "api":
+            # Call API endpoint with credentials
+            return _make_response(200, {
+                "status": "fulfilled",
+                "type": "api",
+                "endpoint": service.get("delivery_config", {}).get("endpoint"),
+                "credentials": service.get("delivery_config", {}).get("credentials")
+            })
+        elif delivery_type == "file":
+            # Generate and return download URL
+            file_url = f"https://storage.example.com/services/{service_id}/{payment_id}.zip"
+            return _make_response(200, {
+                "status": "fulfilled", 
+                "type": "file",
+                "download_url": file_url
+            })
+        else:
+            return _make_response(200, {
+                "status": "pending_manual",
+                "message": "Service will be delivered manually"
+            })
+            
+    except Exception as e:
+        return _error_response(500, f"Service fulfillment failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +293,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/fulfill
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "fulfill" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return handle_service_fulfillment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
