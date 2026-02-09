@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from payment_processor import PaymentProcessor
+from pricing_engine import PricingEngine
 
 
 def generate_revenue_ideas(
@@ -14,10 +16,27 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    payment_processor: Optional[PaymentProcessor] = None,
+    pricing_engine: Optional[PricingEngine] = None
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Enhance ideas with pricing data if available
+    if pricing_engine:
+        for idea in ideas:
+            demand_data = {
+                "conversion_rate": idea.get("estimated_conversion", 0.1),
+                "inventory_level": idea.get("inventory_impact", 1.0),
+                "competitor_price": idea.get("competitor_price", 1.0)
+            }
+            base_price = idea.get("base_price", 10.0)
+            idea["optimal_price"] = pricing_engine.calculate_optimal_price(
+                product_id=idea.get("title", ""),
+                base_price=base_price,
+                demand_data=demand_data
+            )
 
     created = 0
     failures: List[Dict[str, Any]] = []
