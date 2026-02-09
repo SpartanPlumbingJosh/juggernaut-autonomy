@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook/stripe - Handle Stripe webhooks
 """
 
 import json
@@ -12,6 +13,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_gateway import PaymentGateway
+from core.revenue_tracker import RevenueTracker
+
+payment_gateway = PaymentGateway()
+revenue_tracker = RevenueTracker(query_db)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +237,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        webhook_secret = os.getenv('STRIPE_WEBHOOK_SECRET')
+        if not webhook_secret:
+            return _error_response(500, "Webhook secret not configured")
+        
+        try:
+            result = await payment_gateway.handle_webhook(
+                body or "",
+                headers.get("Stripe-Signature", ""),
+                webhook_secret
+            )
+            
+            if result.get("success") and result.get("handled") and result.get("action") == "payment_success":
+                await revenue_tracker.record_revenue_event(**result["revenue_event"])
+            
+            return _make_response(200, {"success": True})
+        except Exception as e:
+            return _error_response(400, f"Webhook error: {str(e)}")
     
     return _error_response(404, "Not found")
 
