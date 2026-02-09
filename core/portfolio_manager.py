@@ -276,6 +276,23 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_subscription_metrics(execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Calculate key subscription metrics for dashboard."""
+    try:
+        res = execute_sql("""
+            SELECT 
+                COUNT(DISTINCT user_id) as active_subscribers,
+                SUM(amount_cents) as mrr_cents,
+                COUNT(*) FILTER (WHERE recorded_at >= NOW() - INTERVAL '30 days') as new_subscribers_30d
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+              AND source = 'subscription'
+              AND recorded_at >= NOW() - INTERVAL '90 days'
+        """)
+        return res.get('rows', [{}])[0]
+    except Exception as e:
+        return {'error': str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
