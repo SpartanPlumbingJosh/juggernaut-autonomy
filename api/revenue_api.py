@@ -9,6 +9,8 @@ Endpoints:
 
 import json
 from datetime import datetime, timezone, timedelta
+import math
+from typing import Tuple
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -210,6 +212,120 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+def _calculate_projections(current_mrr: int, growth_rate: float, target: int = 1600000000) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Calculate revenue projections and milestones."""
+    # Convert MRR to annual
+    current_annual = current_mrr * 12
+    
+    # Calculate projections
+    projections = []
+    for year in range(1, 8):
+        projected = current_annual * (1 + growth_rate) ** year
+        projections.append({
+            "year": year,
+            "projected_revenue": projected,
+            "target": target,
+            "variance": (projected - target) / target * 100
+        })
+    
+    # Calculate milestones
+    milestones = []
+    remaining = target - current_annual
+    if remaining > 0:
+        required_growth = (target / current_annual) ** (1/7) - 1
+        milestones.append({
+            "name": "Year 1",
+            "required_revenue": current_annual * (1 + required_growth),
+            "required_growth": required_growth * 100
+        })
+    
+    return projections, milestones
+
+def _check_alerts(projections: List[Dict[str, Any]], current_burn_rate: float) -> List[Dict[str, Any]]:
+    """Generate alerts based on projections."""
+    alerts = []
+    
+    # Check for variance alerts
+    for proj in projections:
+        if abs(proj["variance"]) > 10:
+            alerts.append({
+                "type": "variance",
+                "year": proj["year"],
+                "variance": proj["variance"],
+                "message": f"Projected revenue variance exceeds 10% in year {proj['year']}"
+            })
+    
+    # Check burn rate against milestones
+    if current_burn_rate > 0:
+        burn_months = projections[0]["projected_revenue"] / current_burn_rate
+        if burn_months < 12:
+            alerts.append({
+                "type": "burn_rate",
+                "months": burn_months,
+                "message": f"Current burn rate threatens milestone achievement ({burn_months:.1f} months remaining)"
+            })
+    
+    return alerts
+
+async def handle_revenue_projections() -> Dict[str, Any]:
+    """Get revenue projections and alerts."""
+    try:
+        # Get current MRR from last 30 days
+        now = datetime.now(timezone.utc)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) / 100 as mrr
+        FROM revenue_events
+        WHERE recorded_at >= '{month_start.isoformat()}'
+        """
+        
+        result = await query_db(sql)
+        current_mrr = result.get("rows", [{}])[0].get("mrr", 0)
+        
+        # Calculate growth rate (using last 3 months)
+        three_months_ago = (now - timedelta(days=90)).replace(day=1)
+        prev_sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) / 100 as prev_mrr
+        FROM revenue_events
+        WHERE recorded_at >= '{three_months_ago.isoformat()}'
+          AND recorded_at < '{month_start.isoformat()}'
+        """
+        
+        prev_result = await query_db(prev_sql)
+        prev_mrr = prev_result.get("rows", [{}])[0].get("prev_mrr", 0)
+        
+        growth_rate = (current_mrr - prev_mrr) / prev_mrr if prev_mrr > 0 else 0
+        
+        # Get current burn rate
+        burn_sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) / 100 as burn_rate
+        FROM revenue_events
+        WHERE recorded_at >= '{month_start.isoformat()}'
+        """
+        
+        burn_result = await query_db(burn_sql)
+        burn_rate = burn_result.get("rows", [{}])[0].get("burn_rate", 0)
+        
+        # Calculate projections and alerts
+        projections, milestones = _calculate_projections(current_mrr, growth_rate)
+        alerts = _check_alerts(projections, burn_rate)
+        
+        return _make_response(200, {
+            "current_mrr": current_mrr,
+            "growth_rate": growth_rate,
+            "burn_rate": burn_rate,
+            "projections": projections,
+            "milestones": milestones,
+            "alerts": alerts
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate projections: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +347,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/projections
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "projections" and method == "GET":
+        return handle_revenue_projections()
     
     return _error_response(404, "Not found")
 
