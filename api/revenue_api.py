@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,12 +211,22 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Payment webhooks
+    processor = PaymentProcessor()
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook":
+        if method == "POST" and body:
+            if headers.get("x-paypal-signature"):
+                return processor.handle_paypal_webhook(json.loads(body))
+            elif headers.get("stripe-signature"):
+                return processor.handle_stripe_webhook(body, headers["stripe-signature"])
+        return _error_response(400, "Invalid webhook request")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
