@@ -3,8 +3,9 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/subscriptions - Subscription metrics (MRR, churn, LTV, CAC)
 """
 
 import json
@@ -162,6 +163,71 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def get_subscription_metrics() -> Dict[str, Any]:
+    """Calculate key subscription metrics"""
+    try:
+        # Get MRR
+        mrr_result = await query_db("""
+            SELECT SUM(amount_cents) / 100 as mrr
+            FROM subscriptions
+            WHERE status = 'active'
+        """)
+        mrr = mrr_result.get("rows", [{}])[0].get("mrr", 0)
+        
+        # Get churn rate
+        churn_result = await query_db("""
+            WITH churned AS (
+                SELECT COUNT(*) as churned_count
+                FROM subscriptions
+                WHERE status = 'canceled'
+                  AND canceled_at >= NOW() - INTERVAL '30 days'
+            ),
+            total AS (
+                SELECT COUNT(*) as total_count
+                FROM subscriptions
+                WHERE created_at <= NOW() - INTERVAL '30 days'
+            )
+            SELECT 
+                churned.churned_count::float / total.total_count as churn_rate
+            FROM churned, total
+        """)
+        churn_rate = churn_result.get("rows", [{}])[0].get("churn_rate", 0)
+        
+        # Get LTV
+        ltv_result = await query_db("""
+            SELECT AVG(total_revenue) as ltv
+            FROM (
+                SELECT customer_id, SUM(amount_cents) / 100 as total_revenue
+                FROM revenue_events
+                WHERE event_type = 'payment_success'
+                GROUP BY customer_id
+            ) t
+        """)
+        ltv = ltv_result.get("rows", [{}])[0].get("ltv", 0)
+        
+        # Get CAC
+        cac_result = await query_db("""
+            SELECT AVG(acquisition_cost) as cac
+            FROM (
+                SELECT customer_id, SUM(amount_cents) / 100 as acquisition_cost
+                FROM revenue_events
+                WHERE event_type = 'marketing_cost'
+                GROUP BY customer_id
+            ) t
+        """)
+        cac = cac_result.get("rows", [{}])[0].get("cac", 0)
+        
+        return {
+            "mrr": mrr,
+            "churn_rate": churn_rate,
+            "ltv": ltv,
+            "cac": cac,
+            "ltv_cac_ratio": ltv / cac if cac > 0 else 0
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +297,13 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        metrics = await get_subscription_metrics()
+        if "error" in metrics:
+            return _error_response(500, metrics["error"])
+        return _make_response(200, metrics)
     
     return _error_response(404, "Not found")
 
