@@ -5,13 +5,25 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhooks/stripe - Stripe webhook handler
+- POST /revenue/webhooks/paypal - PayPal webhook handler
 """
 
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from flask import Flask, request
 from core.database import query_db
+from payment_processor import PaymentProcessor
+
+# Initialize payment processor
+payment_processor = PaymentProcessor(
+    stripe_api_key=os.getenv('STRIPE_API_KEY'),
+    paypal_client_id=os.getenv('PAYPAL_CLIENT_ID'), 
+    paypal_secret=os.getenv('PAYPAL_SECRET')
+)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +243,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Payment webhooks
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhooks":
+        if parts[2] == "stripe" and method == "POST":
+            payload = request.data.decode('utf-8')
+            sig_header = request.headers.get('Stripe-Signature')
+            return payment_processor.handle_stripe_webhook(payload, sig_header)
+        elif parts[2] == "paypal" and method == "POST":
+            return payment_processor.handle_paypal_webhook(request.json)
     
     return _error_response(404, "Not found")
 
