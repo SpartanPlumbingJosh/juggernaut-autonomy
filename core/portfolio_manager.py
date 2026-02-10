@@ -1,12 +1,76 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.tool_executor import execute_tool_call
+from core.cost_tracker import check_budget
+
+
+def _provision_service(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    service_config: Dict[str, Any],
+    experiment_id: Optional[str] = None
+) -> Tuple[bool, str]:
+    """Automatically provision a service based on configuration."""
+    try:
+        # Generate unique service ID
+        service_id = str(uuid.uuid4())
+        
+        # Check budget before provisioning
+        budget_ok = check_budget(
+            service="provisioning",
+            estimated_cost=float(service_config.get("estimated_cost", 0)),
+            worker_id="autonomous_provisioner"
+        )
+        if not budget_ok:
+            return False, "Budget limit exceeded"
+            
+        # Execute provisioning via tool
+        provision_result = execute_tool_call(
+            name="provision_service",
+            arguments={
+                "service_type": service_config["type"],
+                "config": service_config,
+                "service_id": service_id,
+                "experiment_id": experiment_id
+            }
+        )
+        
+        if not provision_result.get("success"):
+            return False, provision_result.get("error", "Unknown provisioning error")
+            
+        # Record the provisioned service
+        execute_sql(f"""
+            INSERT INTO provisioned_services (
+                id, experiment_id, service_type, 
+                config, status, created_at
+            ) VALUES (
+                '{service_id}',
+                {f"'{experiment_id}'" if experiment_id else "NULL"},
+                '{service_config["type"]}',
+                '{json.dumps(service_config)}'::jsonb,
+                'active',
+                NOW()
+            )
+        """)
+        
+        return True, service_id
+        
+    except Exception as e:
+        log_action(
+            "provisioning.failed",
+            f"Service provisioning failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e), "config": service_config}
+        )
+        return False, str(e)
 
 
 def generate_revenue_ideas(
