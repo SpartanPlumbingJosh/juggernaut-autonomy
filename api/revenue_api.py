@@ -12,6 +12,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_webhooks import PAYMENT_PROCESSORS
+from .subscription_manager import SubscriptionManager
+from .fraud_detection import FraudDetector
+
+subscription_manager = SubscriptionManager()
+fraud_detector = FraudDetector()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
