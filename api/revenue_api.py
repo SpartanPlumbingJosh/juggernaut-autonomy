@@ -8,10 +8,15 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+from services.service_delivery import ServiceDelivery
+
+logger = logging.getLogger(__name__)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +38,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(payment_processor: Optional[PaymentProcessor] = None) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -114,7 +119,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
-async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_revenue_transactions(query_params: Dict[str, Any], payment_processor: Optional[PaymentProcessor] = None) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -162,7 +167,7 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
-async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_revenue_charts(query_params: Dict[str, Any], payment_processor: Optional[PaymentProcessor] = None) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
