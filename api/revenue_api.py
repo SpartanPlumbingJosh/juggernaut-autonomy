@@ -33,10 +33,11 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
+        include_subscriptions = query_params.get("include_subscriptions", ["false"])[0].lower() == "true"
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -45,7 +46,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         year_start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
         
         # Get revenue by period
-        sql = f"""
+        base_sql = """
         SELECT 
             SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
@@ -55,10 +56,24 @@ async def handle_revenue_summary() -> Dict[str, Any]:
             MIN(recorded_at) FILTER (WHERE event_type = 'revenue') as first_revenue_at,
             MAX(recorded_at) FILTER (WHERE event_type = 'revenue') as last_revenue_at
         FROM revenue_events
-        WHERE recorded_at >= '{month_start.isoformat()}'
+        WHERE recorded_at >= '{period_start}'
         """
         
-        mtd_result = await query_db(sql.replace(month_start.isoformat(), month_start.isoformat()))
+        if include_subscriptions:
+            base_sql += """
+            UNION ALL
+            SELECT 
+                SUM(CASE WHEN status = 'active' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+                SUM(CASE WHEN status = 'active' THEN amount_cents ELSE 0 END) as total_cost_cents,
+                SUM(CASE WHEN status = 'active' THEN amount_cents ELSE 0 END) as net_profit_cents,
+                COUNT(*) FILTER (WHERE status = 'active') as transaction_count,
+                MIN(created_at) FILTER (WHERE status = 'active') as first_revenue_at,
+                MAX(created_at) FILTER (WHERE status = 'active') as last_revenue_at
+            FROM subscriptions
+            WHERE created_at >= '{period_start}'
+            """
+        
+        mtd_result = await query_db(base_sql.replace("{period_start}", month_start.isoformat()))
         mtd = mtd_result.get("rows", [{}])[0]
         
         qtd_result = await query_db(sql.replace(month_start.isoformat(), quarter_start.isoformat()))

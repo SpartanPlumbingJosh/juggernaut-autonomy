@@ -276,11 +276,11 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Automated experiment review system with revenue optimization"""
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
@@ -289,14 +289,16 @@ def review_experiments_stub(
     try:
         res = execute_sql(
             """
-            SELECT e.id, e.name, e.status, e.budget_spent, e.budget_limit, e.start_date, e.created_at,
+            SELECT e.id, e.name, e.status, e.budget_spent, e.budget_limit, e.start_date, e.created_at, e.roi_target,
                    COALESCE(
                        (SELECT SUM(net_amount) FROM revenue_events WHERE attribution->>'experiment_id' = e.id::text),
                        0
                    ) as revenue_generated,
                    COALESCE(e.budget_spent, 0) as actual_cost, e.experiment_type, e.metadata, e.hypothesis
             FROM experiments e
+            LEFT JOIN revenue_events re ON re.attribution->>'experiment_id' = e.id::text
             WHERE e.status IN ('running', 'completed')
+            GROUP BY e.id
             ORDER BY e.updated_at DESC NULLS LAST, e.created_at DESC
             LIMIT 50
             """
