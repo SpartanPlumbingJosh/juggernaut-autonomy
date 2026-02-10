@@ -5,13 +5,25 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhooks/stripe - Stripe webhook handler
+- POST /revenue/webhooks/paypal - PayPal webhook handler
 """
 
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from flask import Flask, request
 from core.database import query_db
+from payment_processor import PaymentProcessor
+
+# Initialize payment processor
+payment_processor = PaymentProcessor(
+    stripe_api_key=os.getenv('STRIPE_API_KEY'),
+    paypal_client_id=os.getenv('PAYPAL_CLIENT_ID'), 
+    paypal_secret=os.getenv('PAYPAL_SECRET')
+)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
