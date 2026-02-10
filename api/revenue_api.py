@@ -12,6 +12,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import PaymentProcessor
+from api.service_delivery import ServiceDelivery
+from api.customer_onboarding import CustomerOnboarding
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +116,65 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def handle_new_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new payment processing"""
+    try:
+        payment_processor = PaymentProcessor()
+        service_delivery = ServiceDelivery()
+        onboarding = CustomerOnboarding()
+        
+        # Create customer record
+        customer_data = body.get("customer", {})
+        customer_res = await onboarding.create_customer(customer_data)
+        if not customer_res.get("success"):
+            return _error_response(400, "Failed to create customer record")
+        
+        customer_id = customer_res.get("customer_id")
+        
+        # Process payment
+        payment_res = await payment_processor.create_payment(
+            amount=body.get("amount"),
+            currency=body.get("currency"),
+            method=body.get("payment_method"),
+            customer_data=customer_data
+        )
+        if not payment_res.get("success"):
+            return _error_response(400, f"Payment failed: {payment_res.get('error')}")
+        
+        # Record transaction
+        record_res = await payment_processor.record_transaction(
+            payment_id=payment_res.get("payment_id"),
+            amount=body.get("amount"),
+            currency=body.get("currency"),
+            customer_id=customer_id
+        )
+        if not record_res.get("success"):
+            return _error_response(500, "Failed to record transaction")
+        
+        # Deliver service
+        service_res = await service_delivery.deliver_service(
+            customer_id=customer_id,
+            service_type=body.get("service_type"),
+            payment_id=payment_res.get("payment_id")
+        )
+        if not service_res.get("success"):
+            return _error_response(500, f"Service delivery failed: {service_res.get('error')}")
+        
+        # Complete onboarding
+        onboarding_res = await onboarding.complete_onboarding(customer_id)
+        if not onboarding_res.get("success"):
+            return _error_response(500, "Onboarding completion failed")
+        
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_res.get("payment_id"),
+            "customer_id": customer_id,
+            "service_delivered": True
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
@@ -224,9 +286,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
     
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            body = json.loads(body or "{}")
+            return await handle_new_payment(body)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
+    
     # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
+        return await handle_revenue_transactions(query_params)
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
