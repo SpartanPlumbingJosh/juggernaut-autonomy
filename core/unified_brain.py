@@ -252,6 +252,7 @@ It is completely separate from Spartan Plumbing operations and focuses on digita
 - 69+ database tables, 350KB+ Python code
 - 5 autonomy levels (L1-L5): L1-L2 complete, L3 85%, L4 60%, L5 55%
 - Active Railway services: engine, watchdog, mcp, puppeteer, dashboard-api
+- Automated marketing services: funnel-engine, email-builder, ad-spender, cac-analyzer
 - 180+ completed governance tasks
 
 **Master reference:** JUGGERNAUT_STATUS.md in repo root
