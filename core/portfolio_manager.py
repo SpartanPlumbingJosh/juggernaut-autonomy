@@ -3,10 +3,16 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import logging
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.logging import logger
+
+# Configure experiment parameters
+MAX_EXPERIMENT_BUDGET = 1000.0  # $1000 max per experiment
+MIN_SCORE_THRESHOLD = 70.0  # Minimum score to run experiment
 
 
 def generate_revenue_ideas(
@@ -185,9 +191,13 @@ def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     max_new: int = 1,
-    min_score: float = 60.0,
-    budget: float = 20.0,
+    min_score: float = MIN_SCORE_THRESHOLD,
+    budget: float = 100.0,
 ) -> Dict[str, Any]:
+    """Start new experiments from top-scoring ideas with budget controls."""
+    if budget > MAX_EXPERIMENT_BUDGET:
+        logger.warning(f"Budget {budget} exceeds max allowed {MAX_EXPERIMENT_BUDGET}")
+        budget = MAX_EXPERIMENT_BUDGET
     try:
         res = execute_sql(
             f"""
