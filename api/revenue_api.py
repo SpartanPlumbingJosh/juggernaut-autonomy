@@ -162,6 +162,50 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_onboarding_start(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Initialize customer onboarding."""
+    try:
+        from core.services.onboarding_service import start_onboarding
+        required = ['email', 'product_id', 'amount_cents']
+        if not all(k in body for k in required):
+            return _error_response(400, f"Missing required fields: {required}")
+            
+        result = await start_onboarding(
+            execute_sql=query_db,
+            email=body['email'],
+            product_id=body['product_id'],
+            amount_cents=int(body['amount_cents'])
+        )
+        
+        if not result.get('success'):
+            return _error_response(400, str(result.get('error', 'Onboarding failed')))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
+
+async def handle_onboarding_complete(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Complete customer onboarding."""
+    try:
+        from core.services.onboarding_service import complete_onboarding
+        required = ['payment_intent_id', 'customer_id', 'product_id']
+        if not all(k in body for k in required):
+            return _error_response(400, f"Missing required fields: {required}")
+            
+        result = await complete_onboarding(
+            execute_sql=query_db,
+            payment_intent_id=body['payment_intent_id'],
+            customer_id=body['customer_id'],
+            product_id=body['product_id']
+        )
+        
+        if not result.get('success'):
+            return _error_response(400, str(result.get('error', 'Completion failed')))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Completion failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
