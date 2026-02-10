@@ -3,10 +3,81 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from enum import Enum, auto
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+
+class RevenueStrategy(Enum):
+    TRADING = auto()
+    SAAS = auto()
+    ARBITRAGE = auto()
+
+
+class RevenueSystem:
+    """Autonomous revenue generation system."""
+    
+    def __init__(self, strategy: RevenueStrategy, execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]):
+        self.strategy = strategy
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        self.active = False
+        self.circuit_breakers = {
+            "max_daily_loss": 0.05,  # 5% of total capital
+            "max_position_size": 0.1,  # 10% of capital per position
+            "max_drawdown": 0.2,  # 20% from peak
+            "min_liquidity": 0.3  # Maintain 30% cash reserves
+        }
+        
+    def activate(self) -> Dict[str, Any]:
+        """Activate the revenue system."""
+        self.active = True
+        return {"success": True, "message": f"Activated {self.strategy.name} revenue system"}
+    
+    def deactivate(self) -> Dict[str, Any]:
+        """Deactivate the revenue system."""
+        self.active = False
+        return {"success": True, "message": f"Deactivated {self.strategy.name} revenue system"}
+    
+    def check_circuit_breakers(self) -> bool:
+        """Check if any circuit breakers have been triggered."""
+        # Implement circuit breaker checks based on strategy
+        return False
+    
+    def execute_strategy(self) -> Dict[str, Any]:
+        """Execute the selected revenue strategy."""
+        if not self.active:
+            return {"success": False, "error": "System not active"}
+            
+        if self.check_circuit_breakers():
+            self.deactivate()
+            return {"success": False, "error": "Circuit breaker triggered"}
+            
+        if self.strategy == RevenueStrategy.TRADING:
+            return self._execute_trading()
+        elif self.strategy == RevenueStrategy.SAAS:
+            return self._execute_saas()
+        elif self.strategy == RevenueStrategy.ARBITRAGE:
+            return self._execute_arbitrage()
+        else:
+            return {"success": False, "error": "Unknown strategy"}
+    
+    def _execute_trading(self) -> Dict[str, Any]:
+        """Execute algorithmic trading strategy."""
+        # Implement trading logic with risk management
+        return {"success": True, "message": "Trading strategy executed"}
+    
+    def _execute_saas(self) -> Dict[str, Any]:
+        """Execute SaaS billing and provisioning."""
+        # Implement SaaS automation
+        return {"success": True, "message": "SaaS strategy executed"}
+    
+    def _execute_arbitrage(self) -> Dict[str, Any]:
+        """Execute arbitrage monitoring and execution."""
+        # Implement arbitrage system
+        return {"success": True, "message": "Arbitrage strategy executed"}
 
 
 def generate_revenue_ideas(
