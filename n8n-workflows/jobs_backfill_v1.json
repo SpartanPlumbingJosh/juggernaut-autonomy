@@ -1,0 +1,95 @@
+{
+  "name": "ST Jobs Backfill v1",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jobs-backfill",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "webhook-trigger",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// ============================================================\n// ST JOBS BACKFILL v1 — Self-triggering page processor\n// Fixes: page cursor always advances, graceful BU fallback,\n//        per-job error isolation\n// ============================================================\n\nconst NEON_URL = 'https://ep-crimson-bar-aetz67os.c-2.us-east-2.aws.neon.tech/sql';\nconst NEON_CONN = 'postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os.c-2.us-east-2.aws.neon.tech/neondb';\nconst ST_CLIENT_ID = 'cid.n4ndqmjxyqvklyrzm0t04nndl';\nconst ST_CLIENT_SECRET = 'cs3.d3ds63u40l7l7w5vit2xyhkgdw8zu7drsg2kwkvou8ddntxkci';\nconst ST_APP_KEY = 'ak1.tku36dgmajp842ozaxunmu2z8';\nconst ST_TENANT = '786349683';\nconst PAGE_SIZE = 50;\nconst POLL_KEY = 'st_jobs_backfill';\n\nconst EXCLUDED_BU_IDS = new Set(['1000003', '40473564']);\nconst EXCLUDED_JOB_TYPE_IDS = new Set(['40464382', '40464866', '40472671', '40474204', '40466532']);\n\nconst BU_TRACK_MAP = {\n  '40464378': 'service',\n  '40472669': 'service',\n  '44662719': 'install',\n  '44663237': 'service',\n  '44663388': 'install',\n  '44663626': 'service',\n  '44663783': 'service',\n  '44664003': 'install',\n  '44664189': 'service',\n  '44664642': 'service',\n  '44665021': 'service',\n  '44665160': 'install',\n  '44665308': 'install',\n  '44665438': 'service',\n  '44667199': 'install'\n};\n\nasync function neonQuery(sql) {\n  const resp = await $helpers.httpRequest({\n    method: 'POST',\n    url: NEON_URL,\n    headers: { 'Neon-Connection-String': NEON_CONN, 'Content-Type': 'application/json' },\n    body: JSON.stringify({ query: sql }),\n    returnFullResponse: false\n  });\n  return typeof resp === 'string' ? JSON.parse(resp) : resp;\n}\n\n// Refresh ST token\nconst tokenResp = await $helpers.httpRequest({\n  method: 'POST',\n  url: 'https://auth.servicetitan.io/connect/token',\n  headers: { 'Content-Type': 'application/x-www-form-urlencoded' },\n  body: `grant_type=client_credentials&client_id=${ST_CLIENT_ID}&client_secret=${ST_CLIENT_SECRET}`,\n  returnFullResponse: false\n});\nconst stToken = (typeof tokenResp === 'string' ? JSON.parse(tokenResp) : tokenResp).access_token;\n\n// Read current page\nconst stateResult = await neonQuery(`SELECT COALESCE(metadata->>'page', '1')::int AS page FROM spartan_ops.poll_state WHERE poll_key = '${POLL_KEY}' LIMIT 1`);\nconst currentPage = (stateResult.rows && stateResult.rows.length > 0) ? parseInt(stateResult.rows[0].page) || 1 : 1;\n\n// Fetch page from ST\nlet jobs = [], hasMore = false;\ntry {\n  const jobsResp = await $helpers.httpRequest({\n    method: 'GET',\n    url: `https://api.servicetitan.io/jpm/v2/tenant/${ST_TENANT}/jobs?page=${currentPage}&pageSize=${PAGE_SIZE}&includeTotal=false&orderBy=id&orderByDirection=asc`,\n    headers: { 'Authorization': `Bearer ${stToken}`, 'ST-App-Key': ST_APP_KEY },\n    returnFullResponse: false\n  });\n  const jobsData = typeof jobsResp === 'string' ? JSON.parse(jobsResp) : jobsResp;\n  jobs = jobsData.data || [];\n  hasMore = jobs.length === PAGE_SIZE;\n} catch(fetchErr) {\n  console.log(`Page ${currentPage} fetch error: ${fetchErr.message}`);\n}\n\n// Pre-fetch customers\nconst customerIds = [...new Set(jobs.map(j => j.customerId).filter(Boolean))];\nlet customerMap = {};\nif (customerIds.length > 0) {\n  try {\n    const idList = customerIds.map(id => `'${id}'`).join(',');\n    const cr = await neonQuery(`SELECT st_customer_id, name, address, phone, email FROM spartan_ops.st_customers WHERE st_customer_id IN (${idList})`);\n    if (cr.rows) for (const row of cr.rows) customerMap[row.st_customer_id] = row;\n  } catch(e) { console.log('Customer lookup error: ' + e.message); }\n}\n\nlet inserted = 0, skipped = 0, errors = 0;\n\nfor (const job of jobs) {\n  try {\n    const buId = String(job.businessUnitId || '');\n    const jobTypeId = String(job.jobTypeId || '');\n    if (EXCLUDED_BU_IDS.has(buId)) { skipped++; continue; }\n    if (EXCLUDED_JOB_TYPE_IDS.has(jobTypeId)) { skipped++; continue; }\n\n    const trackType = BU_TRACK_MAP[buId] || 'unknown';\n    const stStatus = (job.status || '').toLowerCase();\n    let status = 'active';\n    if (['completed','done'].includes(stStatus)) status = 'completed';\n    else if (['canceled','cancelled'].includes(stStatus)) status = 'cancelled';\n    else if (stStatus === 'hold') status = 'on_hold';\n\n    const cust = customerMap[String(job.customerId)] || {};\n    const esc = s => (s || '').replace(/'/g, \"''\").substring(0, 500);\n    const bookedAt = job.receivedOn ? `'${job.receivedOn}'` : 'NULL';\n    const completedAt = job.completedOn ? `'${job.completedOn}'` : 'NULL';\n    const schedDate = job.firstAppointmentDate ? `'${job.firstAppointmentDate.substring(0,10)}'` : 'NULL';\n    const soldAmount = job.invoice?.total != null ? job.invoice.total : 'NULL';\n    const isRecall = job.recallForJobId ? 'true' : 'false';\n    const rawJson = JSON.stringify(job).replace(/'/g, \"''\");\n\n    await neonQuery(`\n      INSERT INTO spartan_ops.jobs (st_job_id, st_job_number, st_customer_id, customer_name, customer_address, customer_phone, customer_email, job_type, job_description, track_type, status, booked_at, install_completed_at, scheduled_install_date, sold_amount, is_recall, st_raw_data, created_at, updated_at)\n      VALUES ('${job.id}', '${esc(job.jobNumber)}', '${job.customerId || ''}', '${esc(cust.name) || 'Unknown'}', '${esc(cust.address)}', '${esc(cust.phone)}', '${esc(cust.email)}', '${esc(job.type?.name || job.jobType?.name || '')}', '${esc((job.summary||'').substring(0,2000))}', '${trackType}', '${status}', ${bookedAt}, ${completedAt}, ${schedDate}, ${soldAmount}, ${isRecall}, '${rawJson}'::jsonb, NOW(), NOW())\n      ON CONFLICT (st_job_id) DO UPDATE SET st_job_number=EXCLUDED.st_job_number, job_type=EXCLUDED.job_type, job_description=EXCLUDED.job_description, track_type=EXCLUDED.track_type, status=EXCLUDED.status, booked_at=EXCLUDED.booked_at, install_completed_at=EXCLUDED.install_completed_at, scheduled_install_date=EXCLUDED.scheduled_install_date, sold_amount=EXCLUDED.sold_amount, is_recall=EXCLUDED.is_recall, st_raw_data=EXCLUDED.st_raw_data, updated_at=NOW()\n    `);\n    inserted++;\n  } catch(jobErr) {\n    errors++;\n    console.log(`Job ${job.id} error: ${jobErr.message}`);\n  }\n}\n\n// ALWAYS advance cursor — this is the core fix\nconst nextPage = currentPage + 1;\nawait neonQuery(`\n  INSERT INTO spartan_ops.poll_state (poll_key, last_poll_at, metadata)\n  VALUES ('${POLL_KEY}', NOW(), '{\"page\": ${nextPage}}'::jsonb)\n  ON CONFLICT (poll_key) DO UPDATE SET last_poll_at=NOW(), metadata='{\"page\": ${nextPage}}'::jsonb\n`);\n\nreturn [{ json: { page: currentPage, nextPage, jobsFetched: jobs.length, inserted, skipped, errors, hasMore, done: !hasMore } }];\n"
+      },
+      "id": "code-batch-processor",
+      "name": "Batch Processor",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "conditions": [
+            {
+              "id": "check-has-more",
+              "leftValue": "={{ $json.hasMore }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-has-more",
+      "name": "Has More Pages?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": { "amount": 2, "unit": "seconds" },
+      "id": "wait-node",
+      "name": "Wait 2s",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [900, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://n8n.thejuggernaut.org/webhook/jobs-backfill",
+        "options": {}
+      },
+      "id": "self-trigger",
+      "name": "Trigger Next Page",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({status: 'done', page: $('Batch Processor').item.json.page, inserted: $('Batch Processor').item.json.inserted}) }}",
+        "options": {}
+      },
+      "id": "respond-done",
+      "name": "Respond Done",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1,
+      "position": [900, 400]
+    }
+  ],
+  "connections": {
+    "Webhook": { "main": [[{ "node": "Batch Processor", "type": "main", "index": 0 }]] },
+    "Batch Processor": { "main": [[{ "node": "Has More Pages?", "type": "main", "index": 0 }]] },
+    "Has More Pages?": {
+      "main": [
+        [{ "node": "Wait 2s", "type": "main", "index": 0 }],
+        [{ "node": "Respond Done", "type": "main", "index": 0 }]
+      ]
+    },
+    "Wait 2s": { "main": [[{ "node": "Trigger Next Page", "type": "main", "index": 0 }]] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "tags": []
+}
