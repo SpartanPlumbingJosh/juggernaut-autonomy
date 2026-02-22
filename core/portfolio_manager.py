@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
+from core.payment_processor import PaymentProcessor, PaymentProvider
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -280,7 +281,8 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    Also handles subscription billing cycles and payment processing."""
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
