@@ -8,10 +8,12 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from delivery.automated_delivery import AutomatedDelivery
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +34,12 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+def initialize_revenue_system(stripe_api_key: str) -> None:
+    """Initialize the revenue system with required configurations"""
+    global delivery_system
+    delivery_system = AutomatedDelivery(stripe_api_key)
+    logging.info("Revenue system initialized")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -113,6 +121,22 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def process_payment_and_delivery(order_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment and delivery for an order"""
+    try:
+        if "delivery_system" not in globals():
+            return _error_response(500, "Revenue system not initialized")
+            
+        result = await delivery_system.process_order(order_data)
+        
+        if result["status"] != "success":
+            return _error_response(400, f"Order processing failed: {result.get('error', 'unknown')}")
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Order processing error: {str(e)}")
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
