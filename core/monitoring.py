@@ -1180,3 +1180,54 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+import logging
+from datetime import datetime
+from typing import Dict, Any
+from fastapi import Request
+from fastapi.middleware.base import BaseHTTPMiddleware
+
+logger = logging.getLogger("monitoring")
+
+class MonitoringMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        start_time = datetime.now()
+        
+        try:
+            response = await call_next(request)
+            process_time = (datetime.now() - start_time).total_seconds()
+            
+            logger.info(
+                "Request processed",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status": response.status_code,
+                    "duration": process_time
+                }
+            )
+            
+            return response
+        except Exception as e:
+            logger.error(
+                "Request failed",
+                extra={
+                    "method": request.method,
+                    "path": request.url.path,
+                    "error": str(e)
+                }
+            )
+            raise
+
+def log_transaction(event: str, data: Dict[str, Any]):
+    """Log revenue-related events."""
+    logger.info(
+        f"Revenue transaction: {event}",
+        extra=data
+    )
+
+def log_error(error: Exception, context: Dict[str, Any]):
+    """Log errors with context."""
+    logger.error(
+        f"Revenue system error: {str(error)}",
+        extra=context
+    )
