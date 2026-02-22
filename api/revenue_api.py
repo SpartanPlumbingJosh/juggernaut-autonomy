@@ -12,6 +12,16 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from typing import TypedDict
+
+class PremiumSubscriptionEvent(TypedDict):
+    subscription_id: str
+    customer_id: str
+    status: str
+    amount_cents: int
+    currency: str
+    period_start: datetime
+    period_end: datetime
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +42,25 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+def _process_subscription_payment(sub_event: PremiumSubscriptionEvent) -> Dict[str, Any]:
+    """Record a subscription payment."""
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    subscription_amount = int(sub_event["amount_cents"] * 0.92)  # After 8% processor fee
+    
+    return {
+        "event_type": "revenue",
+        "amount_cents": subscription_amount,
+        "currency": sub_event["currency"],
+        "metadata": {
+            "subscription_id": sub_event["subscription_id"],
+            "customer_id": sub_event["customer_id"],
+            "period_start": sub_event["period_start"].isoformat(),
+            "period_end": sub_event["period_end"].isoformat(),
+            "platform_fee_cents": sub_event["amount_cents"] - subscription_amount,
+            "platform": "stripe"
+        }
+    }
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
