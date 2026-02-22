@@ -10,8 +10,10 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from decimal import Decimal
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor, SubscriptionManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +34,60 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        amount = Decimal(str(body.get('amount', 0)))
+        metadata = body.get('metadata', {})
+        
+        processor = PaymentProcessor()
+        result = await processor.create_payment_intent(amount, metadata)
+        
+        if not result['success']:
+            return _error_response(400, result['error'])
+            
+        return _make_response(200, {
+            'client_secret': result['client_secret'],
+            'payment_id': result['payment_id']
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation."""
+    try:
+        customer_id = body.get('customer_id')
+        plan_id = body.get('plan_id')
+        
+        manager = SubscriptionManager()
+        result = await manager.create_subscription(customer_id, plan_id)
+        
+        if not result['success']:
+            return _error_response(400, result['error'])
+            
+        return _make_response(200, {
+            'subscription_id': result['subscription_id'],
+            'status': result['status']
+        })
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
+async def handle_webhook(body: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhooks."""
+    try:
+        source = headers.get('X-Payment-Source')
+        signature = headers.get('Stripe-Signature', headers.get('Paypal-Signature', ''))
+        
+        processor = PaymentProcessor()
+        result = await processor.handle_webhook(body, signature, source)
+        
+        if not result['success']:
+            return _error_response(400, result['error'])
+            
+        return _make_response(200, {'status': 'processed'})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -210,7 +266,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +287,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        return handle_payment_intent(json.loads(body or '{}'))
+        
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_subscription(json.loads(body or '{}'))
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(json.loads(body or '{}'), headers or {})
     
     return _error_response(404, "Not found")
 
