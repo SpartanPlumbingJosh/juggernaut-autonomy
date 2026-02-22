@@ -135,7 +135,9 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
             source,
             metadata,
             recorded_at,
-            created_at
+            created_at,
+            (metadata->>'acquisition_channel') as acquisition_channel,
+            (metadata->>'campaign_id') as campaign_id
         FROM revenue_events
         {where_clause}
         ORDER BY recorded_at DESC
@@ -161,6 +163,37 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
+
+async def handle_acquisition_metrics(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get customer acquisition metrics by channel."""
+    try:
+        days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        sql = f"""
+        SELECT 
+            metadata->>'acquisition_channel' as channel,
+            COUNT(DISTINCT metadata->>'customer_id') as customers,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as cost_cents,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as profit_cents
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        AND metadata->>'acquisition_channel' IS NOT NULL
+        GROUP BY channel
+        ORDER BY profit_cents DESC
+        """
+        
+        result = await query_db(sql)
+        metrics = result.get("rows", [])
+        
+        return _make_response(200, {
+            "metrics": metrics,
+            "period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch acquisition metrics: {str(e)}")
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
@@ -227,6 +260,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
         return handle_revenue_transactions(query_params)
+    
+    # GET /revenue/acquisition
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "acquisition" and method == "GET":
+        return handle_acquisition_metrics(query_params)
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
