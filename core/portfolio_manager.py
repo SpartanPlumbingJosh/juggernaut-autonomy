@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.billing_manager import BillingManager
 
 
 def generate_revenue_ideas(
@@ -275,6 +277,51 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+async def run_billing_cycle(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Run automated billing cycle including invoice generation and payment processing."""
+    billing_manager = BillingManager()
+    
+    # Generate recurring invoices
+    invoice_result = await billing_manager.generate_recurring_invoices(execute_sql)
+    if not invoice_result.get("success"):
+        log_action(
+            "billing.invoice_generation_failed",
+            "Failed to generate recurring invoices",
+            level="error",
+            output_data=invoice_result
+        )
+        return invoice_result
+        
+    # Process pending invoices
+    payment_result = await billing_manager.process_pending_invoices(execute_sql)
+    if not payment_result.get("success"):
+        log_action(
+            "billing.payment_processing_failed",
+            "Failed to process pending invoices",
+            level="error",
+            output_data=payment_result
+        )
+        return payment_result
+        
+    log_action(
+        "billing.cycle_completed",
+        "Billing cycle completed successfully",
+        level="info",
+        output_data={
+            "invoices_generated": invoice_result.get("generated", 0),
+            "payments_processed": payment_result.get("processed", 0)
+        }
+    )
+    
+    return {
+        "success": True,
+        "invoices_generated": invoice_result.get("generated", 0),
+        "payments_processed": payment_result.get("processed", 0)
+    }
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
