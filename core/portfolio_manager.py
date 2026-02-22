@@ -1,19 +1,46 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+# Rate limits - max calls per minute
+RATE_LIMITS = {
+    'generate_ideas': 30,  
+    'score_ideas': 60,
+    'start_experiments': 10,
+    'review_experiments': 120
+}
+
+def _check_rate_limit(last_called: Dict[str, float], endpoint: str) -> Tuple[bool, Optional[float]]:
+    """Check if request is within rate limits."""
+    now = time.time()
+    min_interval = 60 / RATE_LIMITS[endpoint]
+    
+    if endpoint in last_called and (now - last_called[endpoint]) < min_interval:
+        wait_time = min_interval - (now - last_called[endpoint])
+        return False, wait_time
+    return True, None
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=lambda retry_state: print(f"Retrying after error: {retry_state.outcome.exception()}")  
+)
 def generate_revenue_ideas(
-    execute_sql: Callable[[str], Dict[str, Any]],
+    execute_sql: Callable[[str], Dict[str, Any]], 
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    last_called: Optional[Dict[str, float]] = None
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()

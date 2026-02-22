@@ -8,8 +8,19 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+
+# Configure Stripe
+stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
+PAYMENT_PROVIDERS = {
+    'stripe': {
+        'api_key': os.getenv("STRIPE_SECRET_KEY"),
+        'webhook_secret': os.getenv("STRIPE_WEBHOOK_SECRET"),
+        'max_retries': 3
+    }
+}
 
 from core.database import query_db
 
@@ -29,8 +40,26 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
-    """Create error response."""
-    return _make_response(status_code, {"error": message})
+    """Create error response with detailed logging."""
+    error_id = f"err_{int(time.time())}_{random.randint(1000,9999)}"
+    log_data = {
+        "error_id": error_id,
+        "status_code": status_code,
+        "message": message,
+        "timestamp": datetime.now(timezone.utc).isoformat()
+    }
+    
+    # Send to monitoring service
+    try:
+        httpx.post(os.getenv("MONITORING_WEBHOOK"), json=log_data)
+    except Exception:
+        pass
+        
+    return _make_response(status_code, {
+        "error": message,
+        "error_id": error_id,
+        "documentation": "https://errors.example.com/" + error_id
+    })
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
