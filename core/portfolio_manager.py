@@ -1,12 +1,62 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+logger = logging.getLogger(__name__)
+
+def generate_seo_content(execute_sql: Callable[[str], Dict[str, Any]], topic: str) -> Dict[str, Any]:
+    """Generate SEO-optimized content for customer acquisition"""
+    try:
+        # Generate content ideas based on topic
+        generator = IdeaGenerator()
+        content_ideas = generator.generate_ideas({"topic": topic, "content_type": "blog_post"})
+        
+        # Select top idea and generate detailed content
+        if content_ideas:
+            selected_idea = content_ideas[0]
+            content = f"""
+            <h1>{selected_idea.get('title', '')}</h1>
+            <p>{selected_idea.get('description', '')}</p>
+            <h2>Key Points</h2>
+            <ul>
+                <li>{selected_idea.get('hypothesis', '')}</li>
+                <li>{selected_idea.get('timeliness', '')}</li>
+                <li>{selected_idea.get('evidence_type', '')}</li>
+            </ul>
+            """
+            
+            # Track content performance
+            execute_sql(f"""
+                INSERT INTO seo_content (id, topic, content, created_at)
+                VALUES (gen_random_uuid(), '{topic}', '{content}', NOW())
+            """)
+            
+            return {"success": True, "content": content}
+        return {"success": False, "error": "No content ideas generated"}
+    except Exception as e:
+        logger.error(f"SEO content generation failed: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+def track_referral(execute_sql: Callable[[str], Dict[str, Any]], referral_code: str) -> Dict[str, Any]:
+    """Track referral conversions"""
+    try:
+        execute_sql(f"""
+            UPDATE referrals
+            SET conversions = conversions + 1,
+                last_conversion_at = NOW()
+            WHERE code = '{referral_code}'
+        """)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Referral tracking failed: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 
 def generate_revenue_ideas(
