@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from decimal import Decimal
+
+logger = logging.getLogger(__name__)
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer

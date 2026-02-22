@@ -33,7 +33,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(execute_sql: Optional[callable] = None) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -58,7 +58,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         WHERE recorded_at >= '{month_start.isoformat()}'
         """
         
-        mtd_result = await query_db(sql.replace(month_start.isoformat(), month_start.isoformat()))
+        db = execute_sql if execute_sql else query_db
+        mtd_result = await db(sql.replace(month_start.isoformat(), month_start.isoformat()))
         mtd = mtd_result.get("rows", [{}])[0]
         
         qtd_result = await query_db(sql.replace(month_start.isoformat(), quarter_start.isoformat()))
