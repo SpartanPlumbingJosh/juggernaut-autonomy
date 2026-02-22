@@ -5,11 +5,13 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Payment webhook handler
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from api.payment_handlers import handle_payment_webhook
 
 from core.database import query_db
 
@@ -231,6 +233,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            event = json.loads(body or "{}")
+            return await handle_payment_webhook(event)
+        except Exception as e:
+            return _error_response(400, f"Invalid webhook payload: {str(e)}")
     
     return _error_response(404, "Not found")
 
