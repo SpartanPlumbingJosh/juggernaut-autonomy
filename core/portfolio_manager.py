@@ -276,6 +276,72 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def recognize_revenue(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    days_back: int = 7
+) -> Dict[str, Any]:
+    """Automatically recognize revenue from successful experiments."""
+    try:
+        # Get experiments that generated revenue but haven't been recognized
+        sql = f"""
+        SELECT e.id, e.name, 
+               COALESCE(SUM(r.amount_cents), 0) as revenue_cents,
+               COUNT(r.id) as transaction_count
+        FROM experiments e
+        LEFT JOIN revenue_events r ON r.attribution->>'experiment_id' = e.id::text
+        WHERE e.status = 'completed'
+          AND e.revenue_recognized = false
+          AND e.completed_at >= NOW() - INTERVAL '{days_back} days'
+        GROUP BY e.id
+        HAVING COALESCE(SUM(r.amount_cents), 0) > 0
+        """
+        
+        result = execute_sql(sql)
+        experiments = result.get("rows", [])
+        
+        recognized = 0
+        for exp in experiments:
+            try:
+                execute_sql(f"""
+                    UPDATE experiments
+                    SET revenue_recognized = true,
+                        total_revenue_cents = {exp['revenue_cents']},
+                        updated_at = NOW()
+                    WHERE id = '{exp['id']}'
+                """)
+                recognized += 1
+                
+                log_action(
+                    "revenue.recognized",
+                    f"Recognized ${exp['revenue_cents']/100:.2f} revenue for {exp['name']}",
+                    level="info",
+                    output_data={
+                        "experiment_id": exp['id'],
+                        "amount_cents": exp['revenue_cents'],
+                        "transactions": exp['transaction_count']
+                    }
+                )
+            except Exception as e:
+                log_action(
+                    "revenue.recognition_failed",
+                    f"Failed to recognize revenue for {exp['name']}: {str(e)}",
+                    level="error",
+                    error_data={"experiment_id": exp['id'], "error": str(e)}
+                )
+        
+        return {
+            "success": True,
+            "recognized": recognized,
+            "total_experiments": len(experiments)
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

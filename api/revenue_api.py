@@ -1,17 +1,27 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and processing.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/process - Process new payment
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import logging
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+from payment_processor import PaymentProcessor
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Initialize payment processor
+processor = PaymentProcessor(api_key="sk_test_your_stripe_key")  # Should be from config
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +172,61 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a new payment and record revenue event."""
+    try:
+        required_fields = ["amount_cents", "currency", "customer_id", "payment_method_id"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required payment fields")
+
+        # Process payment
+        success, result = processor.charge_customer(
+            amount_cents=body["amount_cents"],
+            currency=body["currency"],
+            customer_id=body["customer_id"],
+            payment_method_id=body["payment_method_id"],
+            description=body.get("description", "")
+        )
+
+        if not success:
+            return _error_response(400, result.get("error", "Payment failed"))
+
+        # Record revenue event
+        metadata = {
+            "payment_id": result["id"],
+            "source": body.get("source", "api"),
+            "customer_id": body["customer_id"]
+        }
+
+        await execute_sql(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {body["amount_cents"]},
+                '{body["currency"]}',
+                '{body.get("source", "api")}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+
+        return _make_response(200, {
+            "success": True,
+            "payment_id": result["id"],
+            "amount_cents": body["amount_cents"],
+            "currency": body["currency"]
+        })
+
+    except Exception as e:
+        logger.error(f"Payment processing failed: {str(e)}")
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +296,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/process
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return await handle_process_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
