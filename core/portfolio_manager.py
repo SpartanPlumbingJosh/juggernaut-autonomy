@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.revenue_engine import RevenueEngine
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
