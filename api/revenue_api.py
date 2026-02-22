@@ -232,6 +232,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # Marketing endpoints
+    if len(parts) >= 2 and parts[0] == "marketing":
+        from marketing_automation import automation
+        
+        # POST /marketing/campaigns
+        if len(parts) == 2 and parts[1] == "campaigns" and method == "POST":
+            try:
+                campaign_config = json.loads(body or "{}")
+                result = await automation.launch_campaign(campaign_config)
+                return _make_response(201, result)
+            except Exception as e:
+                return _error_response(400, f"Invalid campaign config: {str(e)}")
+        
+        # GET /marketing/stats
+        if len(parts) == 2 and parts[1] == "stats" and method == "GET":
+            stats = await automation.get_conversion_stats()
+            return _make_response(200, stats)
+    
     return _error_response(404, "Not found")
 
 
