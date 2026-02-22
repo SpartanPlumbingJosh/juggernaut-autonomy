@@ -12,6 +12,23 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import PaymentProcessor
+from services.product_delivery import ProductDelivery
+from automation.customer_onboarding import CustomerOnboarding
+from security.fraud_detection import FraudDetection
+
+# Initialize components
+payment_processor = PaymentProcessor(
+    stripe_key="sk_test_...",  # Replace with your Stripe key
+    paypal_config={
+        "mode": "sandbox",  # or "live"
+        "client_id": "...",
+        "client_secret": "..."
+    }
+)
+product_delivery = ProductDelivery()
+customer_onboarding = CustomerOnboarding()
+fraud_detection = FraudDetection()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
