@@ -12,6 +12,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_service import PaymentService
+from services.service_delivery import ServiceDelivery
+
+payment_service = PaymentService()
+service_delivery = ServiceDelivery()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +236,31 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment - Create payment intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            return await payment_service.create_payment_intent(
+                amount=payload.get("amount"),
+                currency=payload.get("currency", "usd"),
+                payment_method=payload.get("payment_method", "stripe"),
+                metadata=payload.get("metadata", {})
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
+    
+    # POST /revenue/delivery - Initiate service delivery
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "delivery" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            return await service_delivery.create_delivery(
+                customer_id=payload.get("customer_id"),
+                service_type=payload.get("service_type"),
+                parameters=payload.get("parameters", {})
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
     
     return _error_response(404, "Not found")
 
