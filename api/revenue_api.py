@@ -1,17 +1,25 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core monetization and payment processing system.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment session
+- POST /revenue/webhook - Payment processor webhook
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import settings
+
+# Configure Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
+stripe.max_network_retries = 3
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +170,92 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        amount = int(float(body.get("amount", 0)) * 100)  # Convert to cents
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': body.get("description", "Service"),
+                    },
+                    'unit_amount': amount,
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=body.get("success_url", settings.STRIPE_SUCCESS_URL),
+            cancel_url=body.get("cancel_url", settings.STRIPE_CANCEL_URL),
+            metadata={
+                "user_id": body.get("user_id"),
+                "service_id": body.get("service_id"),
+            }
+        )
+
+        return _make_response(200, {
+            "session_id": session.id,
+            "url": session.url
+        })
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+
+async def handle_webhook(payload: str, sig_header: str) -> Dict[str, Any]:
+    """Process Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            await record_payment(
+                amount_cents=session['amount_total'],
+                currency=session['currency'],
+                source="stripe",
+                metadata={
+                    "stripe_session_id": session['id'],
+                    **session.get('metadata', {})
+                }
+            )
+
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(400, f"Webhook error: {str(e)}")
+
+
+async def record_payment(
+    amount_cents: int,
+    currency: str,
+    source: str,
+    metadata: Dict[str, Any]
+) -> None:
+    """Record payment in revenue_events table."""
+    await query_db(
+        f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency,
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            '{source}',
+            '{json.dumps(metadata)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+    )
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +325,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_checkout(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        return handle_webhook(body or "", sig_header)
     
     return _error_response(404, "Not found")
 
