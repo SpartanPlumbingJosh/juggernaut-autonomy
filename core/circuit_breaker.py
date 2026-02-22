@@ -288,3 +288,59 @@ def initialize_common_circuit_breakers():
 
 # Initialize on import
 initialize_common_circuit_breakers()
+"""
+Circuit breaker pattern implementation for fault tolerance.
+"""
+
+import time
+from typing import Optional
+from enum import Enum, auto
+
+class CircuitState(Enum):
+    CLOSED = auto()
+    OPEN = auto()
+    HALF_OPEN = auto()
+
+class CircuitBreaker:
+    def __init__(self, max_failures: int = 5, reset_timeout: int = 60):
+        self.max_failures = max_failures
+        self.reset_timeout = reset_timeout
+        self.failure_count = 0
+        self.last_failure_time: Optional[float] = None
+        self.state = CircuitState.CLOSED
+
+    def is_open(self) -> bool:
+        """Check if circuit is open (requests should be blocked)"""
+        if self.state == CircuitState.OPEN:
+            # Check if we should transition to HALF_OPEN
+            if (time.time() - (self.last_failure_time or 0)) > self.reset_timeout:
+                self.state = CircuitState.HALF_OPEN
+                return False
+            return True
+        return False
+
+    def record_success(self) -> None:
+        """Record a successful operation"""
+        if self.state == CircuitState.HALF_OPEN:
+            # Successful operation in HALF_OPEN state - reset circuit
+            self._reset()
+        elif self.state == CircuitState.CLOSED:
+            # Reset failure count on consecutive successes
+            self.failure_count = max(0, self.failure_count - 1)
+
+    def record_failure(self) -> None:
+        """Record a failed operation"""
+        self.failure_count += 1
+        self.last_failure_time = time.time()
+        
+        if (self.state == CircuitState.CLOSED and 
+            self.failure_count >= self.max_failures):
+            self.state = CircuitState.OPEN
+        elif self.state == CircuitState.HALF_OPEN:
+            self.state = CircuitState.OPEN
+
+    def _reset(self) -> None:
+        """Reset circuit to CLOSED state"""
+        self.state = CircuitState.CLOSED
+        self.failure_count = 0
+        self.last_failure_time = None
