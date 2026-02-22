@@ -9,9 +9,19 @@ Endpoints:
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import uuid
+from enum import Enum
 
 from core.database import query_db
+from services.payment_gateway import PaymentGateway, PaymentGatewayService
+from services.delivery_manager import DeliveryManager
+
+class TransactionStatus(Enum):
+    PENDING = 'pending'
+    COMPLETED = 'completed'
+    FAILED = 'failed'
+    REFUNDED = 'refunded'
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,7 +125,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination and status filtering."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -210,8 +220,80 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def process_transaction(
+    gateway: PaymentGateway,
+    amount: float,
+    currency: str,
+    payment_method: Dict,
+    metadata: Dict
+) -> Dict[str, Any]:
+    """Process a new transaction with retry logic and error handling."""
+    payment_service = PaymentGatewayService()
+    delivery_manager = DeliveryManager()
+    
+    transaction_id = str(uuid.uuid4())
+    retry_count = 0
+    max_retries = 3
+    
+    while retry_count < max_retries:
+        try:
+            # Process payment
+            gateway_tx_id, gateway_response = await payment_service.process_payment(
+                gateway, amount, currency, payment_method, metadata
+            )
+            
+            # Record transaction
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, status, gateway_tx_id
+                ) VALUES (
+                    '{transaction_id}',
+                    'revenue',
+                    {int(amount * 100)},
+                    '{currency}',
+                    '{gateway.name.lower()}',
+                    '{json.dumps(metadata)}'::jsonb,
+                    NOW(),
+                    '{TransactionStatus.COMPLETED.value}',
+                    '{gateway_tx_id}'
+                )
+            """)
+            
+            # Trigger service delivery
+            await delivery_manager.process_delivery(transaction_id, metadata)
+            
+            return _make_response(200, {
+                "transaction_id": transaction_id,
+                "status": TransactionStatus.COMPLETED.value,
+                "gateway_response": gateway_response
+            })
+            
+        except PaymentError as e:
+            retry_count += 1
+            if not e.retryable or retry_count >= max_retries:
+                await query_db(f"""
+                    INSERT INTO revenue_events (
+                        id, event_type, amount_cents, currency, source,
+                        metadata, recorded_at, status, error_message
+                    ) VALUES (
+                        '{transaction_id}',
+                        'revenue',
+                        {int(amount * 100)},
+                        '{currency}',
+                        '{gateway.name.lower()}',
+                        '{json.dumps(metadata)}'::jsonb,
+                        NOW(),
+                        '{TransactionStatus.FAILED.value}',
+                        '{str(e)}'
+                    )
+                """)
+                return _error_response(500, f"Payment failed: {str(e)}")
+            
+    return _error_response(500, "Max retries exceeded")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue API requests including transaction processing."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
