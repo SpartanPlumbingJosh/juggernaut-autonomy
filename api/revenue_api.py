@@ -12,6 +12,16 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+from services.customer_onboarding import CustomerOnboarding
+from services.billing_manager import BillingManager
+from services.service_delivery import ServiceDelivery
+
+# Initialize services
+payment_processor = PaymentProcessor(stripe_api_key="sk_test_12345")
+customer_onboarding = CustomerOnboarding(payment_processor)
+billing_manager = BillingManager(payment_processor)
+service_delivery = ServiceDelivery()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
