@@ -5,13 +5,16 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscribe - Create new subscription
+- POST /revenue/webhook - Stripe webhook handler
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from services.subscription_service import SubscriptionService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +213,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -232,6 +235,31 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            user_id = data.get("user_id")
+            plan_id = data.get("plan_id")
+            if not user_id or not plan_id:
+                return _error_response(400, "Missing user_id or plan_id")
+            
+            service = SubscriptionService()
+            result = await service.create_checkout_session(user_id, plan_id)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Subscription failed: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            sig_header = query_params.get("stripe-signature", [""])[0]
+            service = SubscriptionService()
+            result = await service.handle_webhook(body.encode(), sig_header)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(400, f"Webhook failed: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
