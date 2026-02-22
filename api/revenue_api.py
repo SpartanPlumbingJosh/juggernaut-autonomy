@@ -90,6 +90,7 @@ async def handle_revenue_summary(user: User = Depends(authenticate_user)) -> Dic
         all_time = all_time_result.get("rows", [{}])[0]
         
         return _make_response(200, {
+            "user": user_summary,
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
                 "cost_cents": mtd.get("total_cost_cents") or 0,
