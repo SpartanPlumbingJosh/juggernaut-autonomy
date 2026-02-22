@@ -162,6 +162,22 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhooks."""
+    try:
+        from services.payment_gateway import PaymentGateway
+        pg = PaymentGateway()
+        
+        signature = headers.get("Stripe-Signature") or headers.get("PAYPAL-AUTH-ALGO")
+        result = await pg.handle_webhook(body, signature)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+            
+        return _make_response(200, {"processed": result.get("processed", False)})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,7 +226,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +247,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing webhook body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_webhook(body_data, headers or {})
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 

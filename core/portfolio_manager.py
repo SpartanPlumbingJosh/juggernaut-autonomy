@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from services.payment_gateway import PaymentGateway
 
 
 def generate_revenue_ideas(
@@ -14,14 +17,49 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    retries: int = 3,
+    retry_delay: int = 2
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with retry mechanism."""
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
 
     created = 0
     failures: List[Dict[str, Any]] = []
-    for idea in ideas:
+    pg = PaymentGateway()
+    
+    def process_idea(idea: Dict[str, Any]) -> bool:
+        nonlocal created
+        title = str(idea.get("title") or "")
+        if not title:
+            return False
+
+        for attempt in range(retries):
+            try:
+                # Create payment link for the idea
+                payment = pg.create_payment(
+                    amount=float(idea.get("price", 0)),
+                    currency="usd",
+                    metadata={
+                        "title": title,
+                        "description": str(idea.get("description") or ""),
+                        "tags": idea.get("tags", [])
+                    }
+                )
+                
+                if not payment.get("success"):
+                    raise Exception(payment.get("error", "Payment failed"))
+                
+                # Add payment link to idea metadata
+                idea["payment_link"] = payment.get("approval_url") or payment.get("client_secret")
+                
+                # Rest of the idea processing logic...
+                dedupe_key = f"revenue_idea:{title.strip().lower()}"
+                title_esc = title.replace("'", "''")
+                desc_esc = str(idea.get("description") or "").replace("'", "''")
+                hyp_esc = str(idea.get("hypothesis") or "").replace("'", "''")
+                estimates_json = json.dumps(idea.get("estimates") or {}).replace("'", "''")
         title = str(idea.get("title") or "")
         if not title:
             continue
