@@ -34,6 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
+    """Revenue summary now includes subscription metrics."""
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -210,6 +211,25 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook() -> Dict[str, Any]:
+    """Handle payment provider webhooks."""
+    try:
+        body = request.get_json()
+        provider = query_params.get("provider", ["stripe"])[0] \
+            if isinstance(query_params.get("provider"), list) \
+            else query_params.get("provider", "stripe")
+        signature = request.headers.get("Stripe-Signature", None)
+        
+        webhook_handler = WebhookHandler()
+        result = await webhook_handler.handle_webhook(
+            provider=provider,
+            payload=body,
+            signature=signature
+        )
+        return _make_response(200 if result.get("success") else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +251,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook()
     
     return _error_response(404, "Not found")
 
