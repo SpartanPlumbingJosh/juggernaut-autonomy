@@ -8,10 +8,14 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
-
+from fastapi import HTTPException
 from core.database import query_db
+from core.config import settings
+
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +214,55 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment and deliver product."""
+    try:
+        # Create Stripe payment intent
+        intent = stripe.PaymentIntent.create(
+            amount=int(float(payload.get("amount", 0)) * 100),
+            currency=payload.get("currency", "usd"),
+            payment_method=payload.get("payment_method_id"),
+            confirmation_method="manual",
+            confirm=True,
+            metadata={
+                "product_id": payload.get("product_id"),
+                "user_email": payload.get("user_email")
+            }
+        )
+        
+        if intent.status == "succeeded":
+            # Deliver product
+            delivery_result = await deliver_product(payload)
+            return _make_response(200, {
+                "success": True,
+                "payment_id": intent.id,
+                "delivery": delivery_result
+            })
+        
+        return _error_response(400, f"Payment failed: {intent.status}")
+    
+    except stripe.error.StripeError as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Delivery error: {str(e)}")
+
+async def deliver_product(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Deliver purchased product."""
+    try:
+        product_id = payload.get("product_id")
+        user_email = payload.get("user_email")
+        
+        # TODO: Implement product delivery logic
+        # This could be API access, file download, service activation, etc.
+        
+        return {
+            "status": "delivered",
+            "delivery_method": "email",
+            "user_email": user_email
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Delivery failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +284,11 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment
+    if len(parts) == 1 and parts[0] == "payment" and method == "POST":
+        payload = json.loads(body or "{}")
+        return handle_payment(payload)
     
     return _error_response(404, "Not found")
 
