@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.billing_manager import BillingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,21 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /billing/webhook - Stripe webhook handler
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        billing_manager = BillingManager()
+        return billing_manager.handle_webhook(body.encode(), query_params.get("stripe-signature", ""))
+    
+    # POST /billing/subscribe - Create subscription
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscribe" and method == "POST":
+        billing_manager = BillingManager()
+        body_data = json.loads(body or "{}")
+        return billing_manager.create_subscription(
+            body_data.get("customer_id"),
+            body_data.get("price_id"),
+            body_data.get("tax_rate_id")
+        )
     
     return _error_response(404, "Not found")
 
