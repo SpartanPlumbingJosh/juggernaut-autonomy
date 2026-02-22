@@ -1,13 +1,17 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Automated revenue tracking and SaaS billing infrastructure.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscribe - Create new subscription
+- POST /revenue/webhook - Stripe webhook handler
+- GET /revenue/plans - List available plans
 """
 
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -162,6 +166,95 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new subscription signup."""
+    try:
+        from stripe_integration import StripePaymentProcessor
+        
+        email = body.get('email')
+        name = body.get('name')
+        plan_id = body.get('plan_id')
+        
+        if not all([email, name, plan_id]):
+            return _error_response(400, "Missing required fields")
+            
+        stripe = StripePaymentProcessor(
+            api_key=os.environ['STRIPE_API_KEY'],
+            webhook_secret=os.environ['STRIPE_WEBHOOK_SECRET']
+        )
+        
+        # Create customer 
+        customer = stripe.create_customer(email, name)
+        if not customer['success']:
+            return _error_response(500, customer['error'])
+            
+        # Create subscription
+        subscription = stripe.create_subscription(
+            customer['customer_id'],
+            plan_id
+        )
+        
+        if not subscription['success']:
+            return _error_response(500, subscription['error'])
+            
+        return _make_response(200, {
+            'success': True,
+            'client_secret': subscription['client_secret'],
+            'subscription_id': subscription['subscription_id']
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
+
+
+async def handle_webhook_event(body: str, headers: Dict) -> Dict[str, Any]:
+    """Handle Stripe webhook events for payment processing."""
+    try:
+        from stripe_integration import StripePaymentProcessor
+        
+        stripe = StripePaymentProcessor(
+            api_key=os.environ['STRIPE_API_KEY'],
+            webhook_secret=os.environ['STRIPE_WEBHOOK_SECRET']
+        )
+        
+        result = stripe.handle_webhook(
+            payload=body,
+            sig_header=headers.get('Stripe-Signature')
+        )
+        
+        if not result['success']:
+            return _error_response(400, result['error'])
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+
+async def list_subscription_plans() -> Dict[str, Any]:
+    """List available subscription plans."""
+    try:
+        plans = [
+            {
+                'id': 'basic_monthly',
+                'name': 'Basic Plan',
+                'price': 2900,
+                'currency': 'usd',
+                'interval': 'month'
+            },
+            {
+                'id': 'pro_monthly', 
+                'name': 'Professional Plan',
+                'price': 99900,
+                'currency': 'usd',
+                'interval': 'month'
+            }
+        ]
+        return _make_response(200, {'plans': plans})
+    except Exception as e:
+        return _error_response(500, f"Failed to list plans: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +324,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return await handle_subscription_creation(body)
+        
+    # POST /revenue/webhook    
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return await handle_webhook_event(body, headers)
+        
+    # GET /revenue/plans
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "plans" and method == "GET":
+        return await list_subscription_plans()
     
     return _error_response(404, "Not found")
 
