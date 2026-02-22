@@ -2,16 +2,20 @@
 Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- GET /revenue/summary - MTD/QTD/YTD totals 
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/process - Process payments (credit card, crypto, etc)
+- GET /revenue/health - Service health check
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+from datetime import datetime
+import pytz
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -235,4 +239,75 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
-__all__ = ["route_request"]
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment transaction."""
+    try:
+        # Validate minimum required fields
+        required_fields = ['amount_cents', 'currency', 'payment_method', 'customer_id']
+        for field in required_fields:
+            if not payment_data.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Insert transaction with pending status
+        payment_id = str(random.randint(100000, 999999))
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, experiment_id, event_type, 
+            amount_cents, currency, source, 
+            metadata, recorded_at, created_at,
+            status
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {int(payment_data['amount_cents'])},
+            '{payment_data['currency']}',
+            'payment_processor',
+            '{json.dumps(payment_data)}',
+            NOW(),
+            NOW(),
+            'pending'
+        )
+        RETURNING id
+        """
+        
+        result = await execute_sql(sql)
+        payment_id = result['rows'][0]['id']
+
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_id,
+            "status": "processing"
+        })
+
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def check_health() -> Dict[str, Any]:
+    """Health check endpoint for monitoring."""
+    try:
+        # Check database connection
+        db_result = await query_db("SELECT 1 as status")
+        if not db_result or not db_result.get('rows'):
+            return _error_response(503, "Database unavailable")
+
+        # Check pending payments
+        pending_payments = await query_db(
+            "SELECT COUNT(*) as count FROM revenue_events WHERE status = 'pending'"
+        )
+        pending_count = pending_payments['rows'][0]['count']
+
+        return _make_response(200, {
+            "status": "healthy",
+            "timestamp": datetime.now(pytz.utc).isoformat(),
+            "uptime": get_uptime(), 
+            "pending_payments": pending_count
+        })
+
+    except Exception as e:
+        return _error_response(503, f"Service unhealthy: {str(e)}")
+
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    """Route revenue API requests."""
