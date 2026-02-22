@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from marketing.automation import MarketingAutomation
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,25 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_marketing_automation() -> Dict[str, Any]:
+    """Handle marketing automation requests"""
+    try:
+        automation = MarketingAutomation()
+        
+        # Example workflow
+        content = await automation.generate_seo_content("AI Marketing", ["AI", "automation", "marketing"])
+        await automation.schedule_social_posts(content)
+        
+        return _make_response(200, {
+            "status": "success",
+            "automation": {
+                "content_generated": True,
+                "posts_scheduled": True
+            }
+        })
+    except Exception as e:
+        return _error_response(500, f"Marketing automation failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +251,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /marketing/automate
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "automate" and method == "POST":
+        return handle_marketing_automation()
     
     return _error_response(404, "Not found")
 
