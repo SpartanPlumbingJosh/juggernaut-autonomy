@@ -276,6 +276,48 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def monitor_autonomous_revenue(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Monitor and maintain autonomous revenue streams."""
+    try:
+        # Check for failed payments
+        res = execute_sql("""
+            SELECT COUNT(*) as failed_payments
+            FROM revenue_events
+            WHERE event_type = 'payment.failed'
+              AND recorded_at >= NOW() - INTERVAL '1 hour'
+        """)
+        failed_payments = res.get("rows", [{}])[0].get("failed_payments", 0)
+        
+        if failed_payments > 0:
+            log_action(
+                "revenue.payment_failures",
+                f"Detected {failed_payments} failed payments in last hour",
+                level="warning"
+            )
+        
+        # Check revenue stream health
+        res = execute_sql("""
+            SELECT 
+                COUNT(*) FILTER (WHERE event_type = 'revenue') as total_transactions,
+                SUM(amount_cents) FILTER (WHERE event_type = 'revenue') as total_revenue
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 hour'
+        """)
+        stats = res.get("rows", [{}])[0]
+        
+        return {
+            "success": True,
+            "failed_payments": failed_payments,
+            "total_transactions": stats.get("total_transactions", 0),
+            "total_revenue": stats.get("total_revenue", 0)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
