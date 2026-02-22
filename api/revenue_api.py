@@ -5,6 +5,11 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /marketing/campaigns - Create new marketing campaign
+- GET /marketing/campaigns - List campaigns
+- POST /marketing/leads - Capture new lead
+- POST /marketing/email-sequences - Create email sequence
+- POST /marketing/pricing-experiments - Create pricing experiment
 """
 
 import json
@@ -162,6 +167,64 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_marketing_campaign_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new marketing campaign."""
+    try:
+        name = body.get("name")
+        channel = body.get("channel")
+        budget_cents = int(body.get("budget_cents", 0))
+        start_date = body.get("start_date")
+        
+        if not name or not channel or not start_date:
+            return _error_response(400, "Missing required fields")
+            
+        sql = f"""
+        INSERT INTO marketing_campaigns (name, channel, budget_cents, start_date)
+        VALUES (
+            '{name.replace("'", "''")}',
+            '{channel.replace("'", "''")}',
+            {budget_cents},
+            '{start_date}'
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        campaign_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(201, {"campaign_id": campaign_id})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create campaign: {str(e)}")
+
+async def handle_marketing_lead_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Capture new lead."""
+    try:
+        campaign_id = body.get("campaign_id")
+        email = body.get("email")
+        source = body.get("source")
+        
+        if not email or not source:
+            return _error_response(400, "Missing required fields")
+            
+        sql = f"""
+        INSERT INTO marketing_leads (campaign_id, email, source)
+        VALUES (
+            {f"'{campaign_id}'" if campaign_id else "NULL"},
+            '{email.replace("'", "''")}',
+            '{source.replace("'", "''")}'
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        lead_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(201, {"lead_id": lead_id})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create lead: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +294,13 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Marketing endpoints
+    if len(parts) == 2 and parts[0] == "marketing":
+        if parts[1] == "campaigns" and method == "POST":
+            return handle_marketing_campaign_create(json.loads(body or "{}"))
+        if parts[1] == "leads" and method == "POST":
+            return handle_marketing_lead_create(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
