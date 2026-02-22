@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Single Product MVP</title>
+    <script src="https://js.stripe.com/v3/"></script>
+</head>
+<body>
+    <div class="product">
+        <h1>Premium Feature</h1>
+        <p>Get instant access for just $9.99</p>
+        <form id="payment-form">
+            <input type="email" id="email" required placeholder="Your email">
+            <button id="submit">Pay with Card</button>
+        </form>
+        <div id="payment-status"></div>
+    </div>
+
+    <script>
+        const stripe = Stripe('pk_test_your_publishable_key');
+        const form = document.getElementById('payment-form');
+        
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const response = await fetch('/payment/create', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    amount: '9.99',
+                    product_id: 'premium_feature',
+                    email: document.getElementById('email').value
+                }),
+            });
+            
+            const {client_secret} = await response.json();
+            
+            const {error} = await stripe.confirmCardPayment(client_secret, {
+                payment_method: {
+                    card: elements.getElement('card'),
+                    billing_details: {
+                        email: document.getElementById('email').value
+                    }
+                }
+            });
+            
+            if (error) {
+                document.getElementById('payment-status').textContent = error.message;
+            } else {
+                document.getElementById('payment-status').textContent = 'Payment successful! Delivering product...';
+                // TODO: Show download or redirect to product
+            }
+        });
+    </script>
+</body>
+</html>
