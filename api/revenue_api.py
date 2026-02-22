@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_service import PaymentService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -112,6 +113,68 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
+
+
+async def handle_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment intent creation."""
+    try:
+        amount = int(body.get('amount', 0))
+        currency = str(body.get('currency', 'usd')).lower()
+        metadata = body.get('metadata', {})
+        provider = str(body.get('provider', 'stripe')).lower()
+
+        if provider == 'stripe':
+            result = await PaymentService.create_payment_intent(amount, currency, metadata)
+        elif provider == 'paypal':
+            result = await PaymentService.create_paypal_order(amount/100, currency, metadata)
+        else:
+            return _error_response(400, 'Invalid payment provider')
+
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Payment failed'))
+
+        return _make_response(200, {
+            'payment_id': result.get('payment_id') or result.get('order_id'),
+            'client_secret': result.get('client_secret'),
+            'approval_url': result.get('approval_url'),
+            'provider': provider
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment: {str(e)}")
+
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook notifications."""
+    try:
+        event = body.get('event', {})
+        payment_id = event.get('id') or event.get('order_id')
+        provider = event.get('provider', 'stripe')
+
+        # Verify and fulfill payment
+        result = await PaymentService.fulfill_payment(payment_id, provider)
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Fulfillment failed'))
+
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {result['amount']},
+                '{result['currency']}',
+                '{provider}',
+                '{json.dumps(result['metadata'])}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+
+        return _make_response(200, {'success': True})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +294,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        return handle_payment_intent(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
