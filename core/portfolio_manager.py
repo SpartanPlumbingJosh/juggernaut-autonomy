@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_engine import RevenueEngine
 
 
 def generate_revenue_ideas(
@@ -276,11 +277,18 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments, handle revenue operations, and trigger learning loop."""
+    # Initialize revenue engine
+    revenue_engine = RevenueEngine(execute_sql, log_action)
+    
+    # Process payments and services
+    payment_result = await revenue_engine.process_payments()
+    delivery_result = await revenue_engine.deliver_services()
+    failure_result = await revenue_engine.handle_failures()
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
