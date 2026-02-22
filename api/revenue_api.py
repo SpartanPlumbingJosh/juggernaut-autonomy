@@ -33,6 +33,29 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def handle_payment_intent(amount: int, currency: str, product_id: str, 
+                              customer_email: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent for checkout."""
+    from api.payment_processor import PaymentProcessor
+    from core.database import query_db
+    
+    processor = PaymentProcessor(query_db)
+    return await processor.create_payment_intent(
+        amount=amount,
+        currency=currency,
+        product_id=product_id,
+        customer_email=customer_email,
+        metadata=metadata
+    )
+
+async def handle_webhook(payload: str, sig_header: str, source: str) -> Dict[str, Any]:
+    """Process payment webhooks."""
+    from api.payment_processor import PaymentProcessor
+    from core.database import query_db
+    
+    processor = PaymentProcessor(query_db)
+    return await processor.handle_webhook(payload, sig_header, source)
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +254,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/intent
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "intent" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return await handle_payment_intent(
+                amount=data.get('amount'),
+                currency=data.get('currency', 'usd'),
+                product_id=data.get('product_id'),
+                customer_email=data.get('customer_email'),
+                metadata=data.get('metadata', {})
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /payment/webhook/{source}
+    if len(parts) == 3 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        sig_header = headers.get('Stripe-Signature') if parts[2] == 'stripe' else headers.get('Paypal-Signature', '')
+        return await handle_webhook(body, sig_header, parts[2])
     
     return _error_response(404, "Not found")
 
