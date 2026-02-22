@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import time
+import random
+import httpx
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
@@ -9,6 +11,30 @@ from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_excep
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+AUTOMATED_REVENUE_METHODS = [
+    {
+        'name': 'content_monetization',
+        'description': 'Automated content generation and monetization',
+        'min_budget': 5.00,
+        'max_budget': 100.00,
+        'platforms': ['youtube', 'tiktok', 'medium']
+    },
+    {
+        'name': 'api_arbitrage',
+        'description': 'API-based price arbitrage opportunities',
+        'min_budget': 10.00,
+        'max_budget': 50.00,
+        'platforms': ['aws', 'google', 'stripe']
+    },
+    {
+        'name': 'affiliate_marketing',
+        'description': 'Automated affiliate promotions',
+        'min_budget': 2.00,
+        'max_budget': 20.00,
+        'platforms': ['amazon', 'shopify', 'clickbank']
+    }
+]
 
 
 # Rate limits - max calls per minute
