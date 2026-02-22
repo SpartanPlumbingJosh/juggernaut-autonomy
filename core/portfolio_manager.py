@@ -118,7 +118,7 @@ def generate_revenue_ideas(
 def score_pending_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
-    limit: int = 20,
+    limit: int = 100,  # Increased for active operations
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
