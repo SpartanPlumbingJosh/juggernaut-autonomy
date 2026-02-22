@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
+from core.product_delivery import ProductDeliveryService
 
 
 def generate_revenue_ideas(
@@ -120,6 +123,7 @@ def score_pending_ideas(
     log_action: Callable[..., Any],
     limit: int = 20,
 ) -> Dict[str, Any]:
+    """Score pending revenue ideas and automatically create products"""
     try:
         res = execute_sql(
             f"""
