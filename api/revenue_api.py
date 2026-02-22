@@ -1,18 +1,27 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Payment processing and revenue tracking system 
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Create payment intent
+- POST /revenue/webhook - Payment webhook handler
 """
+
+import os
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
 
+
+# Initialize payment processor
+stripe_key = os.getenv('STRIPE_SECRET_KEY')
+payment_processor = PaymentProcessor(stripe_key)
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
@@ -231,8 +240,47 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return await handle_create_payment(body)
+
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = headers.get("Stripe-Signature", "")
+        return await payment_processor.handle_webhook_event(body, sig_header, os.getenv('STRIPE_WEBHOOK_SECRET'))
     
     return _error_response(404, "Not found")
+
+
+async def handle_create_payment(body: str) -> Dict[str, Any]:
+    """Create a new payment intent."""
+    try:
+        data = json.loads(body)
+        amount_cents = int(data.get("amount_cents", 0))
+        currency = str(data.get("currency", "usd")).lower()
+        metadata = data.get("metadata", {})
+        customer_id = data.get("customer_id")
+        
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = await payment_processor.create_payment_intent(
+            amount_cents=amount_cents,
+            currency=currency,
+            metadata=metadata,
+            customer_id=customer_id
+        )
+        
+        if result["success"]:
+            return _make_response(200, {
+                "client_secret": result["client_secret"],
+                "payment_intent_id": result["payment_intent_id"]
+            })
+        return _error_response(400, result["error"])
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
 
 
 __all__ = ["route_request"]
