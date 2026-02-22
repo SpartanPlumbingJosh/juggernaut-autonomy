@@ -1,10 +1,14 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue Pipeline API - End-to-end revenue tracking and automation.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/process - Process new payment
+- POST /revenue/refund - Process refund
+- GET /revenue/health - System health check
+- GET /revenue/metrics - Real-time pipeline metrics
 """
 
 import json
@@ -162,6 +166,120 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process new payment through the revenue pipeline."""
+    try:
+        processor = PaymentProcessor()
+        result = await processor.process_payment(
+            amount=body['amount'],
+            currency=body['currency'],
+            customer_info=body['customer_info']
+        )
+        
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {int(body['amount'] * 100)},
+                '{body['currency']}',
+                'payment_processor',
+                '{json.dumps(result)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, result)
+        
+    except PaymentError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_refund(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process refund through the revenue pipeline."""
+    try:
+        processor = PaymentProcessor()
+        result = await processor.refund_payment(
+            transaction_id=body['transaction_id'],
+            amount=body.get('amount')
+        )
+        
+        # Record refund event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'refund',
+                {int(body.get('amount', 0) * 100)},
+                '{body['currency']}',
+                'payment_processor',
+                '{json.dumps(result)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, result)
+        
+    except PaymentError as e:
+        return _error_response(400, str(e))
+    except Exception as e:
+        return _error_response(500, f"Refund processing failed: {str(e)}")
+
+async def handle_system_health() -> Dict[str, Any]:
+    """Check system health and pipeline status."""
+    try:
+        # Check database connectivity
+        await query_db("SELECT 1")
+        
+        # Check payment processors
+        processor = PaymentProcessor()
+        if not processor.processors:
+            raise Exception("No payment processors configured")
+            
+        return _make_response(200, {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "processors": [p.__class__.__name__ for p in processor.processors]
+        })
+    except Exception as e:
+        return _error_response(500, f"Health check failed: {str(e)}")
+
+async def handle_realtime_metrics() -> Dict[str, Any]:
+    """Get real-time pipeline metrics."""
+    try:
+        # Get transaction rates
+        rates = await query_db("""
+            SELECT 
+                COUNT(*) FILTER (WHERE recorded_at > NOW() - INTERVAL '1 minute') as last_minute,
+                COUNT(*) FILTER (WHERE recorded_at > NOW() - INTERVAL '5 minutes') as last_5_minutes,
+                COUNT(*) FILTER (WHERE recorded_at > NOW() - INTERVAL '1 hour') as last_hour
+            FROM revenue_events
+        """)
+        
+        # Get error rates
+        errors = await query_db("""
+            SELECT 
+                COUNT(*) FILTER (WHERE status = 'failed' AND recorded_at > NOW() - INTERVAL '1 hour') as last_hour_errors,
+                COUNT(*) FILTER (WHERE status = 'failed') as total_errors
+            FROM payment_attempts
+        """)
+        
+        return _make_response(200, {
+            "transaction_rates": rates.get("rows", [{}])[0],
+            "error_rates": errors.get("rows", [{}])[0],
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to get metrics: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +349,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/process
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process" and method == "POST":
+        return handle_payment_processing(json.loads(body or "{}"))
+        
+    # POST /revenue/refund
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "refund" and method == "POST":
+        return handle_refund(json.loads(body or "{}"))
+        
+    # GET /revenue/health
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "health" and method == "GET":
+        return handle_system_health()
+        
+    # GET /revenue/metrics
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "metrics" and method == "GET":
+        return handle_realtime_metrics()
     
     return _error_response(404, "Not found")
 
