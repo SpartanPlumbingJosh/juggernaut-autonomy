@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue Engine API - Core platform for processing transactions and managing revenue operations.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
-- GET /revenue/charts - Revenue over time data
+- POST /transactions - Process new payments and transactions
+- GET /transactions - View transaction history
+- POST /users - Create new user accounts
+- POST /subscriptions - Manage recurring subscriptions
+- GET /revenue/summary - Revenue analytics and reporting
 """
 
 import json
@@ -162,6 +164,86 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_transaction_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a new transaction."""
+    try:
+        required_fields = ["user_id", "amount", "currency", "payment_method"]
+        for field in required_fields:
+            if field not in body:
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Validate payment amount
+        amount = float(body["amount"])
+        if amount <= 0:
+            return _error_response(400, "Amount must be positive")
+
+        # Record transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, user_id, event_type, amount_cents, currency,
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["user_id"]}',
+            'revenue',
+            {int(amount * 100)},
+            '{body["currency"]}',
+            'payment',
+            '{json.dumps(body.get("metadata", {}))}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        transaction_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(201, {
+            "transaction_id": transaction_id,
+            "status": "success",
+            "amount": amount,
+            "currency": body["currency"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process transaction: {str(e)}")
+
+
+async def handle_user_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new user account."""
+    try:
+        required_fields = ["email", "name"]
+        for field in required_fields:
+            if field not in body:
+                return _error_response(400, f"Missing required field: {field}")
+
+        sql = f"""
+        INSERT INTO users (
+            id, email, name, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["email"]}',
+            '{body["name"]}',
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        user_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(201, {
+            "user_id": user_id,
+            "status": "success",
+            "email": body["email"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create user: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -211,7 +293,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue engine API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -220,13 +302,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /transactions
+    if len(parts) == 1 and parts[0] == "transactions" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_transaction_creation(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # GET /transactions
+    if len(parts) == 1 and parts[0] == "transactions" and method == "GET":
+        return handle_revenue_transactions(query_params)
+    
+    # POST /users
+    if len(parts) == 1 and parts[0] == "users" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_user_creation(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
-    
-    # GET /revenue/transactions
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
