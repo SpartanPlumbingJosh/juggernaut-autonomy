@@ -12,6 +12,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.subscription_manager import SubscriptionManager
+import os
+
+# Initialize subscription manager
+subscription_manager = SubscriptionManager(
+    stripe_api_key=os.getenv('STRIPE_API_KEY')
+)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +169,29 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_webhook(body: bytes, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    sig_header = headers.get('stripe-signature', '')
+    return await subscription_manager.handle_webhook(body, sig_header)
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    required_fields = ['customer_email', 'plan_id', 'payment_method_id']
+    if not all(field in body for field in required_fields):
+        return _error_response(400, 'Missing required fields')
+    
+    result = await subscription_manager.create_subscription(
+        customer_email=body['customer_email'],
+        plan_id=body['plan_id'],
+        payment_method_id=body['payment_method_id'],
+        metadata=body.get('metadata')
+    )
+    
+    if not result.get('success'):
+        return _error_response(500, result.get('error', 'Subscription creation failed'))
+    
+    return _make_response(200, result)
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,7 +240,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +261,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "webhook" and method == "POST":
+        return handle_subscription_webhook(body.encode() if body else b'', headers or {})
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            body_data = json.loads(body or '{}')
+            return handle_create_subscription(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, 'Invalid JSON body')
     
     return _error_response(404, "Not found")
 
