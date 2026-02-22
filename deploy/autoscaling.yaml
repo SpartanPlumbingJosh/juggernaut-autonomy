@@ -1,0 +1,66 @@
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: revenue-api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: revenue-api
+  minReplicas: 3
+  maxReplicas: 100
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 80
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    - type: Pods
+      pods:
+        metric:
+          name: requests_per_second
+        target:
+          type: AverageValue
+          averageValue: 1000
+---
+apiVersion: policy/v1beta1
+kind: PodDisruptionBudget
+metadata:
+  name: revenue-api-pdb
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app: revenue-api
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: revenue-api-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+    nginx.ingress.kubernetes.io/limit-burst: "200"
+    nginx.ingress.kubernetes.io/limit-whitelist: "192.168.0.0/16"
+spec:
+  rules:
+    - host: api.revenue.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: revenue-api
+                port:
+                  number: 80
+  tls:
+    - hosts:
+        - api.revenue.com
+      secretName: revenue-api-tls
