@@ -203,6 +203,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _make_response(200, {
             "daily": daily_data,
             "by_source": by_source,
+            "by_tier": by_tier,
             "period_days": days
         })
         

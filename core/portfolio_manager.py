@@ -187,6 +187,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    pricing_experiments: bool = True,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -268,6 +269,35 @@ def start_experiments_from_top_ideas(
         )
     except Exception:
         pass
+
+    # Start pricing page experiments if enabled
+    if pricing_experiments:
+        try:
+            pricing_sql = """
+            INSERT INTO experiments (
+                id, name, status, experiment_type, 
+                budget_limit, start_date, created_at,
+                metadata, hypothesis
+            ) VALUES (
+                gen_random_uuid(),
+                'Pricing Page Optimization',
+                'running',
+                'pricing',
+                1000.0,
+                NOW(),
+                NOW(),
+                '{"test_groups": ["control", "tier_a", "tier_b"]}'::jsonb,
+                'Optimizing pricing page layout and tiers will increase conversion rate by 15%'
+            )
+            """
+            execute_sql(pricing_sql)
+            created += 1
+        except Exception as e:
+            log_action(
+                "pricing.experiment_failed",
+                f"Failed to start pricing experiment: {str(e)}",
+                level="error"
+            )
 
     out = {"success": True, "new_experiments": created, "candidates": len(ideas)}
     if failures:
