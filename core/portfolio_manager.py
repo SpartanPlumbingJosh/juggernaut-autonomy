@@ -1,4 +1,9 @@
 from __future__ import annotations
+from datetime import datetime, timedelta
+import json
+from typing import List
+
+PREMIUM_REPORT_PRICE_CENTS = 2990  # $29.90
 
 import json
 from datetime import datetime, timezone
@@ -275,6 +280,97 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def generate_premium_insights_report(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    frequency: str = "weekly",
+    limit: int = 5
+) -> Dict[str, Any]:
+    """Generate and package top insights as a premium report."""
+    time_filter = "7 days" if frequency == "weekly" else "30 days"
+    
+    # Get top scored ideas from recent period
+    ideas_query = f"""
+    SELECT 
+        id, title, description, hypothesis, estimates, score,
+        score_breakdown::jsonb AS score_breakdown
+    FROM revenue_ideas
+    WHERE created_at >= NOW() - INTERVAL '{time_filter}'
+      AND score IS NOT NULL
+    ORDER BY score DESC
+    LIMIT {limit}
+    """
+    
+    # Get top performing experiments
+    experiments_query = f"""
+    SELECT 
+        e.id, e.name, e.status, e.budget_spent, e.budget_limit,
+        COALESCE(SUM(r.amount_cents), 0) as revenue_generated,
+        e.hypothesis, e.experiment_type
+    FROM experiments e
+    LEFT JOIN revenue_events r ON r.attribution->>'experiment_id' = e.id::text
+    WHERE e.start_date >= NOW() - INTERVAL '{time_filter}'
+    GROUP BY e.id
+    ORDER BY revenue_generated DESC
+    LIMIT {limit}
+    """
+    
+    try:
+        ideas_result = execute_sql(ideas_query)
+        experiments_result = execute_sql(experiments_query)
+        
+        report_id = str(uuid.uuid4())
+        report_data = {
+            "report_id": report_id,
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "report_period": time_filter,
+            "top_ideas": ideas_result.get("rows", []),
+            "top_experiments": experiments_result.get("rows", []),
+        }
+        
+        # Store report metadata
+        execute_sql(f"""
+            INSERT INTO premium_reports (
+                id, generated_at, report_period,
+                top_ideas_count, top_experiments_count,
+                price_cents, metadata
+            ) VALUES (
+                '{report_id}',
+                NOW(),
+                '{time_filter}',
+                {len(report_data["top_ideas"])},
+                {len(report_data["top_experiments"])},
+                {PREMIUM_REPORT_PRICE_CENTS},
+                '{json.dumps(report_data)}'::jsonb
+            )
+        """)
+        
+        log_action(
+            "premium.report_generated",
+            f"Generated premium insights report {report_id}",
+            level="info",
+            output_data={"report_id": report_id}
+        )
+        
+        return {
+            "success": True,
+            "report_id": report_id,
+            "price_cents": PREMIUM_REPORT_PRICE_CENTS,
+            "item_count": len(report_data["top_ideas"]) + len(report_data["top_experiments"])
+        }
+        
+    except Exception as e:
+        log_action(
+            "premium.report_failed",
+            f"Failed to generate premium report: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
