@@ -3,11 +3,13 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/log - Log revenue event (protected)
 """
 
 import json
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -210,12 +212,30 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+def route_request(
+    path: str, 
+    method: str, 
+    query_params: Dict[str, Any], 
+    body: Optional[str] = None,
+    headers: Optional[Dict[str, str]] = None
+) -> Dict[str, Any]:
+    """Route revenue API requests with authentication."""
+    
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Check authentication (except for OPTIONS)
+    auth_header = headers.get('authorization', '').split(' ')
+    if len(auth_header) != 2 or auth_header[0].lower() != 'bearer':
+        return _error_response(401, "Missing or invalid authorization header")
+    
+    token = auth_header[1]
+    decoded = AuthHandler.decode_token(token)
+    if not decoded:
+        return _error_response(401, "Invalid auth token")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -232,7 +252,46 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/log  
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "log" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return handle_revenue_log(data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
     return _error_response(404, "Not found")
+
+
+async def handle_revenue_log(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Log a revenue event with idempotency key."""
+    required_fields = ['event_type', 'amount_cents', 'currency', 'source']
+    if not all(field in data for field in required_fields):
+        return _error_response(400, f"Missing required fields: {required_fields}")
+    
+    idempotency_key = data.get('idempotency_key', str(uuid.uuid4()))
+    
+    try:
+        success = PaymentProcessor.log_revenue_event(
+            execute_sql=query_db,
+            event_type=data['event_type'],
+            amount_cents=data['amount_cents'],
+            currency=data['currency'],
+            idempotency_key=idempotency_key,
+            source=data['source'],
+            metadata=data.get('metadata')
+        )
+        
+        if success:
+            return _make_response(201, {
+                "message": "Event logged",
+                "idempotency_key": idempotency_key
+            })
+        return _error_response(500, "Failed to log event")
+    except Exception as e:
+        return _error_response(500, f"Internal server error: {str(e)}")
 
 
 __all__ = ["route_request"]
