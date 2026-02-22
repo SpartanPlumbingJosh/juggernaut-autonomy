@@ -8,10 +8,30 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+
+logger = logging.getLogger(__name__)
+
+# Configure monitoring thresholds
+MONITORING_CONFIG = {
+    "payment_failure_threshold": 0.1,  # 10% failure rate
+    "api_error_threshold": 0.05,       # 5% error rate
+    "response_time_threshold": 1.0     # 1 second
+}
+
+def _check_monitoring_metrics(response_time: float, error_count: int, total_requests: int):
+    """Check metrics against thresholds and trigger alerts"""
+    if total_requests > 0:
+        error_rate = error_count / total_requests
+        if error_rate > MONITORING_CONFIG["api_error_threshold"]:
+            logger.error(f"API error rate exceeded threshold: {error_rate:.2%}")
+        
+        if response_time > MONITORING_CONFIG["response_time_threshold"]:
+            logger.warning(f"API response time exceeded threshold: {response_time:.2f}s")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +50,27 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
+    logger.error(f"API error: {message}")
     return _make_response(status_code, {"error": message})
+
+def _process_payment(amount_cents: int, payment_method: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through integrated payment gateway"""
+    try:
+        # Integrate with payment gateway API
+        # This is a placeholder - implement actual payment gateway integration
+        payment_data = {
+            "amount": amount_cents / 100,
+            "currency": "USD",
+            "payment_method": payment_method
+        }
+        
+        # Simulate payment processing
+        if amount_cents > 0:
+            return {"success": True, "transaction_id": "txn_12345"}
+        return {"success": False, "error": "Invalid payment amount"}
+    except Exception as e:
+        logger.error(f"Payment processing failed: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
