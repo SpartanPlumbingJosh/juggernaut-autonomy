@@ -1,13 +1,138 @@
 from __future__ import annotations
 
 import json
+import random
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Protocol
+from enum import Enum, auto
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
+from core.system_monitor import SystemMonitor
 
+
+class RevenueStrategy(Enum):
+    """Available autonomous monetization strategies."""
+    FAST_ITERATION = auto()   # Many small experiments
+    BIG_BETS = auto()         # Few large experiments  
+    BALANCED = auto()         # Mix of sizes and frequencies
+    CONSERVATIVE = auto()     # Low risk/reward
+    AGGRESSIVE = auto()       # High risk/reward
+
+
+class StrategyExecutor(Protocol):
+    """Interface for strategy implementations."""
+    def execute(
+        self,
+        execute_sql: Callable[[str], Dict[str, Any]],
+        log_action: Callable[..., Any],
+        strategy: RevenueStrategy,
+        budget: float
+    ) -> Dict[str, Any]:
+        ...
+
+
+class DefaultStrategyExecutor:
+    """Default strategic execution framework."""
+    def __init__(self):
+        self.processor = PaymentProcessor()
+        self.monitor = SystemMonitor()
+
+    def execute(
+        self,
+        execute_sql: Callable[[str], Dict[str, Any]],
+        log_action: Callable[..., Any],
+        strategy: RevenueStrategy,
+        budget: float
+    ) -> Dict[str, Any]:
+        """Execute the revenue strategy."""
+        try:
+            # Apply budget allocations based on strategy
+            allocations = self._get_budget_allocation(strategy, budget)
+            
+            # Generate and score ideas  
+            generate_revenue_ideas(execute_sql, log_action, limit=allocations['idea_generation'])
+            score_pending_ideas(execute_sql, log_action, limit=allocations['idea_scoring'])
+            
+            # Run experiments  
+            result = start_experiments_from_top_ideas(
+                execute_sql,
+                log_action,
+                max_new=allocations['new_experiments'],
+                budget=allocations['experiment_budget']
+            )
+            
+            # Capture payments for successful experiments  
+            self._capture_revenue(execute_sql, allocations['revenue_capture'])
+            
+            # Perform system health checks  
+            self.monitor.check_system_health()
+            
+            return result
+            
+        except Exception as e:
+            self.handle_error(e, execute_sql, log_action)
+            raise
+
+    def _get_budget_allocation(self, strategy: RevenueStrategy, total_budget: float) -> Dict[str, float]:
+        """Allocate budget based on strategy."""
+        allocations = {
+            'idea_generation': 0,
+            'idea_scoring': 0,
+            'new_experiments': 0,
+            'experiment_budget': 0,
+            'revenue_capture': 0
+        }
+        
+        if strategy == RevenueStrategy.FAST_ITERATION:
+            allocations.update({
+                'idea_generation': 20,
+                'idea_scoring': 20,
+                'new_experiments': 10,
+                'experiment_budget': total_budget * 0.8 / 10,
+                'revenue_capture': total_budget * 0.1
+            })
+        # Other strategy allocations...
+        
+        return allocations
+
+    def _capture_revenue(self, execute_sql: Callable[[str], Dict[str, Any]], amount: float) -> None:
+        """Process revenue from successful experiments."""
+        active_experiments = self._get_active_experiments(execute_sql)
+        for exp in active_experiments:
+            try:
+                self.processor.capture_payment(exp['id'], amount)
+            except Exception as e:
+                self.handle_error(e, execute_sql)
+
+    def handle_error(self, error: Exception, execute_sql: Callable[[str], Dict[str, Any]],
+                   log_action: Optional[Callable[..., Any]] = None) -> None:
+        """Self-healing error handling."""
+        try:
+            if log_action:
+                log_action("system.error", str(error), level="critical")
+            
+            # Try to automatically recover from common error types  
+            if "database" in str(error).lower():
+                execute_sql("SELECT 1")  # Simple connection test
+            elif "payment" in str(error).lower():
+                self.processor.reset_connection()
+        except Exception:
+            pass
+            
+
+
+def run_autonomous_cycle(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    strategy: RevenueStrategy = RevenueStrategy.BALANCED,
+    budget: float = 1000.0
+) -> Dict[str, Any]:
+    """Main entry point for autonomous revenue engine."""
+    executor = DefaultStrategyExecutor()
+    return executor.execute(execute_sql, log_action, strategy, budget)
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
