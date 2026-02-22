@@ -15,9 +15,20 @@ def generate_revenue_ideas(
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
-    context = context or {}
-    gen = IdeaGenerator()
-    ideas = gen.generate_ideas(context)[: int(limit)]
+    """Generate revenue ideas with safety checks and logging."""
+    try:
+        if limit > 50:
+            raise ValueError("Limit cannot exceed 50 for safety reasons")
+            
+        context = context or {}
+        if not isinstance(context, dict):
+            raise TypeError("Context must be a dictionary")
+            
+        gen = IdeaGenerator()
+        ideas = gen.generate_ideas(context)[: int(limit)]
+        
+        if not ideas or not isinstance(ideas, list):
+            raise ValueError("No valid ideas generated")
 
     created = 0
     failures: List[Dict[str, Any]] = []
@@ -188,6 +199,13 @@ def start_experiments_from_top_ideas(
     min_score: float = 60.0,
     budget: float = 20.0,
 ) -> Dict[str, Any]:
+    """Start new experiments with budget safety checks."""
+    if budget <= 0:
+        raise ValueError("Budget must be positive")
+    if budget > 1000:
+        raise ValueError("Budget cannot exceed $1000 for safety reasons")
+    if min_score < 0 or min_score > 100:
+        raise ValueError("Minimum score must be between 0 and 100")
     try:
         res = execute_sql(
             f"""

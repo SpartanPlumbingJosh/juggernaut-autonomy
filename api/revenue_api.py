@@ -34,8 +34,12 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals with enhanced error handling."""
     try:
+        # Validate time ranges
+        now = datetime.now(timezone.utc)
+        if now.year < 2020 or now.year > 2030:
+            raise ValueError("Invalid system time detected")
         now = datetime.now(timezone.utc)
         
         # Calculate period boundaries
@@ -115,8 +119,16 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination and validation."""
     try:
+        # Validate pagination parameters
+        limit = int(query_params.get("limit", 50))
+        offset = int(query_params.get("offset", 0))
+        
+        if limit < 1 or limit > 1000:
+            raise ValueError("Limit must be between 1 and 1000")
+        if offset < 0:
+            raise ValueError("Offset cannot be negative")
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
         event_type = query_params.get("event_type", [""])[0] if isinstance(query_params.get("event_type"), list) else query_params.get("event_type", "")
