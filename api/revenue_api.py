@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor, PaymentProvider
+from core.subscription_manager import SubscriptionManager, SubscriptionStatus
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +34,64 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_payment_intent(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment intent"""
+    try:
+        amount = float(query_params.get("amount", [0])[0])
+        currency = query_params.get("currency", ["usd"])[0]
+        provider = PaymentProvider(query_params.get("provider", ["stripe"])[0])
+        
+        processor = PaymentProcessor()
+        success, result = await processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            provider=provider
+        )
+        
+        if not success:
+            return _error_response(400, result.get("error", "Payment failed"))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_subscription(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription management"""
+    try:
+        customer_id = query_params.get("customer_id", [""])[0]
+        plan_id = query_params.get("plan_id", [""])[0]
+        action = query_params.get("action", ["create"])[0]
+        provider = PaymentProvider(query_params.get("provider", ["stripe"])[0])
+        
+        manager = SubscriptionManager()
+        
+        if action == "create":
+            success, result = await manager.create_subscription(
+                customer_id=customer_id,
+                plan_id=plan_id,
+                provider=provider
+            )
+        elif action == "cancel":
+            success, result = await manager.cancel_subscription(
+                subscription_id=customer_id,
+                provider=provider
+            )
+        elif action == "update":
+            success, result = await manager.update_subscription(
+                subscription_id=customer_id,
+                provider=provider,
+                new_plan_id=plan_id
+            )
+        else:
+            return _error_response(400, "Invalid action")
+            
+        if not success:
+            return _error_response(400, result.get("error", "Subscription operation failed"))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Subscription management failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +291,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return handle_payment_intent(query_params)
+    
+    # POST /revenue/subscription
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscription" and method == "POST":
+        return handle_subscription(query_params)
     
     return _error_response(404, "Not found")
 
