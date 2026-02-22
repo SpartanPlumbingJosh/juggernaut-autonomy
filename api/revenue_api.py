@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core autonomous revenue system.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- GET /revenue/summary - MTD/QTD/YTD totals  
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/transactions - Record new revenue
+- POST /revenue/webhook - Payment processor webhooks
 """
 
 import json
@@ -162,6 +164,70 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def record_revenue_transaction(
+    amount_cents: int,
+    currency: str,
+    source: str = "direct",
+    attribution: Optional[Dict] = None,
+    description: Optional[str] = None  
+) -> Dict[str, Any]:
+    """Record a new revenue transaction in the system."""
+    try:
+        attribution_json = json.dumps(attribution or {})
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            attribution,
+            description,
+            recorded_at,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {int(amount_cents)},
+            '{currency}',
+            '{source}',
+            '{attribution_json}'::jsonb,
+            {'NULL' if not description else f"'{description.replace("'", "''")}'"},
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        result = await query_db(sql)
+        return {"success": True, "transaction_id": result.get("rows", [{}])[0].get("id")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+async def handle_new_transaction(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process and record a new payment."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = await record_revenue_transaction(
+            amount_cents=amount_cents,
+            currency=str(body.get("currency", "usd")),
+            source=str(body.get("source", "api")),
+            attribution=body.get("attribution"),
+            description=body.get("description")
+        )
+        
+        if result.get("success"):
+            return _make_response(201, {
+                "transaction_id": result["transaction_id"],
+                "amount_cents": amount_cents,
+                "recorded_at": datetime.now(timezone.utc).isoformat()
+            })
+        return _error_response(500, "Failed to record transaction")
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +297,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "POST":
+        try:
+            request_body = json.loads(body or "{}")
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+        return handle_new_transaction(request_body)
     
     return _error_response(404, "Not found")
 
