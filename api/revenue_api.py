@@ -164,6 +164,7 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
+    """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
         
@@ -232,7 +233,87 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # GET /revenue/leads
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "leads" and method == "GET":
+        return handle_leads(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_payment(body)
+    
+    # GET /revenue/onboarding
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboarding" and method == "GET":
+        return handle_onboarding(query_params)
+    
     return _error_response(404, "Not found")
+
+
+async def handle_leads(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get and manage leads."""
+    try:
+        status = query_params.get("status", ["new"])[0]
+        limit = int(query_params.get("limit", ["100"])[0])
+        
+        lead_manager = LeadManager(query_db)
+        leads = lead_manager.get_leads(status=status, limit=limit)
+        
+        return _make_response(200, {
+            "leads": leads,
+            "count": len(leads),
+            "status": status
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch leads: {str(e)}")
+
+
+async def handle_payment(body: Optional[str]) -> Dict[str, Any]:
+    """Handle payment processing."""
+    try:
+        if not body:
+            return _error_response(400, "Missing payment data")
+            
+        payment_data = json.loads(body)
+        payment_intent_id = payment_data.get("payment_intent_id")
+        
+        if not payment_intent_id:
+            return _error_response(400, "Missing payment_intent_id")
+            
+        payment_processor = PaymentProcessor(STRIPE_API_KEY)
+        result = payment_processor.record_payment(payment_intent_id)
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment processing failed"))
+            
+        return _make_response(200, {
+            "success": True,
+            "payment": {
+                "amount": result["amount"],
+                "currency": result["currency"],
+                "customer_id": result["customer_id"]
+            }
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def handle_onboarding(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get onboarding status."""
+    try:
+        onboarding_id = query_params.get("onboarding_id", [""])[0]
+        if not onboarding_id:
+            return _error_response(400, "Missing onboarding_id")
+            
+        onboarding_manager = OnboardingManager(query_db)
+        status = onboarding_manager.get_onboarding_status(onboarding_id)
+        
+        if not status:
+            return _error_response(404, "Onboarding not found")
+            
+        return _make_response(200, {
+            "onboarding": status
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to get onboarding status: {str(e)}")
 
 
 __all__ = ["route_request"]
