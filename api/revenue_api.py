@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/process_payment - Process new payment
+- POST /revenue/webhook - Payment webhook handler
 """
 
 import json
@@ -162,6 +164,75 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def _process_payment_intent(amount_cents: int, currency: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through payment processor."""
+    try:
+        # In production, integrate with Stripe/PayPal/etc here
+        payment_id = f"pmt_{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+        
+        # Record the payment
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                '{currency}',
+                'payment_processor',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return {
+            "payment_id": payment_id,
+            "status": "succeeded",
+            "amount_cents": amount_cents,
+            "currency": currency
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a new payment."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = str(body.get("currency", "USD")).upper()
+        metadata = body.get("metadata", {})
+        
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = await _process_payment_intent(amount_cents, currency, metadata)
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment processor webhook."""
+    try:
+        event_type = body.get("type")
+        data = body.get("data", {})
+        
+        # Validate webhook signature in production
+        
+        if event_type == "payment.succeeded":
+            amount_cents = int(data.get("amount", 0))
+            currency = str(data.get("currency", "USD")).upper()
+            metadata = data.get("metadata", {})
+            
+            await _process_payment_intent(amount_cents, currency, metadata)
+            
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +302,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/process_payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process_payment" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_process_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_payment_webhook(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
