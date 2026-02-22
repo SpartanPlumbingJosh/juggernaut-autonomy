@@ -6588,3 +6588,73 @@ if __name__ == "__main__":
 
 
 
+from fastapi import FastAPI, Request, Depends, HTTPException
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from typing import Optional
+
+from auth.auth import (
+    create_user, 
+    authenticate_user,
+    create_access_token,
+    get_current_active_user,
+    User,
+    Token
+)
+from datetime import timedelta
+
+app = FastAPI()
+
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Templates
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.post("/signup")
+async def signup(username: str, email: str, password: str):
+    try:
+        user = create_user(username, email, password)
+        return {"message": "User created successfully", "username": user.username}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/login")
+async def login(username: str, password: str):
+    user = authenticate_user(username, password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=30)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.get("/dashboard")
+async def dashboard(current_user: User = Depends(get_current_active_user)):
+    return {"message": f"Welcome {current_user.username}"}
+
+# Stripe webhook handler
+@app.post("/stripe-webhook")
+async def stripe_webhook(request: Request):
+    payload = await request.body()
+    # Verify webhook signature and process event
+    return {"status": "received"}
+
+# Basic analytics endpoint
+@app.post("/track")
+async def track_event(event_name: str, request: Request):
+    # In a real app, store this in a database
+    print(f"Tracked event: {event_name}")
+    return {"status": "tracked"}
