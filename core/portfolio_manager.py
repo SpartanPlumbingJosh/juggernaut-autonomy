@@ -434,3 +434,30 @@ class PortfolioManager:
         "completed": completed_count,
         "learning_triggered": learning_triggered
     }
+
+    def _run_management_cycle(self) -> None:
+        """Execute one full management cycle."""
+        logger.info("Starting management cycle")
+        
+        # Run tasks in parallel
+        futures = [
+            self.executor.submit(self.generate_revenue_ideas),
+            self.executor.submit(self.score_pending_ideas),
+            self.executor.submit(self.start_experiments_from_top_ideas),
+            self.executor.submit(self.review_experiments_stub)
+        ]
+        
+        # Wait for completion
+        for future in futures:
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Task failed: {str(e)}", exc_info=True)
+                self.log_action(
+                    "portfolio.task_error",
+                    f"Task failed: {str(e)}",
+                    level="error",
+                    error_data={"error": str(e)}
+                )
+        
+        logger.info("Completed management cycle")
