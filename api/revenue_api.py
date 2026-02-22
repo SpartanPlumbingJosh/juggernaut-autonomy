@@ -10,8 +10,14 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import stripe
+from decimal import Decimal
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +38,50 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def create_payment_intent(amount: Decimal, currency: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a Stripe payment intent for automated billing."""
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=int(amount * 100),  # Convert to cents
+            currency=currency.lower(),
+            automatic_payment_methods={"enabled": True},
+            metadata=metadata
+        )
+        return _make_response(200, {
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id,
+            "status": intent.status
+        })
+    except stripe.error.StripeError as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_payment_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events for payment processing."""
+    try:
+        event_type = event.get("type")
+        data = event.get("data", {})
+        object_data = data.get("object", {})
+        
+        if event_type == "payment_intent.succeeded":
+            # Record successful payment
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source, metadata, recorded_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {object_data.get("amount")},
+                    '{object_data.get("currency")}',
+                    'stripe',
+                    '{json.dumps(object_data.get("metadata") or {})}'::jsonb,
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +281,25 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = Decimal(str(body_data.get("amount", 0)))
+            currency = str(body_data.get("currency", "usd"))
+            metadata = body_data.get("metadata", {})
+            return create_payment_intent(amount, currency, metadata)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            event = json.loads(body or "{}")
+            return handle_payment_webhook(event)
+        except Exception as e:
+            return _error_response(400, f"Invalid webhook: {str(e)}")
     
     return _error_response(404, "Not found")
 
