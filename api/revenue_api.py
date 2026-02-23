@@ -5,6 +5,10 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook/stripe - Stripe webhook handler
+- POST /revenue/webhook/paypal - PayPal webhook handler
+- POST /revenue/create-payment - Create payment intent
+- POST /revenue/create-subscription - Create subscription
 """
 
 import json
@@ -162,6 +166,52 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_stripe_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        from core.payment_gateways import PaymentProcessor, PaymentGateway
+        processor = PaymentProcessor(PaymentGateway.STRIPE)
+        signature = headers.get("Stripe-Signature", "")
+        return processor.handle_webhook(body, signature)
+    except Exception as e:
+        return _error_response(500, f"Failed to process Stripe webhook: {str(e)}")
+
+async def handle_paypal_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle PayPal webhook events."""
+    try:
+        from core.payment_gateways import PaymentProcessor, PaymentGateway
+        processor = PaymentProcessor(PaymentGateway.PAYPAL)
+        return processor.handle_webhook(body)
+    except Exception as e:
+        return _error_response(500, f"Failed to process PayPal webhook: {str(e)}")
+
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        from core.payment_gateways import PaymentProcessor, PaymentGateway
+        processor = PaymentProcessor(PaymentGateway(body.get("gateway", "stripe")))
+        return processor.create_payment_intent(
+            amount=body["amount"],
+            currency=body["currency"],
+            customer_id=body["customer_id"],
+            metadata=body.get("metadata", {})
+        )
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a subscription."""
+    try:
+        from core.payment_gateways import SubscriptionManager, PaymentGateway
+        manager = SubscriptionManager(PaymentGateway(body.get("gateway", "stripe")))
+        return manager.create_subscription(
+            customer_id=body["customer_id"],
+            plan_id=body["plan_id"],
+            metadata=body.get("metadata", {})
+        )
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +281,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        return handle_stripe_webhook(body or "", headers)
+    
+    # POST /revenue/webhook/paypal
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "paypal" and method == "POST":
+        return handle_paypal_webhook(body or "", headers)
+    
+    # POST /revenue/create-payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-payment" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/create-subscription
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-subscription" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
