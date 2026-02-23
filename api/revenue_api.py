@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from acquisition.pipeline import AcquisitionPipeline, AcquisitionSource
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,17 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_acquisition_summary() -> Dict[str, Any]:
+    """Get acquisition metrics summary"""
+    pipeline = AcquisitionPipeline(query_db, lambda *args, **kwargs: None)
+    metrics = await pipeline.get_acquisition_metrics()
+    if not metrics.get("success"):
+        return _error_response(500, "Failed to fetch acquisition metrics")
+    
+    return _make_response(200, {
+        "metrics": metrics
+    })
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +243,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /acquisition/summary
+    if len(parts) == 2 and parts[0] == "acquisition" and parts[1] == "summary" and method == "GET":
+        return handle_acquisition_summary()
     
     return _error_response(404, "Not found")
 
