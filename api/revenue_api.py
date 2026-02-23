@@ -12,6 +12,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
+from .service_delivery import ServiceDelivery
+from .auth import AuthHandler
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,6 +223,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # Initialize services
+    payment_processor = PaymentProcessor()
+    service_delivery = ServiceDelivery()
+    auth_handler = AuthHandler()
+    
+    # Authentication
+    auth_token = query_params.get("token", [""])[0] if isinstance(query_params.get("token"), list) else query_params.get("token", "")
+    if parts[0] != "auth" and not auth_handler.verify_token(auth_token):
+        return _error_response(401, "Unauthorized")
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
@@ -231,6 +244,35 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/create
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = int(body_data.get("amount", 0))
+            currency = body_data.get("currency", "usd")
+            metadata = body_data.get("metadata", {})
+            
+            result = await payment_processor.create_payment_intent(amount, currency, metadata)
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, str(e))
+    
+    # POST /service/deliver
+    if len(parts) == 2 and parts[0] == "service" and parts[1] == "deliver" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            user_id = body_data.get("user_id")
+            product_id = body_data.get("product_id")
+            payment_intent_id = body_data.get("payment_intent_id")
+            
+            if not all([user_id, product_id, payment_intent_id]):
+                return _error_response(400, "Missing required fields")
+            
+            result = await service_delivery.deliver_service(user_id, product_id, payment_intent_id)
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, str(e))
     
     return _error_response(404, "Not found")
 
