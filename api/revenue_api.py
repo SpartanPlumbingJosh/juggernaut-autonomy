@@ -1,7 +1,9 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing capabilities.
 
 Endpoints:
+- POST /revenue/payment - Process customer payment
+- POST /revenue/subscribe - Create subscription
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
@@ -12,6 +14,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
+from .user_manager import UserManager
+
+payment_processor = PaymentProcessor()
+user_manager = UserManager()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -219,6 +226,47 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            amount = data.get("amount")
+            currency = data.get("currency", "usd")
+            metadata = data.get("metadata", {})
+            
+            if not amount:
+                return _error_response(400, "Amount is required")
+                
+            result = payment_processor.create_payment_intent(amount, currency, metadata)
+            if "error" in result:
+                return _error_response(500, result["error"])
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, str(e))
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            customer_id = data.get("customer_id")
+            price_id = data.get("price_id")
+            
+            if not customer_id or not price_id:
+                return _error_response(400, "Customer ID and Price ID are required")
+                
+            result = payment_processor.create_subscription(customer_id, price_id)
+            if "error" in result:
+                return _error_response(500, result["error"])
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, str(e))
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
