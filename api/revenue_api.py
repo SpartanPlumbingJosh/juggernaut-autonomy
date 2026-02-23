@@ -5,13 +5,17 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Manage subscriptions
+- POST /revenue/invoices - Manage invoices
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from decimal import Decimal
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +166,78 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_management(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation and management"""
+    try:
+        processor = PaymentProcessor(api_key="sk_test_...")  # Should come from config
+        
+        action = body.get("action")
+        customer_id = body.get("customer_id")
+        
+        if action == "create":
+            email = body.get("email")
+            name = body.get("name")
+            price_id = body.get("price_id")
+            
+            customer = processor.create_customer(email, name)
+            subscription = processor.create_subscription(customer.id, price_id)
+            
+            return _make_response(200, {
+                "customer_id": customer.id,
+                "subscription_id": subscription.id,
+                "status": subscription.status
+            })
+            
+        elif action == "cancel":
+            subscription = stripe.Subscription.modify(
+                customer_id,
+                cancel_at_period_end=True
+            )
+            return _make_response(200, {
+                "subscription_id": subscription.id,
+                "status": subscription.status
+            })
+            
+        return _error_response(400, "Invalid action")
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription management failed: {str(e)}")
+
+async def handle_invoice_management(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle invoice creation and management"""
+    try:
+        processor = PaymentProcessor(api_key="sk_test_...")  # Should come from config
+        
+        action = body.get("action")
+        customer_id = body.get("customer_id")
+        
+        if action == "create":
+            amount = Decimal(body.get("amount"))
+            currency = body.get("currency", "usd")
+            invoice = processor.create_invoice(customer_id, amount, currency)
+            
+            return _make_response(200, {
+                "invoice_id": invoice.id,
+                "amount": invoice.amount_due,
+                "currency": invoice.currency,
+                "status": invoice.status
+            })
+            
+        elif action == "pay":
+            payment_intent_id = body.get("payment_intent_id")
+            payment = processor.record_payment(payment_intent_id)
+            
+            return _make_response(200, {
+                "payment_id": payment["payment_id"],
+                "amount": payment["amount"],
+                "status": payment["status"]
+            })
+            
+        return _error_response(400, "Invalid action")
+        
+    except Exception as e:
+        return _error_response(500, f"Invoice management failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +307,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_management(json.loads(body or "{}"))
+        
+    # POST /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "POST":
+        return handle_invoice_management(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
