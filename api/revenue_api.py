@@ -114,6 +114,15 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhooks."""
+    from api.payment_processor import handle_webhook_event
+    try:
+        result = await handle_webhook_event(body)
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
@@ -231,6 +240,12 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/webhook (payment gateway callbacks)
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Webhook body required")
+        return handle_payment_webhook(json.loads(body))
     
     return _error_response(404, "Not found")
 
