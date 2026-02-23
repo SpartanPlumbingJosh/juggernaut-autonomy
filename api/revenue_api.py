@@ -1,10 +1,11 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook/stripe - Stripe payment webhook handler
 """
 
 import json
@@ -12,6 +13,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
+import os
+
+# Initialize payment processor
+stripe_processor = PaymentProcessor(
+    api_key=os.getenv("STRIPE_API_KEY"),
+    webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET")
+)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +171,20 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_stripe_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe payment webhook events."""
+    sig_header = headers.get("stripe-signature", "")
+    if not sig_header:
+        return _error_response(400, "Missing Stripe signature")
+    
+    try:
+        result = await stripe_processor.handle_webhook(body, sig_header)
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +254,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        return await handle_stripe_webhook(body or "", {k.lower(): v for k, v in headers.items()})
     
     return _error_response(404, "Not found")
 
