@@ -3,8 +3,10 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/trading/start - Start trading strategy
+- POST /revenue/trading/stop - Stop trading strategy
 """
 
 import json
@@ -162,6 +164,65 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from core.trading_engine import TradingEngine
+
+# Initialize trading engine
+trading_engine = None
+
+async def init_trading_engine(execute_sql: callable, log_action: callable) -> TradingEngine:
+    """Initialize trading engine singleton."""
+    global trading_engine
+    if trading_engine is None:
+        trading_engine = TradingEngine(execute_sql, log_action)
+    return trading_engine
+
+async def handle_trading_start(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Start trading strategy."""
+    try:
+        engine = await init_trading_engine(query_db, lambda *args, **kwargs: None)
+        
+        # Connect to exchange
+        exchange_connected = await engine.connect_exchange(
+            body['exchange'],
+            body['api_key'],
+            body['api_secret']
+        )
+        
+        if not exchange_connected:
+            return _error_response(400, "Failed to connect to exchange")
+            
+        # Start strategy
+        result = await engine.run_strategy(
+            body['strategy_id'],
+            {
+                'exchange': body['exchange'],
+                'symbol': body['symbol'],
+                'interval': body.get('interval', '1h')
+            }
+        )
+        
+        if not result['success']:
+            return _error_response(500, result['error'])
+            
+        return _make_response(200, {
+            'status': 'running',
+            'strategy_id': body['strategy_id']
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to start trading: {str(e)}")
+
+async def handle_trading_stop(strategy_id: str) -> Dict[str, Any]:
+    """Stop trading strategy."""
+    try:
+        if trading_engine:
+            # In real implementation, would track and stop specific strategy
+            await trading_engine.shutdown()
+            return _make_response(200, {'status': 'stopped'})
+        return _error_response(400, "No active trading engine")
+    except Exception as e:
+        return _error_response(500, f"Failed to stop trading: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +292,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/trading/start
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "trading" and parts[2] == "start" and method == "POST":
+        return handle_trading_start(json.loads(body or "{}"))
+    
+    # POST /revenue/trading/stop
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "trading" and parts[2] == "stop" and method == "POST":
+        return handle_trading_stop((json.loads(body or "{}")).get("strategy_id"))
     
     return _error_response(404, "Not found")
 
