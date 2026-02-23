@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Payment webhook handler
 """
 
 import json
@@ -162,6 +163,26 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: str, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Handle payment webhook events"""
+    try:
+        processor = PaymentProcessor(api_key="your_stripe_secret_key")
+        webhook_secret = "your_webhook_secret"
+        sig_header = headers.get("stripe-signature", "")
+        
+        result = await processor.handle_webhook(
+            payload=body,
+            sig_header=sig_header,
+            webhook_secret=webhook_secret
+        )
+        
+        if not result['success']:
+            return _error_response(400, result['error'])
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +252,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(body or "", headers or {})
     
     return _error_response(404, "Not found")
 
