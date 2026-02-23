@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process new payment
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import payment_processor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +235,36 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            result = await payment_processor.create_payment_intent(
+                amount_cents=data.get("amount_cents"),
+                currency=data.get("currency", "usd"),
+                customer_id=data.get("customer_id"),
+                metadata=data.get("metadata", {}),
+                payment_method=data.get("payment_method", "stripe")
+            )
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Payment processing failed: {str(e)}")
+
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            source = data.get("source", "stripe")
+            result = await payment_processor.handle_webhook(data.get("payload"), source)
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
-__all__ = ["route_request"]
+__all__ = ["route_request", "payment_processor"]
