@@ -4,9 +4,13 @@ import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
+import stripe
+from core.config import STRIPE_SECRET_KEY
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+stripe.api_key = STRIPE_SECRET_KEY
 
 
 def generate_revenue_ideas(
@@ -275,6 +279,77 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def create_customer_portfolio(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    user_id: str,
+    email: str,
+) -> Dict[str, Any]:
+    """Create a Stripe customer and initialize their portfolio."""
+    try:
+        # Create Stripe customer
+        customer = stripe.Customer.create(
+            email=email,
+            metadata={"user_id": user_id}
+        )
+        
+        # Create portfolio record
+        execute_sql(f"""
+            INSERT INTO portfolios (
+                id, user_id, stripe_customer_id,
+                status, created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{user_id}',
+                '{customer.id}',
+                'active',
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return {"success": True, "customer_id": customer.id}
+    except Exception as e:
+        log_action("portfolio.create_failed", f"Failed to create portfolio: {str(e)}", level="error")
+        return {"success": False, "error": str(e)}
+
+def create_subscription(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    user_id: str,
+    price_id: str,
+) -> Dict[str, Any]:
+    """Create a subscription for a user."""
+    try:
+        # Get customer ID
+        res = execute_sql(f"""
+            SELECT stripe_customer_id 
+            FROM portfolios
+            WHERE user_id = '{user_id}'
+            LIMIT 1
+        """)
+        customer_id = res.get("rows", [{}])[0].get("stripe_customer_id")
+        if not customer_id:
+            return {"success": False, "error": "Customer not found"}
+        
+        # Create subscription
+        subscription = stripe.Subscription.create(
+            customer=customer_id,
+            items=[{"price": price_id}],
+            payment_behavior="default_incomplete",
+            expand=["latest_invoice.payment_intent"]
+        )
+        
+        return {
+            "success": True,
+            "subscription_id": subscription.id,
+            "client_secret": subscription.latest_invoice.payment_intent.client_secret,
+            "status": subscription.status
+        }
+    except Exception as e:
+        log_action("subscription.create_failed", f"Failed to create subscription: {str(e)}", level="error")
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
