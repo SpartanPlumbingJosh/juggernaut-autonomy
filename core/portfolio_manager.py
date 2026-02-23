@@ -1,20 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
 
 
-def generate_revenue_ideas(
+async def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas and automatically create payment-enabled products."""
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
@@ -62,6 +65,7 @@ def generate_revenue_ideas(
             pass
 
         try:
+            # Create the revenue idea
             execute_sql(
                 f"""
                 INSERT INTO revenue_ideas (
@@ -98,8 +102,28 @@ def generate_revenue_ideas(
                 )
                 """
             )
+            
+            # Create Stripe product for this idea
+            processor = PaymentProcessor()
+            product = stripe.Product.create(
+                name=title,
+                description=desc_esc,
+                metadata={
+                    'idea_id': idea.get('id'),
+                    'estimated_revenue': reported_revenue_val or 0
+                }
+            )
+            
+            # Create price for the product
+            price = stripe.Price.create(
+                unit_amount=int(float(reported_revenue_val or 0) * 100),
+                currency='usd',
+                product=product.id
+            )
+            
             created += 1
-        except Exception:
+        except Exception as e:
+            logging.error(f"Failed to create revenue idea: {str(e)}")
             continue
 
     try:
