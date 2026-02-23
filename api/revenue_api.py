@@ -10,8 +10,11 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import hashlib
+import hmac
 
 from core.database import query_db
+from core.service_delivery import deliver_service
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +213,40 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any], signature: Optional[str] = None) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    try:
+        # Verify webhook signature
+        secret = "YOUR_WEBHOOK_SECRET"  # Should be from environment
+        if signature:
+            expected = hmac.new(secret.encode(), json.dumps(body).encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(signature, expected):
+                return _error_response(401, "Invalid signature")
+        
+        event_type = body.get("event")
+        payment_id = body.get("id")
+        amount = body.get("amount") / 100  # Convert cents to dollars
+        currency = body.get("currency")
+        metadata = body.get("metadata", {})
+        
+        # Record transaction
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source,
+                metadata, recorded_at, created_at
+            ) VALUES (
+                '{payment_id}', 'payment', {int(amount * 100)}, '{currency}',
+                'webhook', '{json.dumps(metadata)}'::jsonb, NOW(), NOW()
+            )
+        """)
+        
+        # Trigger service delivery
+        await deliver_service(payment_id, metadata)
+        
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +268,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing body")
+        try:
+            body_data = json.loads(body)
+            signature = query_params.get("signature")
+            return handle_payment_webhook(body_data, signature)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
     
     return _error_response(404, "Not found")
 
