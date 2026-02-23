@@ -3,8 +3,9 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/track - Manually record revenue events
 """
 
 import json
@@ -162,6 +163,37 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_track(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Manually record a revenue event."""
+    try:
+        event_type = body.get("event_type", "revenue")
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = body.get("currency", "usd")
+        source = body.get("source", "manual")
+        metadata = body.get("metadata", {})
+        
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                {amount_cents},
+                '{currency}',
+                '{source}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to track revenue: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +263,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/track
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "track" and method == "POST":
+        return handle_revenue_track(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
