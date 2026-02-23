@@ -8,10 +8,55 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from fastapi.security import OAuth2PasswordBearer
+from fastapi import Depends, HTTPException
+from jose import JWTError, jwt
+from passlib.context import CryptContext
 
 from core.database import query_db
+from core.config import settings
+
+# Configure Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Authentication setup
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+def verify_password(plain_password: str, hashed_password: str):
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str):
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm=settings.ALGORITHM)
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=401,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        email: str = payload.get("sub")
+        if email is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    
+    user = await query_db(f"SELECT * FROM users WHERE email = '{email}'")
+    if not user.get("rows"):
+        raise credentials_exception
+    return user.get("rows")[0]
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +78,75 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_create_subscription(user_id: str, plan_id: str) -> Dict[str, Any]:
+    """Create a new subscription for a user."""
+    try:
+        # Get user and plan details
+        user = await query_db(f"SELECT * FROM users WHERE id = '{user_id}'")
+        plan = await query_db(f"SELECT * FROM plans WHERE id = '{plan_id}'")
+        
+        if not user.get("rows") or not plan.get("rows"):
+            return _error_response(404, "User or plan not found")
+            
+        user = user.get("rows")[0]
+        plan = plan.get("rows")[0]
+        
+        # Create Stripe customer if needed
+        if not user.get("stripe_customer_id"):
+            customer = stripe.Customer.create(
+                email=user.get("email"),
+                name=user.get("name"),
+                metadata={"user_id": user_id}
+            )
+            await query_db(f"""
+                UPDATE users 
+                SET stripe_customer_id = '{customer.id}'
+                WHERE id = '{user_id}'
+            """)
+            stripe_customer_id = customer.id
+        else:
+            stripe_customer_id = user.get("stripe_customer_id")
+        
+        # Create subscription
+        subscription = stripe.Subscription.create(
+            customer=stripe_customer_id,
+            items=[{"price": plan.get("stripe_price_id")}],
+            expand=["latest_invoice.payment_intent"]
+        )
+        
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source,
+                metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {plan.get("price_cents")},
+                'usd',
+                'subscription',
+                '{json.dumps({
+                    "subscription_id": subscription.id,
+                    "plan_id": plan_id,
+                    "user_id": user_id
+                })}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {
+            "subscription_id": subscription.id,
+            "status": subscription.status,
+            "payment_status": subscription.latest_invoice.payment_intent.status
+        })
+        
+    except stripe.error.StripeError as e:
+        return _error_response(500, f"Stripe error: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_revenue_summary(current_user: dict = Depends(get_current_user)) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
