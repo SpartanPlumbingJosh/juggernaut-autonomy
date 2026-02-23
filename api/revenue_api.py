@@ -1,17 +1,53 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core revenue tracking and billing system.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- PUT /revenue/subscriptions/{id} - Update subscription
+- POST /revenue/webhooks - Handle payment provider webhooks
 """
 
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from functools import wraps
 
 from core.database import query_db
+
+# Rate limiting for API endpoints
+RATE_LIMITS = {
+    "summary": 100,  # per minute
+    "transactions": 500,  # per minute
+    "subscriptions": 200,  # per minute
+}
+
+# In-memory rate limit tracking
+rate_limit_counters = {k: {"count": 0, "last_reset": time.time()} for k in RATE_LIMITS}
+
+def rate_limit(endpoint: str):
+    """Decorator to enforce rate limits."""
+    def decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            now = time.time()
+            counter = rate_limit_counters[endpoint]
+            
+            # Reset counter if last reset was more than 60 seconds ago
+            if now - counter["last_reset"] > 60:
+                counter["count"] = 0
+                counter["last_reset"] = now
+            
+            if counter["count"] >= RATE_LIMITS[endpoint]:
+                return _error_response(429, "Too many requests")
+            
+            counter["count"] += 1
+            return f(*args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +198,118 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_id", "plan_id", "payment_method_id"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+        
+        # Create subscription in database
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, status, 
+            payment_method_id, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["customer_id"]}',
+            '{body["plan_id"]}',
+            'active',
+            '{body["payment_method_id"]}',
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        subscription_id = result.get("rows", [{}])[0].get("id")
+        
+        if not subscription_id:
+            return _error_response(500, "Failed to create subscription")
+        
+        return _make_response(201, {"subscription_id": subscription_id})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_update_subscription(subscription_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Update an existing subscription."""
+    try:
+        # Validate subscription exists
+        check_sql = f"SELECT id FROM subscriptions WHERE id = '{subscription_id}'"
+        check_result = await query_db(check_sql)
+        if not check_result.get("rows"):
+            return _error_response(404, "Subscription not found")
+        
+        # Build update query
+        updates = []
+        for field in ["status", "payment_method_id", "plan_id"]:
+            if field in body:
+                updates.append(f"{field} = '{body[field]}'")
+        
+        if not updates:
+            return _error_response(400, "No valid fields to update")
+        
+        sql = f"""
+        UPDATE subscriptions
+        SET {", ".join(updates)}, updated_at = NOW()
+        WHERE id = '{subscription_id}'
+        RETURNING id
+        """
+        
+        await query_db(sql)
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to update subscription: {str(e)}")
+
+
+async def handle_webhook_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment provider webhook events."""
+    try:
+        event_type = body.get("type")
+        data = body.get("data", {})
+        
+        # Handle different webhook events
+        if event_type == "payment.succeeded":
+            # Record successful payment
+            sql = f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {data.get("amount", 0)},
+                '{data.get("currency", "usd")}',
+                'subscription',
+                '{json.dumps(data)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+            await query_db(sql)
+            
+        elif event_type == "payment.failed":
+            # Handle failed payment
+            sql = f"""
+            UPDATE subscriptions
+            SET status = 'past_due',
+                updated_at = NOW()
+            WHERE payment_method_id = '{data.get("payment_method_id")}'
+            """
+            await query_db(sql)
+            
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +379,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_create_subscription(json.loads(body))
+    
+    # PUT /revenue/subscriptions/{id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "PUT":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_update_subscription(parts[2], json.loads(body))
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_webhook_event(json.loads(body))
     
     return _error_response(404, "Not found")
 
