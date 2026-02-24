@@ -8,10 +8,21 @@ Endpoints:
 """
 
 import json
+import stripe
+import paypalrestsdk
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize payment processors
+stripe.api_key = settings.STRIPE_SECRET_KEY
+paypalrestsdk.configure({
+    "mode": settings.PAYPAL_MODE,
+    "client_id": settings.PAYPAL_CLIENT_ID,
+    "client_secret": settings.PAYPAL_SECRET
+})
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +124,39 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def create_payment_intent(amount: int, currency: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent with Stripe."""
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            metadata=metadata,
+            automatic_payment_methods={"enabled": True},
+        )
+        return {"success": True, "client_secret": intent.client_secret}
+    except stripe.error.StripeError as e:
+        return {"success": False, "error": str(e)}
+
+async def create_paypal_order(amount: str, currency: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a PayPal order."""
+    try:
+        payment = paypalrestsdk.Payment({
+            "intent": "sale",
+            "payer": {"payment_method": "paypal"},
+            "transactions": [{
+                "amount": {
+                    "total": amount,
+                    "currency": currency
+                },
+                "description": metadata.get("description", "")
+            }]
+        })
+        if payment.create():
+            return {"success": True, "payment_id": payment.id, "approval_url": payment.links[1].href}
+        return {"success": False, "error": "Payment creation failed"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
