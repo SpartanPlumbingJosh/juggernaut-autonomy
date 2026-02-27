@@ -276,6 +276,42 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def _monitor_revenue_streams(execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Monitor revenue streams and trigger alerts for anomalies."""
+    try:
+        # Get recent revenue trends
+        res = execute_sql("""
+            SELECT 
+                DATE(recorded_at) as date,
+                SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+                COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '7 days'
+            GROUP BY DATE(recorded_at)
+            ORDER BY date DESC
+        """)
+        trends = res.get("rows", [])
+        
+        # Calculate average daily revenue
+        avg_daily = sum(t['revenue_cents'] for t in trends) / len(trends) if trends else 0
+        
+        # Check for significant deviations
+        alerts = []
+        for trend in trends:
+            deviation = abs(trend['revenue_cents'] - avg_daily) / avg_daily if avg_daily > 0 else 0
+            if deviation > 0.5:  # 50% deviation
+                alerts.append({
+                    "date": trend['date'],
+                    "revenue": trend['revenue_cents'],
+                    "deviation": deviation,
+                    "message": f"Significant revenue deviation detected: {deviation:.0%}"
+                })
+                
+        return {"success": True, "alerts": alerts}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
