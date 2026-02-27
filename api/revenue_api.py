@@ -10,6 +10,7 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from bots.marketing_funnel import MarketingBot, FunnelAnalytics
 
 from core.database import query_db
 
@@ -33,8 +34,8 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get MTD/QTD/YTD revenue totals with marketing funnel data."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -81,6 +82,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        # Add marketing funnel data if requested
+        funnel_data = {}
+        if query_params.get("include_funnel"):
+            funnel = FunnelAnalytics(query_db)
+            funnel_data = funnel.get_conversion_rates()
+
         return _make_response(200, {
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
@@ -107,7 +114,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
-            }
+            },
+            "funnel": funnel_data
         })
         
     except Exception as e:
