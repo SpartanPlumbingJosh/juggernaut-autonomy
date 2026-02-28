@@ -162,6 +162,86 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_monitoring() -> Dict[str, Any]:
+    """Get revenue monitoring dashboard data."""
+    try:
+        # Target revenue in cents
+        TARGET_CENTS = 1400000000
+        
+        # Get current total revenue
+        total_sql = """
+        SELECT SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents
+        FROM revenue_events
+        """
+        total_result = await query_db(total_sql)
+        current_cents = total_result.get("rows", [{}])[0].get("total_revenue_cents", 0)
+        
+        # Get daily revenue for burn-up chart
+        burnup_sql = """
+        SELECT 
+            DATE(recorded_at) as date,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents
+        FROM revenue_events
+        GROUP BY DATE(recorded_at)
+        ORDER BY date ASC
+        """
+        burnup_result = await query_db(burnup_sql)
+        burnup_data = burnup_result.get("rows", [])
+        
+        # Calculate MRR/ARR
+        mrr_sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) / 100 as mrr
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '30 days'
+        """
+        mrr_result = await query_db(mrr_sql)
+        mrr = mrr_result.get("rows", [{}])[0].get("mrr", 0)
+        arr = mrr * 12
+        
+        # Calculate velocity and projection
+        velocity_sql = """
+        SELECT 
+            AVG(daily.revenue_cents) as avg_daily_velocity
+        FROM (
+            SELECT 
+                DATE(recorded_at) as date,
+                SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(recorded_at)
+        ) daily
+        """
+        velocity_result = await query_db(velocity_sql)
+        avg_daily_velocity = velocity_result.get("rows", [{}])[0].get("avg_daily_velocity", 0)
+        
+        # Calculate days remaining
+        remaining_cents = TARGET_CENTS - current_cents
+        days_remaining = remaining_cents / avg_daily_velocity if avg_daily_velocity > 0 else None
+        
+        # Check alerts
+        alerts = []
+        if current_cents < TARGET_CENTS * 0.8:
+            alerts.append("Revenue is below 80% of target")
+        if days_remaining and days_remaining > 90:
+            alerts.append("Projected completion exceeds 90 days")
+            
+        return _make_response(200, {
+            "current_cents": current_cents,
+            "target_cents": TARGET_CENTS,
+            "progress": current_cents / TARGET_CENTS,
+            "burnup_data": burnup_data,
+            "mrr": mrr,
+            "arr": arr,
+            "avg_daily_velocity": avg_daily_velocity,
+            "days_remaining": days_remaining,
+            "alerts": alerts
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch monitoring data: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +311,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/monitoring
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitoring" and method == "GET":
+        return handle_revenue_monitoring()
     
     return _error_response(404, "Not found")
 
