@@ -162,6 +162,54 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription with payment processing."""
+    try:
+        from payment_processor.payment_handler import PaymentHandler
+        
+        required_fields = ['customer_id', 'plan_id', 'payment_method']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+            
+        # Process initial payment
+        payment_data = {
+            'idempotency_key': f"sub_{body['customer_id']}_{datetime.now(timezone.utc).timestamp()}",
+            'amount': body.get('amount', 0),
+            'currency': body.get('currency', 'USD'),
+            'metadata': body
+        }
+        
+        handler = PaymentHandler(query_db)
+        result = await handler.process_payment(payment_data)
+        
+        if result['status'] != 'success':
+            return _error_response(402, "Payment processing failed")
+            
+        # Create subscription record
+        await query_db(
+            """
+            INSERT INTO subscriptions (
+                customer_id, plan_id, status, 
+                current_period_start, current_period_end,
+                payment_method, created_at
+            ) VALUES (
+                %(customer_id)s, %(plan_id)s, 'active',
+                NOW(), NOW() + INTERVAL '1 month',
+                %(payment_method)s, NOW()
+            )
+            """,
+            body
+        )
+        
+        return _make_response(201, {
+            'status': 'active',
+            'subscription_id': payment_data['idempotency_key']
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +279,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            body = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+        return await handle_subscription_create(body)
     
     return _error_response(404, "Not found")
 
