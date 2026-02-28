@@ -33,10 +33,19 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
+        
+        # Get subscription revenue
+        subscription_sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'subscription' THEN amount_cents ELSE 0 END) as total_subscription_cents,
+            COUNT(*) FILTER (WHERE event_type = 'subscription') as subscription_count
+        FROM revenue_events
+        WHERE recorded_at >= '{date}'
+        """
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -81,9 +90,16 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        # Get subscription metrics
+        mtd_sub = await query_db(subscription_sql.replace("{date}", month_start.isoformat()))
+        qtd_sub = await query_db(subscription_sql.replace("{date}", quarter_start.isoformat()))
+        ytd_sub = await query_db(subscription_sql.replace("{date}", year_start.isoformat()))
+        
         return _make_response(200, {
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
+                "subscription_cents": mtd_sub.get("rows", [{}])[0].get("total_subscription_cents") or 0,
+                "subscription_count": mtd_sub.get("rows", [{}])[0].get("subscription_count") or 0,
                 "cost_cents": mtd.get("total_cost_cents") or 0,
                 "profit_cents": mtd.get("net_profit_cents") or 0,
                 "transaction_count": mtd.get("transaction_count") or 0,
