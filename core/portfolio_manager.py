@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
+import stripe
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
@@ -274,6 +276,65 @@ def start_experiments_from_top_ideas(
         out["failures"] = failures[:10]
         out["failed"] = len(failures)
     return out
+
+
+def create_subscription_product(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    name: str,
+    description: str,
+    monthly_price_cents: int,
+) -> Dict[str, Any]:
+    """Create a Stripe subscription product."""
+    try:
+        stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+        
+        # First create the product
+        product = stripe.Product.create(
+            name=name,
+            description=description,
+        )
+        
+        # Then create the price
+        price = stripe.Price.create(
+            product=product.id,
+            unit_amount=monthly_price_cents,
+            currency='usd',
+            recurring={'interval': 'month'},
+        )
+        
+        # Store in database
+        execute_sql(
+            f"""
+            INSERT INTO subscription_products (
+                id,
+                stripe_product_id,
+                stripe_price_id,
+                name,
+                description,
+                monthly_price_cents,
+                created_at,
+                updated_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{product.id}',
+                '{price.id}',
+                '{name.replace("'", "''")}',
+                '{description.replace("'", "''")}',
+                {monthly_price_cents},
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        
+        return {
+            'success': True,
+            'product_id': product.id,
+            'price_id': price.id
+        }
+        
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 
 def review_experiments_stub(

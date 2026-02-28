@@ -11,7 +11,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+import stripe
+from datetime import datetime
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -213,6 +215,9 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
+    # Initialize Stripe
+    stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+    
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
@@ -235,4 +240,55 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
-__all__ = ["route_request"]
+async def handle_payment_intent(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process Stripe payment and record revenue event."""
+    try:
+        amount_cents = int(payload.get('amount'))  # In pennies/cents
+        customer_email = payload.get('email')
+
+        # Create Stripe payment intent
+        intent = stripe.PaymentIntent.create(
+            amount=amount_cents,
+            currency='usd',
+            receipt_email=customer_email,
+            metadata={
+                'product': payload.get('product_name', ''),
+                'user_email': customer_email
+            }
+        )
+
+        # Record revenue event
+        await execute_sql(
+            f"""
+            INSERT INTO revenue_events (
+                id, 
+                event_type,
+                amount_cents,
+                currency,
+                source,
+                metadata,
+                recorded_at,
+                created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                'usd',
+                'stripe',
+                '{json.dumps(payload)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+
+        return _make_response(200, {
+            'client_secret': intent.client_secret,
+            'status': 'payment_created'
+        })
+
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+__all__ = ["route_request", "handle_payment_intent"]
