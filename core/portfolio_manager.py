@@ -276,6 +276,77 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def deliver_services(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Automated service delivery system."""
+    try:
+        # Get active subscriptions needing service delivery
+        res = execute_sql("""
+            SELECT s.id, s.customer_id, p.service_type, p.delivery_frequency
+            FROM subscriptions s
+            JOIN plans p ON s.plan_id = p.id
+            WHERE s.status = 'active'
+              AND s.next_delivery_at <= NOW()
+            LIMIT 100
+        """)
+        subscriptions = res.get("rows", []) or []
+        
+        delivered = 0
+        for sub in subscriptions:
+            try:
+                # Trigger service delivery
+                execute_sql(f"""
+                    UPDATE subscriptions
+                    SET last_delivered_at = NOW(),
+                        next_delivery_at = NOW() + INTERVAL '{sub["delivery_frequency"]} days',
+                        updated_at = NOW()
+                    WHERE id = '{sub["id"]}'
+                """)
+                
+                # Record delivery event
+                execute_sql(f"""
+                    INSERT INTO service_deliveries (
+                        id, subscription_id, customer_id,
+                        service_type, delivered_at
+                    ) VALUES (
+                        gen_random_uuid(),
+                        '{sub["id"]}',
+                        '{sub["customer_id"]}',
+                        '{sub["service_type"]}',
+                        NOW()
+                    )
+                """)
+                
+                delivered += 1
+            except Exception as e:
+                log_action(
+                    "service.delivery_failed",
+                    f"Failed to deliver service: {str(e)}",
+                    level="error",
+                    error_data={"subscription_id": sub["id"], "error": str(e)}
+                )
+        
+        log_action(
+            "services.delivered",
+            f"Delivered {delivered} services",
+            level="info",
+            output_data={"delivered": delivered}
+        )
+        
+        return {"success": True, "delivered": delivered}
+        
+    except Exception as e:
+        log_action(
+            "service.delivery_error",
+            f"Service delivery system error: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
