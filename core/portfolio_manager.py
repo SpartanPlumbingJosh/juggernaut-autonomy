@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_service import RevenueService
 
 
 def generate_revenue_ideas(
@@ -276,11 +278,34 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+async def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    
+    Also handles automated revenue processing and service monitoring.
+    """
+    # Initialize revenue service
+    revenue_service = RevenueService(execute_sql, log_action)
+    
+    # Process pending transactions
+    process_result = await revenue_service.process_pending_transactions()
+    if not process_result.get("success"):
+        log_action(
+            "revenue.processing_failed",
+            f"Failed to process transactions: {process_result.get('error')}",
+            level="error"
+        )
+    
+    # Monitor service health
+    health_result = await revenue_service.monitor_service_health()
+    if not health_result.get("success"):
+        log_action(
+            "service.health_check_failed",
+            f"Failed to check service health: {health_result.get('error')}",
+            level="error"
+        )
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
