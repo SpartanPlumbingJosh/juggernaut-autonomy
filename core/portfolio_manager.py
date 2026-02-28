@@ -3,11 +3,70 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from decimal import Decimal
+import uuid
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
+
+def deliver_value_to_customer(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    customer_id: str,
+    value_amount: Decimal,
+    service_type: str,
+    metadata: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Automated value delivery system."""
+    try:
+        # Record value delivery
+        await execute_sql(f"""
+            INSERT INTO value_deliveries (
+                id, customer_id, value_amount, service_type, 
+                status, metadata, delivered_at
+            ) VALUES (
+                '{str(uuid.uuid4())}',
+                '{customer_id}',
+                {float(value_amount)},
+                '{service_type}',
+                'delivered',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW()
+            )
+        """)
+        
+        # Trigger billing
+        billing_metadata = {
+            "customer_id": customer_id,
+            "service_type": service_type,
+            "value_delivered": float(value_amount)
+        }
+        billing_result = await execute_sql(f"""
+            INSERT INTO billing_events (
+                id, customer_id, amount, currency, 
+                status, metadata, created_at
+            ) VALUES (
+                '{str(uuid.uuid4())}',
+                '{customer_id}',
+                {float(value_amount)},
+                'usd',
+                'pending',
+                '{json.dumps(billing_metadata)}'::jsonb,
+                NOW()
+            )
+        """)
+        
+        return {"success": True, "value_delivered": value_amount}
+    except Exception as e:
+        log_action(
+            "value_delivery.failed",
+            f"Failed to deliver value to customer {customer_id}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
