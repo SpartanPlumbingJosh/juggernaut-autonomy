@@ -8,10 +8,14 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import STRIPE_SECRET_KEY
+
+stripe.api_key = STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +214,63 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a Stripe PaymentIntent."""
+    try:
+        amount = int(float(body.get("amount", 0)) * 100)  # Convert to cents
+        currency = str(body.get("currency", "usd")).lower()
+        
+        intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            automatic_payment_methods={"enabled": True},
+            metadata={
+                "user_id": body.get("user_id"),
+                "product_id": body.get("product_id")
+            }
+        )
+        
+        return _make_response(200, {
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id,
+            "amount": intent.amount,
+            "currency": intent.currency
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment failed: {str(e)}")
+
+async def handle_webhook_event(body: Dict[str, Any], sig_header: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            payload=body,
+            sig_header=sig_header,
+            secret=STRIPE_WEBHOOK_SECRET
+        )
+        
+        if event["type"] == "payment_intent.succeeded":
+            payment_intent = event["data"]["object"]
+            # Record successful payment
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, 
+                    source, metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {payment_intent["amount"]},
+                    '{payment_intent["currency"]}',
+                    'stripe',
+                    '{json.dumps(payment_intent["metadata"])}',
+                    NOW(),
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(400, f"Webhook error: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +292,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment-intents
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intents" and method == "POST":
+        return handle_create_payment_intent(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        return handle_webhook_event(body or "{}", sig_header)
     
     return _error_response(404, "Not found")
 
