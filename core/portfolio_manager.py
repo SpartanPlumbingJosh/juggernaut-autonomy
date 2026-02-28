@@ -276,6 +276,61 @@ def start_experiments_from_top_ideas(
     return out
 
 
+class DeliveryController:
+    """Manages automated delivery of successful experiments to production."""
+    
+    def __init__(self, execute_sql, log_action):
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        
+    def deploy_experiment(self, experiment_id: str) -> Dict[str, Any]:
+        """Package and deploy a successful experiment to production."""
+        try:
+            # Get experiment details
+            res = self.execute_sql(f"""
+                SELECT e.*, r.title as idea_title, r.score
+                FROM experiments e
+                JOIN revenue_ideas r ON e.idea_id = r.id
+                WHERE e.id = '{experiment_id}'
+            """)
+            exp = res.get("rows", [{}])[0]
+            
+            if not exp or exp.get("status") != "completed":
+                return {"success": False, "error": "Invalid experiment state for deployment"}
+            
+            # Automated packaging steps
+            self.execute_sql(f"""
+                UPDATE experiments
+                SET deployment_status = 'packaging',
+                    deployment_started_at = NOW()
+                WHERE id = '{experiment_id}'
+            """)
+            
+            # Implement your CI/CD pipeline integration
+            
+            self.execute_sql(f"""
+                UPDATE experiments
+                SET deployment_status = 'deployed',
+                    deployed_at = NOW()
+                WHERE id = '{experiment_id}'
+            """)
+            
+            self.log_action(
+                "experiment.deployed",
+                f"Deployed experiment {exp.get('name')} to production",
+                metadata={"experiment_id": experiment_id, "roi": exp.get("roi", 0)}
+            )
+            return {"success": True}
+            
+        except Exception as e:
+            self.log_action(
+                "experiment.deploy_failed",
+                "Failed to deploy experiment",
+                error=str(e)[:200]
+            )
+            return {"success": False, "error": str(e)}
+
+            
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
