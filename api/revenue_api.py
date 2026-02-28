@@ -162,6 +162,31 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from services.automated_billing import BillingService
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process new subscription purchase"""
+    try:
+        if not body or not isinstance(body, dict):
+            return _error_response(400, "Invalid request body")
+        
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        
+        if not customer_id or not plan_id:
+            return _error_response(400, "Missing customer_id or plan_id")
+        
+        billing = BillingService()
+        result = await billing.process_subscription(customer_id, plan_id)
+        
+        if not result.get("success"):
+            return _make_response(422, result)
+            
+        return _make_response(201, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +256,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            request_body = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+        return handle_create_subscription(request_body)
     
     return _error_response(404, "Not found")
 
