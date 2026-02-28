@@ -118,7 +118,7 @@ def generate_revenue_ideas(
 def score_pending_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
-    limit: int = 20,
+    limit: int = 100,  # Increased for active operations
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -184,9 +184,9 @@ def score_pending_ideas(
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
-    max_new: int = 1,
-    min_score: float = 60.0,
-    budget: float = 20.0,
+    max_new: int = 5,  # More concurrent experiments
+    min_score: float = 50.0,  # Wider funnel criteria
+    budget: float = 100.0,  # Increased budget allocation
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -275,6 +275,46 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+async def auto_rebalance_portfolio(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any]
+) -> Dict[str, Any]:
+    """Automatically rebalance the experimental portfolio based on performance."""
+    try:
+        # Get top performing experiments
+        top_performers = await query_db("""
+            SELECT experiment_id, SUM(net_amount) as net_value
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 week'
+            GROUP BY experiment_id
+            ORDER BY net_value DESC
+            LIMIT 3
+        """)
+
+        # Calculate budget allocation
+        for performer in top_performers.get("rows", []):
+            experiment_id = performer.get("experiment_id")
+            net_value = performer.get("net_value", 0)
+            
+            # Increase budget for top performers
+            if net_value > 0:
+                await execute_sql(f"""
+                    UPDATE experiments 
+                    SET budget_limit = LEAST(budget_limit * 1.5, 1000),
+                        status = CASE WHEN status = 'paused' THEN 'running' ELSE status END
+                    WHERE id = '{experiment_id}'
+                """)
+
+        log_action(
+            "portfolio.auto_rebalanced",
+            "Automated portfolio rebalance completed",
+            level="info"
+        )
+        return {"success": True}
+
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
