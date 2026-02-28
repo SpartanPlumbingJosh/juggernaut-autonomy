@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spartan Job Tracker</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+:root {
+  --navy: #0f1923;
+  --navy-light: #1a2a3a;
+  --navy-mid: #243447;
+  --slate: #64748b;
+  --border: #334155;
+  --surface: #f8fafc;
+  --white: #ffffff;
+  --green: #22c55e;
+  --green-bg: #052e16;
+  --yellow: #eab308;
+  --yellow-bg: #422006;
+  --orange: #f97316;
+  --orange-bg: #431407;
+  --red: #ef4444;
+  --red-bg: #450a0a;
+  --blue: #3b82f6;
+  --blue-bg: #172554;
+  --accent: #06b6d4;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --text-light: #94a3b8;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: 'IBM Plex Sans', -apple-system, sans-serif;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.header {
+  background: var(--navy);
+  color: white;
+  padding: 12px 16px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.header-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.logo {
+  font-weight: 700;
+  font-size: 15px;
+  letter-spacing: 0.5px;
+  color: var(--accent);
+}
+.job-badge {
+  background: var(--navy-mid);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.job-info {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-light);
+}
+.job-info strong { color: white; font-weight: 600; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.status-active { background: var(--green-bg); color: var(--green); }
+
+.tab-nav {
+  background: var(--navy-light);
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+.tab-nav::-webkit-scrollbar { display: none; }
+.tab-nav-inner {
+  display: inline-flex;
+  padding: 0 8px;
+}
+.tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 14px;
+  background: none;
+  border: none;
+  color: var(--text-light);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tab-btn:hover { color: white; background: rgba(255,255,255,0.05); }
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: rgba(6,182,212,0.08);
+}
+.tab-btn .tab-num {
+  background: var(--navy-mid);
+  color: var(--slate);
+  width: 18px;
+  height: 18px;
+  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+}
+.tab-btn.active .tab-num {
+  background: var(--accent);
+  color: var(--navy);
+}
+
+.content { padding: 16px; max-width: 960px; margin: 0 auto; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+.card {
+  background: var(--white);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+.card-header {
+  padding: 12px 16px;
+  border-bottom: 1px solid #e2e8f0;
+  font-weight: 600;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f1f5f9;
+}
+.card-header .badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.card-body { padding: 16px; }
+
+.field-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.field-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 2px;
+}
+.field-value { font-size: 14px; color: var(--text); }
+.field-value.placeholder {
+  color: var(--text-light);
+  font-style: italic;
+  font-size: 13px;
+}
+
+.checklist { list-style: none; }
+.checklist-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+.checklist-item:last-child { border-bottom: none; }
+.check-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.check-pending { background: #f1f5f9; border: 1.5px solid #cbd5e1; color: #cbd5e1; }
+.check-pass { background: #dcfce7; border: 1.5px solid var(--green); color: var(--green); }
+.check-fail { background: #fee2e2; border: 1.5px solid var(--red); color: var(--red); }
+.check-content { flex: 1; min-width: 0; }
+.check-title { font-weight: 500; font-size: 13px; }
+.check-meta { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.check-evidence {
+  margin-top: 6px;
+  padding: 8px;
+  background: #f8fafc;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+  border-left: 3px solid #e2e8f0;
+}
+
+.quarter-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--navy);
+}
+.quarter-divider::before,
+.quarter-divider::after {
+  content: '';
+  flex: 1;
+  height: 2px;
+  background: var(--navy);
+  opacity: 0.15;
+}
+.quarter-score {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.data-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-muted);
+  border-bottom: 2px solid #e2e8f0;
+  background: #f8fafc;
+}
+.data-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid #f1f5f9;
+  vertical-align: top;
+}
+.data-table tr:hover td { background: #f8fafc; }
+
+.verify-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+  gap: 4px;
+}
+.verify-cell {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 700;
+  font-family: 'IBM Plex Mono', monospace;
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.verify-cell:hover { transform: scale(1.15); }
+.vc-pass { background: #dcfce7; color: #166534; }
+.vc-fail { background: #fee2e2; color: #991b1b; }
+.vc-pending { background: #f1f5f9; color: #94a3b8; }
+.vc-skip { background: #fef3c7; color: #92400e; }
+.vc-blocked { background: #e2e8f0; color: #64748b; }
+
+.score-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--navy);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+.score-label { color: var(--text-light); font-size: 12px; font-weight: 500; }
+.score-value {
+  font-family: 'IBM Plex Mono', monospace;
+  font-size: 24px;
+  font-weight: 700;
+  color: var(--accent);
+}
+.score-track {
+  flex: 1;
+  height: 6px;
+  background: var(--navy-mid);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.score-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.5s ease;
+}
+.fill-green { background: var(--green); }
+.fill-yellow { background: var(--yellow); }
+.fill-red { background: var(--red); }
+
+.budget-bar {
+  padding: 12px 16px;
+  background: var(--white);
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.budget-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+}
+.budget-track {
+  height: 8px;
+  background: #e2e8f0;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.budget-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s;
+}
+.budget-marker {
+  position: absolute;
+  top: -4px;
+  height: 16px;
+  width: 2px;
+  background: var(--red);
+}
+
+.section-header {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 16px 0 8px;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 12px;
+}
+
+.risk-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 13px;
+}
+.risk-green { background: #dcfce7; color: #166534; }
+
+.timeline { position: relative; padding-left: 24px; }
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 8px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: #e2e8f0;
+}
+
+.playbook-select {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.playbook-opt {
+  padding: 6px 14px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  background: var(--white);
+  transition: all 0.15s;
+}
+.playbook-opt:hover { border-color: var(--accent); }
+.playbook-opt.selected {
+  border-color: var(--accent);
+  background: rgba(6,182,212,0.08);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.search-box {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.search-input {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1.5px solid #e2e8f0;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.search-input:focus { border-color: var(--accent); }
+.search-btn {
+  padding: 8px 16px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.hard-gate {
+  padding: 12px 16px;
+  background: #fef2f2;
+  border: 2px solid var(--red);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.hard-gate-label {
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--red);
+  margin-bottom: 4px;
+}
+
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 8px;
+}
+.photo-thumb {
+  aspect-ratio: 1;
+  background: #e2e8f0;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-light);
+  font-size: 11px;
+  text-align: center;
+  padding: 8px;
+}
+
+.script-tabs {
+  display: flex;
+  border-bottom: 1px solid #e2e8f0;
+  margin-bottom: 12px;
+}
+.script-tab {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.script-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  color: var(--text-light);
+}
+.empty-state-icon { font-size: 32px; margin-bottom: 8px; }
+.empty-state-text { font-size: 13px; }
+
+@media (max-width: 600px) {
+  .field-grid { grid-template-columns: 1fr; }
+  .job-info { font-size: 12px; gap: 8px; }
+  .tab-btn { padding: 8px 10px; font-size: 11px; }
+  .content { padding: 12px; }
+  .photo-grid { grid-template-columns: repeat(3, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-top">
+    <div class="logo">⚡ SPARTAN JOB TRACKER</div>
+    <span class="job-badge">JOB #247831</span>
+  </div>
+  <div class="job-info">
+    <span><strong>Diana Fisher</strong></span>
+    <span>1247 Oakwood Dr, Dayton</span>
+    <span class="status-pill status-active">● In Progress</span>
+    <span>Install — Water Heater</span>
+  </div>
+</div>
+
+<div class="tab-nav">
+  <div class="tab-nav-inner">
+    <button class="tab-btn active" data-tab="intel"><span class="tab-num">1</span>Customer Intel</button>
+    <button class="tab-btn" data-tab="service"><span class="tab-num">2</span>Service</button>
+    <button class="tab-btn" data-tab="sales"><span class="tab-num">3</span>Sales</button>
+    <button class="tab-btn" data-tab="materials"><span class="tab-num">4</span>Materials</button>
+    <button class="tab-btn" data-tab="permits"><span class="tab-num">5</span>Permits</button>
+    <button class="tab-btn" data-tab="cards"><span class="tab-num">6</span>P-Cards</button>
+    <button class="tab-btn" data-tab="install"><span class="tab-num">7</span>Install</button>
+    <button class="tab-btn" data-tab="financials"><span class="tab-num">8</span>Financials</button>
+    <button class="tab-btn" data-tab="postinstall"><span class="tab-num">9</span>Post-Install</button>
+    <button class="tab-btn" data-tab="blockers"><span class="tab-num">10</span>Blockers</button>
+    <button class="tab-btn" data-tab="dashboard"><span class="tab-num">11</span>Verification</button>
+    <button class="tab-btn" data-tab="scripts"><span class="tab-num">12</span>Calls</button>
+  </div>
+</div>
+
+<div class="content">
+
+<div class="tab-panel active" id="tab-intel">
+  <div class="card">
+    <div class="card-header">Customer Profile <span class="badge" style="background:#dcfce7;color:#166534;">READ-ONLY</span></div>
+    <div class="card-body">
+      <div class="field-grid">
+        <div class="field"><div class="field-label">Customer</div><div class="field-value">Diana Fisher</div></div>
+        <div class="field"><div class="field-label">Address</div><div class="field-value">1247 Oakwood Dr, Dayton OH 45419</div></div>
+        <div class="field"><div class="field-label">Phone</div><div class="field-value">(937) 555-0142</div></div>
+        <div class="field"><div class="field-label">Email</div><div class="field-value">diana.fisher@email.com</div></div>
+        <div class="field"><div class="field-label">Customer Since</div><div class="field-value">March 2021 (4.9 years)</div></div>
+        <div class="field"><div class="field-label">Lifetime Spend</div><div class="field-value">$14,280</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Previous Jobs at This Location</div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Type</th><th>Amount</th><th>Tech</th><th>Outcome</th></tr></thead>
+        <tbody>
+          <tr><td>2025-11-14</td><td>Service — Drain</td><td>$485</td><td>Tim Z.</td><td>Cleared main line</td></tr>
+          <tr><td>2024-08-22</td><td>Service — Plumbing</td><td>$1,290</td><td>Jerrod M.</td><td>Kitchen faucet + disposal</td></tr>
+          <tr><td>2023-03-10</td><td>Install — Water Heater</td><td>$4,800</td><td>Nick H.</td><td>50gal gas → 50gal gas</td></tr>
+          <tr><td>2021-06-05</td><td>Service — Plumbing</td><td>$380</td><td>Michael W.</td><td>Toilet repair, hall bath</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">AI Analysis</div>
+    <div class="card-body">
+      <div class="field-value placeholder">AI briefing will be generated at dispatch — combines prior job patterns, equipment age estimates, recurring issues, and relevant notes from previous Slack channels for this customer.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Open Estimates</div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead><tr><th>Date</th><th>Description</th><th>Amount</th><th>Age</th><th>AI Relevance</th></tr></thead>
+        <tbody>
+          <tr><td>2025-11-14</td><td>Whole house repipe — PEX</td><td>$12,400</td><td>103 days</td><td style="color:var(--green);font-weight:600;">High — galvanized showing age</td></tr>
+          <tr><td>2024-08-22</td><td>Water softener install</td><td>$2,800</td><td>554 days</td><td style="color:var(--text-muted);">Low</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Prior Channel Context</div>
+    <div class="card-body">
+      <div class="field-value placeholder">AI scans prior job Slack channels for: access instructions, pet warnings, gate codes, complaints, positive notes, special requests. Populated at dispatch.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Recall History</div>
+    <div class="card-body"><div class="field-value placeholder">No prior recalls at this location.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">Equipment Age Map</div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead><tr><th>Equipment</th><th>Age (est.)</th><th>Condition</th><th>Source</th></tr></thead>
+        <tbody>
+          <tr><td>Water Heater — 50gal gas</td><td>~3 years</td><td>Good (installed 2023)</td><td>Job #198442</td></tr>
+          <tr><td>Main line — cast iron</td><td>~40+ years</td><td>Aging</td><td>Job #231095 (camera footage)</td></tr>
+          <tr><td>Supply piping — galvanized</td><td>~40+ years</td><td>Corrosion noted</td><td>Job #215600</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">AI-Identified Opportunities</div>
+    <div class="card-body">
+      <div class="field-value placeholder">AI identifies overlooked items from prior visits: unsold estimates, W&T findings never addressed, equipment nearing end-of-life. Populated at dispatch.</div>
+    </div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-service">
+  <div class="score-bar">
+    <div><div class="score-label">Service Score</div><div class="score-value">—%</div></div>
+    <div class="score-track"><div class="score-fill fill-green" style="width:0%"></div></div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header">Playbook Selection</div>
+    <div class="card-body">
+      <div class="playbook-select">
+        <div class="playbook-opt selected">PL Service (32 steps)</div>
+        <div class="playbook-opt">DR Service (33 steps)</div>
+        <div class="playbook-opt">PL Phone Close (25 steps)</div>
+        <div class="playbook-opt">DR Phone Close (28 steps)</div>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);">Auto-selected based on job type and BU. Can be manually overridden.</div>
+    </div>
+  </div>
+  <div class="quarter-divider">Q1 — Arrival & Setup <span class="quarter-score">0 / 8 steps</span></div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">1. ETA text/call to customer</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">2. Arrival confirmation — checked in at location</div><div class="check-meta">Verified via: ST appointment data · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">3. Introduction & set expectations</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4. Booties on, drop cloths down</div><div class="check-meta">Verified via: Photo in Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5. Customer walk-through of home</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">6. Photo of water heater data tag</div><div class="check-meta">Verified via: Photo in Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">7. Photo of main shut-off valve</div><div class="check-meta">Verified via: Photo in Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">8. Manager posts "Q1 Complete"</div><div class="check-meta">Verified via: Manager confirmation keyword · Awaiting</div></div></li>
+  </ul></div></div>
+  <div class="quarter-divider">Q2 — Diagnostics & Options <span class="quarter-score">0 / 8 steps</span></div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">9. Whole-home diagnostic walkthrough</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">10. W&T checklist screenshot posted</div><div class="check-meta">Verified via: Screenshot in Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">11. Issue identified — findings posted</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">12. Photos of all problem areas</div><div class="check-meta">Verified via: Photo in Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">13. Repair options built in ST</div><div class="check-meta">Verified via: ST data · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">14. Screenshot of repair options posted</div><div class="check-meta">Verified via: Screenshot in Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">15. Call to FS for guidance (if needed)</div><div class="check-meta">Verified via: Call recording · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">16. Manager posts "Q2 Complete"</div><div class="check-meta">Verified via: Manager confirmation keyword · Awaiting</div></div></li>
+  </ul></div></div>
+  <div class="quarter-divider">Halftime Show <span class="quarter-score">0 / 16 steps</span></div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">17. Present repair options to customer</div><div class="check-meta">Verified via: Call recording / Slack post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">18. Customer response captured</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">19–32. Additional halftime steps...</div><div class="check-meta">Full playbook loads when activated · Awaiting</div></div></li>
+  </ul>
+  <div style="padding:12px;background:#f8fafc;border-radius:6px;margin-top:8px;font-size:12px;color:var(--text-muted);">
+    Remaining 14 halftime steps will populate from the Rules of the Road playbook database when live data is connected.
+  </div></div></div>
+</div>
+
+<div class="tab-panel" id="tab-sales">
+  <div class="score-bar">
+    <div><div class="score-label">Sales Score</div><div class="score-value">—%</div></div>
+    <div class="score-track"><div class="score-fill fill-green" style="width:0%"></div></div>
+  </div>
+  <div class="card" style="margin-bottom:16px;">
+    <div class="card-header">Playbook Selection</div>
+    <div class="card-body">
+      <div class="playbook-select">
+        <div class="playbook-opt selected">PL Sales — FS Turnover (24 steps)</div>
+        <div class="playbook-opt">DR Sales — FS Turnover (24 steps)</div>
+        <div class="playbook-opt">PL Phone Close (15 steps)</div>
+        <div class="playbook-opt">DR Phone Close (14 steps)</div>
+      </div>
+    </div>
+  </div>
+  <div class="hard-gate">
+    <div class="hard-gate-label">⛔ Hard Gate — 3-Day Right to Cancel</div>
+    <div style="font-size:13px;">Every sale over <strong>$3,000</strong> must have the 3-day right to cancel notice presented and signed before any work begins. This is a legal compliance requirement.</div>
+    <div style="margin-top:8px;">
+      <span style="font-size:12px;color:var(--text-muted);">Job sold amount:</span> <strong>$8,400</strong> — <span style="color:var(--red);font-weight:600;">NOTICE REQUIRED</span>
+    </div>
+    <div style="margin-top:4px;">
+      <span style="font-size:12px;color:var(--text-muted);">Document status:</span> <span class="field-value placeholder">Awaiting signed document upload</span>
+    </div>
+  </div>
+  <div class="quarter-divider">Q3 — Turnover & Presentation <span class="quarter-score">0 / 8 steps</span></div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">1. FS arrival / phone closer connected</div><div class="check-meta">Verified via: ST data / Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">2. Service tech handoff briefing</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">3. Customer rapport building</div><div class="check-meta">Verified via: Call recording · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4. Findings presentation</div><div class="check-meta">Verified via: Call recording / Slack · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5. Options presentation with pricing</div><div class="check-meta">Verified via: ST estimate data · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">6. Financing options discussed</div><div class="check-meta">Verified via: Call recording · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">7. Urgency & bonus phrases</div><div class="check-meta">Verified via: AI call scoring · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">8. Manager posts "Q3 Complete"</div><div class="check-meta">Verified via: Manager confirmation keyword · Awaiting</div></div></li>
+  </ul></div></div>
+  <div class="quarter-divider">Q4 — Close & Handoff <span class="quarter-score">0 / 8 steps</span></div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">9. Close attempt — assumptive close</div><div class="check-meta">Verified via: Call recording · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">10. Deposit / payment collected</div><div class="check-meta">Verified via: ST payment data · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">11. 3-day cancel notice (if >$3k)</div><div class="check-meta">Verified via: Document upload · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">12. Financing submitted (if applicable)</div><div class="check-meta">Verified via: Email monitoring · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">13. @Production tagged for coordination</div><div class="check-meta">Verified via: Slack mention · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">14. Work scope + material list posted</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">15. Production handoff complete</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">16. Manager posts "Q4 Complete"</div><div class="check-meta">Verified via: Manager confirmation keyword · Awaiting</div></div></li>
+  </ul></div></div>
+  <div class="quarter-divider">Post Game Recap <span class="quarter-score">0 / 8 steps</span></div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">17. Manager reviews gaps & missed opportunities</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">18. Call recordings posted</div><div class="check-meta">Verified via: Slack file · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">19. Process breaks identified</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">20. Live-time coaching done</div><div class="check-meta">Verified via: Slack text post · Awaiting</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">21. If no sale — reason documented</div><div class="check-meta">Verified via: Slack text post · Conditional</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">22–24. Additional recap steps...</div><div class="check-meta">Full playbook populates from ROTR database · Awaiting</div></div></li>
+  </ul>
+  <div style="padding:12px;background:#f8fafc;border-radius:6px;margin-top:8px;font-size:12px;color:var(--text-muted);">
+    Manager posts "Post Game Complete" to close out the sales process and release next dispatch.
+  </div></div></div>
+</div>
+
+<div class="tab-panel" id="tab-materials">
+  <div class="budget-bar">
+    <div class="budget-header">
+      <div><span style="font-size:12px;font-weight:600;color:var(--text-muted);">MATERIAL BUDGET (18% TARGET)</span></div>
+      <div><span style="font-family:'IBM Plex Mono';font-weight:700;font-size:16px;">$0</span> <span style="color:var(--text-muted);font-size:12px;">of $1,512 budget</span></div>
+    </div>
+    <div class="budget-track">
+      <div class="budget-fill fill-green" style="width:0%"></div>
+      <div class="budget-marker" style="left:100%"></div>
+    </div>
+    <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--text-muted);margin-top:4px;">
+      <span>0% of revenue</span><span>Job Revenue: $8,400</span><span style="color:var(--red);">18% cap: $1,512</span>
+    </div>
+  </div>
+  <div class="search-box">
+    <input class="search-input" placeholder="Search Lee Supply catalog to add items..." />
+    <button class="search-btn">Search</button>
+  </div>
+  <div class="section-header">Parts</div>
+  <div class="card"><div class="card-body">
+    <table class="data-table"><thead><tr><th>Item</th><th>Lee #</th><th>Qty</th><th>Est. Cost</th><th>Status</th></tr></thead>
+    <tbody><tr><td class="field-value placeholder" colspan="5" style="text-align:center;padding:24px;">AI-generated material list will populate here after job sells. Source: Lee Supply catalog only.</td></tr></tbody></table>
+  </div></div>
+  <div class="section-header">Tools</div>
+  <div class="card"><div class="card-body"><div class="field-value placeholder" style="text-align:center;padding:16px;">Tool requirements generated from job scope and type.</div></div></div>
+  <div class="section-header">Consumables</div>
+  <div class="card"><div class="card-body"><div class="field-value placeholder" style="text-align:center;padding:16px;">Standard consumables list based on job type.</div></div></div>
+  <div class="section-header">Staging Verification</div>
+  <div class="card">
+    <div class="card-header">Staging Status: <span style="color:var(--text-light);font-weight:400;">Not Started</span></div>
+    <div class="card-body">
+      <div style="display:flex;gap:12px;margin-bottom:12px;">
+        <div style="flex:1;text-align:center;padding:12px;border:1.5px dashed #cbd5e1;border-radius:8px;">
+          <div style="font-size:24px;margin-bottom:4px;">📸</div>
+          <div style="font-size:12px;color:var(--text-muted);">Parts Laid Out Photo</div>
+          <div style="font-size:11px;color:var(--text-light);">All items photographed individually</div>
+        </div>
+        <div style="flex:1;text-align:center;padding:12px;border:1.5px dashed #cbd5e1;border-radius:8px;">
+          <div style="font-size:24px;margin-bottom:4px;">📸</div>
+          <div style="font-size:12px;color:var(--text-muted);">Final Staging Photo</div>
+          <div style="font-size:11px;color:var(--text-light);">All material in staging area</div>
+        </div>
+      </div>
+      <div style="font-size:12px;color:var(--text-muted);">AI verifies photos against material list. Missing items flagged with resolution options.</div>
+    </div>
+  </div>
+  <div style="text-align:center;padding:16px;">
+    <button class="search-btn" style="padding:12px 32px;font-size:14px;opacity:0.5;cursor:not-allowed;">Send to Lee Supply</button>
+    <div style="font-size:11px;color:var(--text-light);margin-top:6px;">Enabled after both techs confirm the material list is complete.</div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-permits">
+  <div class="card">
+    <div class="card-header">Permit Requirements — Montgomery County, OH</div>
+    <div class="card-body">
+      <div class="field-grid" style="margin-bottom:12px;">
+        <div class="field"><div class="field-label">Jurisdiction</div><div class="field-value">Montgomery County — City of Dayton</div></div>
+        <div class="field"><div class="field-label">Confidence</div><div class="field-value" style="color:var(--yellow);font-weight:600;">ai_draft — awaiting team review</div></div>
+        <div class="field"><div class="field-label">Typical Turnaround</div><div class="field-value placeholder">Learning — first encounter</div></div>
+      </div>
+      <div style="padding:12px;background:#fffbeb;border-radius:6px;border:1px solid #fde68a;font-size:12px;">
+        <strong>Cold Start:</strong> First encounter with this jurisdiction. AI researched requirements — production team should review and confirm before filing.
+      </div>
+    </div>
+  </div>
+  <div class="section-header">Required Permits for This Job</div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item">
+      <div class="check-icon check-pending">⬜</div>
+      <div class="check-content">
+        <div class="check-title">Plumbing Permit — Water Heater Replacement</div>
+        <div class="check-meta">Status: Not Started → Filed → Pending → Approved → On-Site</div>
+        <div class="check-evidence">AI document verification: Checks address, permit type, valid dates, proper signature. Text confirmation NOT sufficient — actual document required.</div>
+      </div>
+    </li>
+  </ul></div></div>
+  <div class="section-header">Contractor Credentials</div>
+  <div class="card"><div class="card-body">
+    <table class="data-table">
+      <thead><tr><th>Credential</th><th>Number</th><th>Expires</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Plumbing License</td><td class="field-value placeholder">—</td><td class="field-value placeholder">—</td><td style="color:var(--green);font-weight:600;">Active</td></tr>
+        <tr><td>General Liability Insurance</td><td class="field-value placeholder">—</td><td class="field-value placeholder">—</td><td style="color:var(--green);font-weight:600;">Active</td></tr>
+        <tr><td>Workers Comp</td><td class="field-value placeholder">—</td><td class="field-value placeholder">—</td><td style="color:var(--green);font-weight:600;">Active</td></tr>
+      </tbody>
+    </table>
+    <div style="font-size:11px;color:var(--text-muted);margin-top:8px;">Auto-alerts at 60 / 30 / 14 days before expiration.</div>
+  </div></div>
+</div>
+
+<div class="tab-panel" id="tab-cards">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:16px;">
+    <div style="background:var(--navy);padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-light);">Cards Issued</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;color:var(--accent);">0</div>
+    </div>
+    <div style="background:var(--navy);padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-light);">Total Spend</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;color:var(--accent);">$0</div>
+    </div>
+    <div style="background:var(--navy);padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-light);">Material %</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;color:var(--green);">0%</div>
+    </div>
+    <div style="background:var(--navy);padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-light);">Avg Response</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;color:var(--accent);">—</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Response Time Tiers (KPI)</div>
+    <div class="card-body">
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center;">
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;"><div style="font-weight:700;color:#166534;">✅ Green</div><div style="font-size:11px;color:#166534;">Under 3 min</div></div>
+        <div style="padding:8px;background:#fef3c7;border-radius:6px;"><div style="font-weight:700;color:#92400e;">🟡 Yellow</div><div style="font-size:11px;color:#92400e;">3–5 min</div></div>
+        <div style="padding:8px;background:#ffedd5;border-radius:6px;"><div style="font-weight:700;color:#9a3412;">🟠 Orange</div><div style="font-size:11px;color:#9a3412;">5–8 min</div></div>
+        <div style="padding:8px;background:#fee2e2;border-radius:6px;"><div style="font-weight:700;color:#991b1b;">🔴 Red</div><div style="font-size:11px;color:#991b1b;">8+ min</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Card Requests</div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead><tr><th>Time</th><th>Tech</th><th>Resp.</th><th>Amount</th><th>Vendor</th><th>Status</th><th>Budget</th><th>Receipt</th><th>Split</th></tr></thead>
+        <tbody><tr><td colspan="9" class="field-value placeholder" style="text-align:center;padding:24px;">
+          Card requests appear here when a tech says "I need a credit card" in the Slack channel. System auto-detects, checks Google Sheet for approved card-issuing members, and tags them.
+        </td></tr></tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Receipt Processing Rules</div>
+    <div class="card-body" style="font-size:13px;">
+      <ul style="list-style:none;display:flex;flex-direction:column;gap:8px;">
+        <li>📸 <strong>AI Quality Gate:</strong> Receipt must be readable, not crinkled, all text legible. Fail → tech reposts.</li>
+        <li>📧 <strong>Auto-Forward:</strong> Passing receipts forwarded to billing@spartan-plumbing.com</li>
+        <li>🔧 <strong>Tools/Material Split:</strong> AI scans every receipt — mixed tools + materials flagged to manager</li>
+        <li>💰 <strong>Reconciliation:</strong> Card amount vs receipt amount checked. Mismatch flagged.</li>
+        <li>⏰ <strong>Receipt not posted in 24hr:</strong> Auto-reminder. 48hr → escalation.</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-install">
+  <div class="score-bar">
+    <div><div class="score-label">Install Score</div><div class="score-value">—%</div></div>
+    <div class="score-track"><div class="score-fill fill-green" style="width:0%"></div></div>
+  </div>
+  <div class="section-header">Stage 4 — Day of Install (13 Checkpoints)</div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.1 — Morning-of call</div><div class="check-meta">Via ST call tracking</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.2 — Morning-of call scorecard</div><div class="check-meta">AI scores against script</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.3 — Arrival confirmation</div><div class="check-meta">Tech checked in at location</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.4 — Protection photos (drop cloths, floor)</div><div class="check-meta">BEFORE work begins</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.5 — HEPA vac photo</div><div class="check-meta">Conditional — concrete jobs only</div></div></li>
+    <li class="checklist-item" style="background:#fef2f2;margin:0 -16px;padding:10px 16px;">
+      <div class="check-icon check-pending" style="border-color:var(--red);">⬜</div>
+      <div class="check-content"><div class="check-title" style="color:var(--red);">4.6 — Before photos ⛔ HARD GATE</div><div class="check-meta">Must be posted BEFORE work begins</div></div>
+    </li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.7 — During photos</div><div class="check-meta">Required on 4+ hour jobs</div></div></li>
+    <li class="checklist-item" style="background:#fef2f2;margin:0 -16px;padding:10px 16px;">
+      <div class="check-icon check-pending" style="border-color:var(--red);">⬜</div>
+      <div class="check-content"><div class="check-title" style="color:var(--red);">4.8 — After photos ⛔ CRITICAL — AI must approve BEFORE 4.9</div><div class="check-meta">AI reviews for code compliance, work quality, photo coverage</div></div>
+    </li>
+    <li class="checklist-item" style="background:#fef2f2;margin:0 -16px;padding:10px 16px;">
+      <div class="check-icon check-pending" style="border-color:var(--red);">⬜</div>
+      <div class="check-content"><div class="check-title" style="color:var(--red);">4.9 — Customer walkthrough video ⛔ CRITICAL — Blocks job closeout</div><div class="check-meta">Cannot close job without this</div></div>
+    </li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.10 — Phone assistance disclosure</div><div class="check-meta">Slack yes/no prompt — coaching, not enforcement</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.11 — ServiceTitan closeout check</div><div class="check-meta">All ST fields completed</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.12 — Off-platform call detection</div><div class="check-meta">Detects calls outside ST</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">4.13 — Check-in notes quality</div><div class="check-meta">Every 2 hours during install</div></div></li>
+  </ul></div></div>
+  <div class="card">
+    <div class="card-header">Code Compliance & Quality Review</div>
+    <div class="card-body"><div class="field-value placeholder">AI reviews after photos and walkthrough video for: plumbing code compliance, work quality assessment, inspection readiness.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">Photo/Video Coverage Assessment</div>
+    <div class="card-body">
+      <div style="display:flex;gap:8px;margin-bottom:12px;">
+        <div style="flex:1;text-align:center;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">Protection<br><span style="color:var(--text-light);">0 photos</span></div>
+        <div style="flex:1;text-align:center;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">Before<br><span style="color:var(--text-light);">0 photos</span></div>
+        <div style="flex:1;text-align:center;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">During<br><span style="color:var(--text-light);">0 photos</span></div>
+        <div style="flex:1;text-align:center;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">After<br><span style="color:var(--text-light);">0 photos</span></div>
+        <div style="flex:1;text-align:center;padding:8px;border:1px solid #e2e8f0;border-radius:6px;font-size:12px;">Video<br><span style="color:var(--text-light);">None</span></div>
+      </div>
+      <div class="field-value placeholder">AI checks that all work areas are documented, every angle covered, close-ups of connections/transitions shown.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Check-In Timeline (every 2 hours)</div>
+    <div class="card-body">
+      <div style="display:flex;gap:12px;flex-wrap:wrap;">
+        <div style="padding:8px 16px;border:1.5px dashed #cbd5e1;border-radius:6px;text-align:center;font-size:12px;color:var(--text-light);">~10 AM<br>Pending</div>
+        <div style="padding:8px 16px;border:1.5px dashed #cbd5e1;border-radius:6px;text-align:center;font-size:12px;color:var(--text-light);">~12 PM<br>Pending</div>
+        <div style="padding:8px 16px;border:1.5px dashed #cbd5e1;border-radius:6px;text-align:center;font-size:12px;color:var(--text-light);">~2 PM<br>Pending</div>
+        <div style="padding:8px 16px;border:1.5px dashed #cbd5e1;border-radius:6px;text-align:center;font-size:12px;color:var(--text-light);">~4 PM<br>Pending</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-financials">
+  <div class="card">
+    <div class="card-header">Deposit Tracking (40% Rule)</div>
+    <div class="card-body">
+      <div class="field-grid">
+        <div class="field"><div class="field-label">Job Sold Amount</div><div class="field-value">$8,400</div></div>
+        <div class="field"><div class="field-label">40% Required</div><div class="field-value">$3,360</div></div>
+        <div class="field"><div class="field-label">Amount Collected</div><div class="field-value placeholder">Awaiting payment data</div></div>
+        <div class="field"><div class="field-label">Status</div><div class="field-value placeholder">Pending</div></div>
+      </div>
+      <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">For cash/check/credit card jobs: ≥40% must be collected before install date.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Financing Status</div>
+    <div class="card-body">
+      <div class="field-grid">
+        <div class="field"><div class="field-label">Payment Method</div><div class="field-value placeholder">Awaiting data</div></div>
+        <div class="field"><div class="field-label">Lender</div><div class="field-value placeholder">—</div></div>
+        <div class="field"><div class="field-label">Application Date</div><div class="field-value placeholder">—</div></div>
+        <div class="field"><div class="field-label">Status</div><div class="field-value placeholder">Not Started</div></div>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-muted);">Monitored continuously via financing@spartan-plumbing.com. Status: applied → approved → funded → completed.</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Material Cost Tracking</div>
+    <div class="card-body">
+      <div class="budget-bar" style="border:none;padding:0;">
+        <div class="budget-header">
+          <div><span style="font-size:12px;">Material Spend: <strong>$0</strong></span></div>
+          <div><span style="font-size:12px;">0% of $8,400 revenue</span></div>
+        </div>
+        <div class="budget-track">
+          <div class="budget-fill fill-green" style="width:0%"></div>
+          <div class="budget-marker" style="left:18%"></div>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:12px;color:var(--text-muted);">Target: under 18%. PO-based tracking (NOT ST gross margin).</div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Money Manager — Jessie Czikra</div>
+    <div class="card-body"><div class="field-value placeholder">Post-close profitability review area. Manual review unless specific pattern detected by AI.</div></div>
+  </div>
+  <div class="card">
+    <div class="card-header">Financial Events Timeline</div>
+    <div class="card-body">
+      <div class="empty-state">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-text">Financial events will populate as deposits, financing, and payments are processed.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-postinstall">
+  <div class="section-header">Stage 5 — Post-Install</div>
+  <div class="card"><div class="card-body"><ul class="checklist">
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5.1 — Happy call SLA (within 24 hours)</div><div class="check-meta">Clock starts at job completion</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5.2 — Happy call scorecard</div><div class="check-meta">AI scores against happy call script</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5.3 — Missed opportunity flag</div><div class="check-meta">Spartan Shield, review ask, referral ask — were they offered?</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5.4 — Review posted check</div><div class="check-meta">Google/Yelp review actually posted</div></div></li>
+    <li class="checklist-item"><div class="check-icon check-pending">⬜</div><div class="check-content"><div class="check-title">5.5 — Financing finalization</div><div class="check-meta">Final financing status confirmed</div></div></li>
+  </ul></div></div>
+  <div class="card">
+    <div class="card-header">Customer Callback Monitoring</div>
+    <div class="card-body">
+      <div style="display:flex;align-items:center;gap:16px;">
+        <div style="font-family:'IBM Plex Mono';font-size:32px;font-weight:700;color:var(--navy);">0</div>
+        <div><div style="font-weight:600;font-size:13px;">Callbacks after completion</div><div style="font-size:12px;color:var(--text-muted);">3+ callbacks = quality signal regardless of happy call score</div></div>
+      </div>
+    </div>
+  </div>
+  <div class="section-header">Stage 6 — Recall (if triggered)</div>
+  <div class="card"><div class="card-body" style="background:#f8fafc;">
+    <div class="empty-state">
+      <div class="empty-state-icon">✅</div>
+      <div class="empty-state-text">No recall triggered. This section appears only when a return visit is needed.</div>
+    </div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:12px;">
+      <strong>If triggered, tracks:</strong> 6.1 Reason documented · 6.2 Original tech notified · 6.3 Customer contacted · 6.4 Visit scheduled · 6.5 Tech assigned · 6.6 Check-in during recall · 6.7 Resolution confirmed · 6.8 Root cause analysis
+    </div>
+  </div></div>
+</div>
+
+<div class="tab-panel" id="tab-blockers">
+  <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+    <div><div style="font-weight:700;font-size:15px;">Timeline Risk Assessment</div><div style="font-size:12px;color:var(--text-muted);">AI-generated based on all job factors</div></div>
+    <div class="risk-badge risk-green">● GREEN — On Track</div>
+  </div>
+  <div class="section-header">Active Blockers</div>
+  <div class="card"><div class="card-body">
+    <div class="empty-state">
+      <div class="empty-state-icon">🎯</div>
+      <div class="empty-state-text">No active blockers. Items appear here from manual entry, AI detection, or system-detected missing checkpoints.</div>
+    </div>
+  </div></div>
+  <div class="card">
+    <div class="card-header">Escalation Timing</div>
+    <div class="card-body">
+      <table class="data-table">
+        <thead><tr><th>Trigger</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td>Item overdue</td><td>Re-tag assigned person</td></tr>
+          <tr><td>+30 minutes</td><td>Re-tag again</td></tr>
+          <tr><td>+1 hour</td><td>Tag manager</td></tr>
+          <tr><td>+2 hours</td><td>Flag on dashboard</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Risk Factor Assessment</div>
+    <div class="card-body" style="font-size:13px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;">✅ Materials staging</div>
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;">✅ Permit status</div>
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;">✅ Financing status</div>
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;">✅ Missing checkpoints</div>
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;">✅ Customer callback frequency</div>
+        <div style="padding:8px;background:#dcfce7;border-radius:6px;">✅ Active blockers</div>
+      </div>
+    </div>
+  </div>
+  <div class="section-header">Resolved Blockers</div>
+  <div class="card"><div class="card-body"><div class="field-value placeholder" style="text-align:center;">No resolved blockers.</div></div></div>
+</div>
+
+<div class="tab-panel" id="tab-dashboard">
+  <div class="score-bar">
+    <div><div class="score-label">Overall Job Score</div><div class="score-value">—%</div></div>
+    <div class="score-track"><div class="score-fill fill-green" style="width:0%"></div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:16px;">
+    <div style="background:var(--white);border:1px solid #e2e8f0;padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:600;">PRE-SALE (A+B+C)</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;margin-top:4px;">—%</div>
+    </div>
+    <div style="background:var(--white);border:1px solid #e2e8f0;padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:600;">POST-SALE (1-6)</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;margin-top:4px;">—%</div>
+    </div>
+    <div style="background:var(--white);border:1px solid #e2e8f0;padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:600;">SERVICE PROCESS</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;margin-top:4px;">—%</div>
+    </div>
+    <div style="background:var(--white);border:1px solid #e2e8f0;padding:12px;border-radius:8px;text-align:center;">
+      <div style="font-size:11px;color:var(--text-muted);font-weight:600;">SALES PROCESS</div>
+      <div style="font-family:'IBM Plex Mono';font-size:20px;font-weight:700;margin-top:4px;">—%</div>
+    </div>
+  </div>
+  <div class="section-header">Pre-Sale Phases</div>
+  <div class="card"><div class="card-header">Phase A — CSR / Booking (5 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">A.1</div><div class="verify-cell vc-pending">A.2</div><div class="verify-cell vc-pending">A.3</div><div class="verify-cell vc-pending">A.4</div><div class="verify-cell vc-pending">A.5</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Phase B — Call by Call (5 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">B.1</div><div class="verify-cell vc-pending">B.2</div><div class="verify-cell vc-pending">B.3</div><div class="verify-cell vc-pending">B.4</div><div class="verify-cell vc-pending">B.5</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Phase C — Sales Close (4 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">C.1</div><div class="verify-cell vc-pending">C.2</div><div class="verify-cell vc-pending">C.3</div><div class="verify-cell vc-pending">C.4</div>
+  </div></div></div>
+  <div class="section-header">Post-Sale Stages</div>
+  <div class="card"><div class="card-header">Stage 1 — Job Sold (7 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">1.1</div><div class="verify-cell vc-pending">1.2</div><div class="verify-cell vc-pending">1.3</div><div class="verify-cell vc-pending">1.4</div><div class="verify-cell vc-pending">1.5</div><div class="verify-cell vc-pending">1.6</div><div class="verify-cell vc-pending">1.7</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Stage 2 — Customer Contact (7 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">2.1</div><div class="verify-cell vc-pending">2.2</div><div class="verify-cell vc-pending">2.3</div><div class="verify-cell vc-pending">2.4</div><div class="verify-cell vc-pending">2.5</div><div class="verify-cell vc-pending">2.6</div><div class="verify-cell vc-pending">2.7</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Stage 3 — Pre-Install Logistics (8 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">3.1</div><div class="verify-cell vc-pending">3.2</div><div class="verify-cell vc-pending">3.3</div><div class="verify-cell vc-pending">3.4</div><div class="verify-cell vc-pending">3.5</div><div class="verify-cell vc-pending">3.6</div><div class="verify-cell vc-pending">3.7</div><div class="verify-cell vc-pending">3.8</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Stage 4 — Day of Install (13 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">4.1</div><div class="verify-cell vc-pending">4.2</div><div class="verify-cell vc-pending">4.3</div><div class="verify-cell vc-pending">4.4</div><div class="verify-cell vc-pending">4.5</div><div class="verify-cell vc-pending">4.6</div><div class="verify-cell vc-pending">4.7</div><div class="verify-cell vc-pending">4.8</div><div class="verify-cell vc-pending">4.9</div><div class="verify-cell vc-pending">4.10</div><div class="verify-cell vc-pending">4.11</div><div class="verify-cell vc-pending">4.12</div><div class="verify-cell vc-pending">4.13</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Stage 5 — Post-Install (5 checks)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">5.1</div><div class="verify-cell vc-pending">5.2</div><div class="verify-cell vc-pending">5.3</div><div class="verify-cell vc-pending">5.4</div><div class="verify-cell vc-pending">5.5</div>
+  </div></div></div>
+  <div class="card"><div class="card-header">Stage 6 — Recall (8 checks, if triggered)</div><div class="card-body"><div class="verify-grid" style="opacity:0.4;">
+    <div class="verify-cell vc-pending">6.1</div><div class="verify-cell vc-pending">6.2</div><div class="verify-cell vc-pending">6.3</div><div class="verify-cell vc-pending">6.4</div><div class="verify-cell vc-pending">6.5</div><div class="verify-cell vc-pending">6.6</div><div class="verify-cell vc-pending">6.7</div><div class="verify-cell vc-pending">6.8</div>
+  </div><div style="font-size:11px;color:var(--text-light);margin-top:6px;">Grayed out — recall not triggered.</div></div></div>
+  <div class="section-header">Purchasing Cards</div>
+  <div class="card"><div class="card-header">CC Checks (4)</div><div class="card-body"><div class="verify-grid">
+    <div class="verify-cell vc-pending">CC1</div><div class="verify-cell vc-pending">CC2</div><div class="verify-cell vc-pending">CC3</div><div class="verify-cell vc-pending">CC4</div>
+  </div></div></div>
+  <div class="section-header">Rules of the Road</div>
+  <div class="card"><div class="card-header">Service Process Steps (from Tab 2)</div><div class="card-body"><div class="field-value placeholder">Scores pulled from live Service Process playbook scoring.</div></div></div>
+  <div class="card"><div class="card-header">Sales Process Steps (from Tab 3)</div><div class="card-body"><div class="field-value placeholder">Scores pulled from live Sales Process playbook scoring.</div></div></div>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:16px;font-size:11px;">
+    <span><span class="verify-cell vc-pass" style="display:inline-flex;width:16px;height:16px;font-size:8px;vertical-align:middle;">✓</span> Pass</span>
+    <span><span class="verify-cell vc-fail" style="display:inline-flex;width:16px;height:16px;font-size:8px;vertical-align:middle;">✗</span> Fail</span>
+    <span><span class="verify-cell vc-pending" style="display:inline-flex;width:16px;height:16px;font-size:8px;vertical-align:middle;">—</span> Pending</span>
+    <span><span class="verify-cell vc-skip" style="display:inline-flex;width:16px;height:16px;font-size:8px;vertical-align:middle;">⏭</span> Skip</span>
+    <span><span class="verify-cell vc-blocked" style="display:inline-flex;width:16px;height:16px;font-size:8px;vertical-align:middle;">🚫</span> Blocked</span>
+  </div>
+</div>
+
+<div class="tab-panel" id="tab-scripts">
+  <div class="card">
+    <div class="card-header">Script Library</div>
+    <div class="card-body">
+      <div class="script-tabs">
+        <button class="script-tab active">Original</button>
+        <button class="script-tab">My Version</button>
+        <button class="script-tab">Other People's</button>
+      </div>
+      <div class="section-header" style="padding-top:0;">Production Team Scripts (13)</div>
+      <table class="data-table"><tbody>
+        <tr><td style="font-weight:500;">1. Initial contact / setup call</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">2. Same-day scheduling</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">3. Moving up a date</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">4. Rescheduling (customer-initiated)</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">5. Rescheduling (company-initiated)</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">6. Day-before confirmation</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">7. Day-of late notification</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">8. Day-of scope change</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">9. Happy call</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">10. Payment follow-up</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">11. Recall scheduling</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">12. Review request</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">13. General customer communication</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+      </tbody></table>
+      <div class="section-header">Installer Scripts (4)</div>
+      <table class="data-table"><tbody>
+        <tr><td style="font-weight:500;">14. Morning-of customer call</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">15. Customer walkthrough video script</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">16. Scope change on-site</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+        <tr><td style="font-weight:500;">17. End-of-job closeout</td><td style="color:var(--text-muted);font-size:12px;">Loaded from Whale SOP</td></tr>
+      </tbody></table>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">AI Script Builder</div>
+    <div class="card-body">
+      <div style="margin-bottom:8px;font-size:13px;color:var(--text-muted);">Describe the situation and AI will generate a script in Spartan's tone: confident, assumptive, urgency-driven with bonus phrases.</div>
+      <div class="search-box">
+        <input class="search-input" placeholder="e.g., 'Customer angry about delayed install, needs rescheduling...'" />
+        <button class="search-btn">Generate</button>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Call Recordings for This Job</div>
+    <div class="card-body">
+      <div class="empty-state">
+        <div class="empty-state-icon">📞</div>
+        <div class="empty-state-text">Call recordings from ServiceTitan appear here with AI scorecards. Scorecards are private: visible to individual + direct manager only.</div>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-header">Off-Platform Call Detection</div>
+    <div class="card-body"><div class="field-value placeholder">System monitors for calls made outside ServiceTitan. Alerts appear here if detected.</div></div>
+  </div>
+</div>
+
+</div>
+
+<script>
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+  });
+});
+document.querySelectorAll('.playbook-opt').forEach(opt => {
+  opt.addEventListener('click', () => {
+    opt.closest('.playbook-select').querySelectorAll('.playbook-opt').forEach(o => o.classList.remove('selected'));
+    opt.classList.add('selected');
+  });
+});
+document.querySelectorAll('.script-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    tab.closest('.script-tabs').querySelectorAll('.script-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+  });
+});
+</script>
+</body>
+</html>
