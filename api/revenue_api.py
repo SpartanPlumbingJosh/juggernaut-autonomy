@@ -164,6 +164,7 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
+    """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
         
@@ -210,6 +211,30 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_subscription_summary() -> Dict[str, Any]:
+    """Get subscription metrics."""
+    try:
+        # Implement subscription summary logic
+        return _make_response(200, {
+            'active_subscriptions': 0,
+            'mrr': 0,
+            'arr': 0,
+            'churn_rate': 0
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch subscription summary: {str(e)}")
+
+async def handle_subscription_events(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get subscription events."""
+    try:
+        # Implement subscription events logic
+        return _make_response(200, {
+            'events': [],
+            'total': 0
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch subscription events: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +256,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/subscriptions/summary
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "summary" and method == "GET":
+        return handle_subscription_summary()
+    
+    # GET /revenue/subscriptions/events
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "events" and method == "GET":
+        return handle_subscription_events(query_params)
     
     return _error_response(404, "Not found")
 
