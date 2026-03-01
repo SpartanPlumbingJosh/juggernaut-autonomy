@@ -235,4 +235,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
-__all__ = ["route_request"]
+async def handle_admin_summary(auth_token: str) -> Dict[str, Any]:
+    """Admin dashboard summary data"""
+    try:
+        # Verify admin auth
+        user = await get_current_user(auth_token)
+        if not is_admin(user.email):
+            return _error_response(403, "Admin access required")
+            
+        # Get key metrics
+        sql = """
+        SELECT 
+            COUNT(DISTINCT customer_email) as customers,
+            SUM(CASE WHEN recorded_at >= NOW() - INTERVAL '24 hours' AND event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_last_24h,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue
+        FROM revenue_events
+        """
+        
+        result = await query_db(sql)
+        metrics = result.get("rows", [{}])[0]
+        
+        return _make_response(200, metrics)
+        
+    except Exception as e:
+        return _error_response(500, str(e))
+
+__all__ = ["route_request", "handle_admin_summary"]
