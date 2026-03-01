@@ -181,13 +181,48 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
+def _calculate_dynamic_budget(total_revenue: float, target: float, time_remaining: float) -> float:
+    """Calculate dynamic budget allocation based on progress towards target."""
+    # Calculate required growth rate
+    required_growth = (target - total_revenue) / total_revenue if total_revenue > 0 else 1.0
+    # Calculate daily budget factor based on time remaining
+    budget_factor = min(1.0, max(0.1, time_remaining / 365))  # Scale based on year remaining
+    # Base budget adjusted by growth needs
+    return 20.0 * (1 + required_growth) * budget_factor
+
+def _adjust_scoring_threshold(total_revenue: float, target: float) -> float:
+    """Dynamically adjust idea scoring threshold based on revenue progress."""
+    progress = total_revenue / target if target > 0 else 0.0
+    # Start with base threshold, become more selective as we approach target
+    return max(50.0, min(80.0, 60.0 + (progress * 20.0)))
+
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    target_revenue: float = 8000000.0,  # $8M target
 ) -> Dict[str, Any]:
+    # Get current revenue and time remaining
+    try:
+        revenue_res = execute_sql("""
+            SELECT SUM(amount_cents) / 100 as total_revenue
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+        """)
+        total_revenue = float(revenue_res.get('rows', [{}])[0].get('total_revenue', 0))
+        
+        # Calculate dynamic parameters
+        time_remaining = (datetime(2026, 12, 31) - datetime.now()).days  # Assuming Dec 31, 2026 deadline
+        budget = _calculate_dynamic_budget(total_revenue, target_revenue, time_remaining)
+        min_score = _adjust_scoring_threshold(total_revenue, target_revenue)
+    except Exception as e:
+        log_action(
+            "portfolio.dynamic_adjustment_failed",
+            f"Failed to calculate dynamic parameters: {str(e)}",
+            level="error"
+        )
     try:
         res = execute_sql(
             f"""
