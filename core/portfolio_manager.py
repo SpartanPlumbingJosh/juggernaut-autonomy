@@ -9,12 +9,19 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
-def generate_revenue_ideas(
+def generate_revenue_streams(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
-    limit: int = 5,
+    limit: int = 100,
 ) -> Dict[str, Any]:
+    """
+    Generate automated revenue streams including:
+    - SaaS subscriptions
+    - API monetization
+    - Digital marketplace listings
+    - Usage-based billing models
+    """
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
