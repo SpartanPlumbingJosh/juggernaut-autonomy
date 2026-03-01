@@ -8,7 +8,12 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
+from typing import Literal
+
+# Initialize Stripe client
+stripe.api_key = "your_stripe_secret_key"
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -113,6 +118,52 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def create_stripe_customer(email: str, name: str) -> str:
+    """Create Stripe customer and return customer ID."""
+    customer = stripe.Customer.create(
+        email=email,
+        name=name,
+        metadata={"created_at": datetime.now(timezone.utc).isoformat()}
+    )
+    return customer.id
+
+async def create_subscription(customer_id: str, plan_id: str) -> Dict[str, Any]:
+    """Create recurring subscription."""
+    subscription = stripe.Subscription.create(
+        customer=customer_id,
+        items=[{"price": plan_id}],
+        payment_behavior="default_incomplete",
+        expand=["latest_invoice.payment_intent"]
+    )
+    return {
+        "subscription_id": subscription.id,
+        "client_secret": subscription.latest_invoice.payment_intent.client_secret,
+        "status": subscription.status
+    }
+
+async def record_transaction(
+    event_type: Literal["revenue", "cost"],
+    amount_cents: int,
+    customer_id: str,
+    source: str,
+    metadata: Dict[str, Any] = None
+) -> None:
+    """Record transaction in revenue events table."""
+    await query_db(
+        f"""
+        INSERT INTO revenue_events (
+            event_type, amount_cents, currency, source, metadata, recorded_at
+        ) VALUES (
+            '{event_type}',
+            {amount_cents},
+            'usd',
+            '{source.replace("'", "''")}',
+            '{json.dumps(metadata or {}).replace("'", "''")}',
+            NOW()
+        )
+        """
+    )
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""

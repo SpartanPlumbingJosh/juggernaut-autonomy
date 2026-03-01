@@ -276,6 +276,70 @@ def start_experiments_from_top_ideas(
     return out
 
 
+async def process_recurring_billing(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any]
+) -> Dict[str, Any]:
+    """Process all subscriptions with upcoming renewals."""
+    try:
+        # Get active subscriptions due for renewal
+        result = await execute_sql(
+            """
+            SELECT s.id, s.customer_id, s.plan_id, s.current_period_end,
+                   u.email, u.name, c.stripe_customer_id
+            FROM subscriptions s
+            JOIN customers c ON c.id = s.customer_id
+            JOIN users u ON u.id = c.user_id
+            WHERE s.status = 'active'
+            AND s.current_period_end <= (NOW() + INTERVAL '48 hours')
+            LIMIT 100
+            """
+        )
+        subscriptions = result.get("rows", [])
+
+        processed = 0
+        for sub in subscriptions:
+            try:
+                # Create Stripe invoice
+                invoice = stripe.Invoice.create(
+                    customer=sub["stripe_customer_id"],
+                    days_until_due=1,
+                    metadata={"subscription_id": sub["id"]}
+                )
+                
+                # Record payment attempt
+                await execute_sql(
+                    f"""
+                    INSERT INTO billing_events (
+                        subscription_id, event_type, amount, invoice_id,
+                        status, created_at
+                    ) VALUES (
+                        '{sub["id"]}',
+                        'invoice_created',
+                        {invoice.amount_due},
+                        '{invoice.id}',
+                        'pending',
+                        NOW()
+                    )
+                    """
+                )
+                processed += 1
+            except Exception as e:
+                log_action(
+                    "billing.failed",
+                    f"Failed to create invoice for sub {sub['id']}",
+                    level="error",
+                    error_data={"error": str(e), "subscription_id": sub["id"]}
+                )
+
+        return {
+            "success": True,
+            "processed": processed,
+            "total": len(subscriptions)
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
