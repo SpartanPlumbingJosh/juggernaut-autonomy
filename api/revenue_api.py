@@ -33,8 +33,39 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+def _calculate_progress(all_time_revenue: float) -> Dict[str, Any]:
+    """Calculate progress toward $8M target and projections."""
+    target = 8_000_000 * 100  # $8M in cents
+    progress_pct = (all_time_revenue / target) * 100
+    milestones = {
+        '25': {'reached': progress_pct >= 25, 'pct': 25},
+        '50': {'reached': progress_pct >= 50, 'pct': 50}, 
+        '75': {'reached': progress_pct >= 75, 'pct': 75},
+    }
+    
+    # Calculate projection date
+    today = datetime.now(timezone.utc)
+    if all_time_revenue > 0:
+        creation_date = datetime(2023, 1, 1, tzinfo=timezone.utc)  # Project start date
+        days_elapsed = (today - creation_date).days
+        daily_rate = all_time_revenue / days_elapsed
+        projected_days = (target - all_time_revenue) / daily_rate if daily_rate > 0 else float('inf')
+        projected_date = today + timedelta(days=projected_days)
+        on_track = projected_date <= datetime(2029, 12, 31, tzinfo=timezone.utc)
+    else:
+        projected_date = None
+        on_track = False
+        
+    return {
+        'target_cents': target,
+        'progress_pct': progress_pct,
+        'milestones': milestones,
+        'projected_date': projected_date.isoformat() if projected_date else None,
+        'on_track': on_track
+    }
+
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals and progress."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -107,7 +138,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
-            }
+            },
+            "progress": _calculate_progress(all_time.get("total_revenue_cents") or 0)
         })
         
     except Exception as e:
