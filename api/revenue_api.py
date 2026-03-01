@@ -232,6 +232,12 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/automation/{model}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "automation" and method == "POST":
+        model_type = parts[2]
+        batch_size = int(query_params.get("batch_size", ["50"])[0])
+        return execute_revenue_automation(query_db, model_type, batch_size)
+    
     return _error_response(404, "Not found")
 
 
