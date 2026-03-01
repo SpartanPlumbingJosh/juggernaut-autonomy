@@ -115,7 +115,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination. Includes subscription events."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -135,7 +135,11 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
             source,
             metadata,
             recorded_at,
-            created_at
+            created_at,
+            CASE WHEN EXISTS (
+                SELECT 1 FROM subscriptions 
+                WHERE revenue_events.metadata->>'subscription' = subscriptions.id
+            ) THEN TRUE ELSE FALSE END as is_subscription
         FROM revenue_events
         {where_clause}
         ORDER BY recorded_at DESC
