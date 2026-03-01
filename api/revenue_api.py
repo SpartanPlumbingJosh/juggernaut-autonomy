@@ -219,6 +219,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+
+    # Payment provider webhooks
+    if len(parts) == 2 and parts[0] == "webhooks":
+        if parts[1] == "stripe" and method == "POST":
+            from payment_providers import handle_stripe_webhook
+            return handle_stripe_webhook(body)
+        if parts[1] == "paypal" and method == "POST":
+            from payment_providers import handle_paypal_webhook
+            return handle_paypal_webhook(body)
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
