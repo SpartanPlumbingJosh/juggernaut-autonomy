@@ -162,6 +162,32 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_billing_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle billing webhook events."""
+    try:
+        event_type = body.get("type")
+        data = body.get("data", {})
+        
+        if event_type == "payment_succeeded":
+            # Process successful payment
+            billing = BillingSystem(query_db)
+            success, error = await billing.process_payment(data)
+            if not success:
+                return _error_response(400, f"Payment processing failed: {error}")
+                
+            return _make_response(200, {"status": "processed"})
+            
+        elif event_type == "payment_failed":
+            # Handle failed payment
+            billing = BillingSystem(query_db)
+            await billing.handle_failed_payments()
+            return _make_response(200, {"status": "processed"})
+            
+        return _error_response(400, "Unsupported event type")
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +257,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_billing_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
