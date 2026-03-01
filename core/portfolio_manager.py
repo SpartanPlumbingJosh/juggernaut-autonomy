@@ -9,8 +9,49 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+async def fulfill_order(order_id: str, payment_event_id: str = None) -> Dict[str, Any]:
+    """Automate order fulfillment pipeline."""
+    try:
+        # Get order details
+        order_info = await execute_sql(f"""
+            SELECT * FROM orders WHERE id = '{order_id}'
+        """)
+        
+        if not order_info.get("rows"):
+            return {"success": False, "error": "Order not found"}
+
+        order = order_info["rows"][0]
+        product_type = order.get("product_type")
+        
+        # Digital product fulfillment
+        if product_type == "digital":
+            # Generate license keys, download links, etc.
+            await execute_sql(f"""
+                UPDATE orders 
+                SET status = 'fulfilled',
+                    fulfilled_at = NOW(),
+                    download_url = 'https://download.example.com/{order_id}'
+                WHERE id = '{order_id}'
+            """)
+            
+        # Service fulfillment
+        elif product_type == "service":
+            # Create service provisioning workflow
+            await execute_sql(f"""
+                INSERT INTO service_provisioning (
+                    order_id, status, scheduled_start
+                ) VALUES (
+                    '{order_id}', 'pending', NOW() + INTERVAL '1 day'
+                )
+            """)
+            
+        return {"success": True, "order_id": order_id}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def generate_revenue_ideas(
-    execute_sql: Callable[[str], Dict[str, Any]],
+    execute_sql: Callable[[str], Dict[str, Any]], 
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
