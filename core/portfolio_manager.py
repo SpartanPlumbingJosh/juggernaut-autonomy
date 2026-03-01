@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_engine import RevenueEngine
 
 
 def generate_revenue_ideas(
@@ -14,6 +15,7 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    revenue_engine: Optional[RevenueEngine] = None,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
@@ -187,6 +189,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    revenue_engine: Optional[RevenueEngine] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
