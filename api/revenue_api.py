@@ -1,11 +1,23 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment session
+- POST /revenue/webhook - Process payment webhooks
 """
+```
+
+api/revenue_api.py
+```python
+<<<<<<< SEARCH
+import json
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Optional
+
+from core.database import query_db
 
 import json
 from datetime import datetime, timezone, timedelta
@@ -210,7 +222,40 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_create_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment checkout session."""
+    payment_service = PaymentService()
+    price_id = body.get('price_id')
+    email = body.get('customer_email')
+    
+    if not price_id or not email:
+        return _error_response(400, "Missing price_id or customer_email")
+    
+    result = await payment_service.create_checkout_session(price_id, email)
+    
+    if result['success']:
+        return _make_response(200, {
+            'session_url': result['url'],
+            'session_id': result['session_id']
+        })
+    return _error_response(500, result.get('error', 'Payment failed'))
+
+async def handle_webhook(headers: Dict[str, Any], body: str) -> Dict[str, Any]:
+    """Process payment webhook."""
+    payment_service = PaymentService()
+    sig_header = headers.get('stripe-signature', '')
+    
+    result = await payment_service.handle_webhook(body, sig_header)
+    if not result:
+        return _error_response(400, "Webhook processing failed")
+    
+    # Here you would store the revenue event in your database
+    # await query_db("INSERT INTO revenue_events ...", result['data'])
+    
+    return _make_response(200, {'processed': True})
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], 
+                 body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +276,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        try:
+            body_json = json.loads(body) if body else {}
+            return handle_create_checkout(body_json)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+            
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(headers or {}, body or "")
     
     return _error_response(404, "Not found")
 
