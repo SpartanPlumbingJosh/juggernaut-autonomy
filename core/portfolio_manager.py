@@ -7,6 +7,10 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from services.payment import PaymentService
+from services.auth import AuthService
+from services.billing import BillingService
+from services.metering import MeteringService
 
 
 def generate_revenue_ideas(
