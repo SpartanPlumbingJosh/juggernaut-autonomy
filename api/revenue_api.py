@@ -1,15 +1,20 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process payments
+- GET /revenue/subscriptions - List subscriptions
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from billing.payment_gateway import PaymentGateway
+from billing.subscription_manager import SubscriptionManager
+from billing.transaction_processor import TransactionProcessor
 
 from core.database import query_db
 
@@ -162,6 +167,50 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment transaction."""
+    try:
+        processor = TransactionProcessor()
+        payment_gateway = PaymentGateway(provider="stripe", api_key="sk_test_123")
+        
+        # Create payment intent
+        payment_intent = await payment_gateway.create_payment_intent(
+            amount=body["amount"],
+            currency=body["currency"],
+            metadata=body.get("metadata", {})
+        )
+        
+        # Process transaction
+        transaction = await processor.process_transaction(
+            transaction_data={
+                "amount": body["amount"],
+                "currency": body["currency"]
+            },
+            idempotency_key=body["idempotency_key"]
+        )
+        
+        return _make_response(200, {
+            "payment_intent": payment_intent,
+            "transaction": transaction
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_subscription_listing(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """List customer subscriptions."""
+    try:
+        manager = SubscriptionManager()
+        customer_id = query_params.get("customer_id")
+        if not customer_id:
+            return _error_response(400, "customer_id is required")
+            
+        subscriptions = await manager.list_subscriptions(customer_id)
+        return _make_response(200, {
+            "subscriptions": subscriptions
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to list subscriptions: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +280,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_payment_processing(json.loads(body or "{}"))
+        
+    # GET /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        return handle_subscription_listing(query_params)
     
     return _error_response(404, "Not found")
 
