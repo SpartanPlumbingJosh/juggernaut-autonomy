@@ -1,14 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Autonomous Revenue System - Automated payment processing, delivery and monitoring.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process payment
+- POST /revenue/delivery - Track service delivery
+- GET /revenue/monitor - System health and alerts
 """
 
 import json
 from datetime import datetime, timezone, timedelta
+import uuid
+import hashlib
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -162,6 +167,108 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment transaction."""
+    try:
+        # Validate required fields
+        required_fields = ["amount_cents", "currency", "payment_method", "customer_id"]
+        for field in required_fields:
+            if not payment_data.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Generate unique transaction ID
+        transaction_id = str(uuid.uuid4())
+        
+        # Create payment record
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            '{transaction_id}', 'payment', {payment_data['amount_cents']},
+            '{payment_data['currency']}', '{payment_data['payment_method']}',
+            '{{"customer_id": "{payment_data['customer_id']}"}}'::jsonb,
+            NOW(), NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {
+            "transaction_id": transaction_id,
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def track_delivery(delivery_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Track service delivery completion."""
+    try:
+        # Validate required fields
+        required_fields = ["transaction_id", "service_type", "customer_id"]
+        for field in required_fields:
+            if not delivery_data.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Create delivery record
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            '{delivery_data['transaction_id']}', 'delivery', 0,
+            'USD', '{delivery_data['service_type']}',
+            '{{"customer_id": "{delivery_data['customer_id']}"}}'::jsonb,
+            NOW(), NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {
+            "transaction_id": delivery_data['transaction_id'],
+            "status": "delivered"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Delivery tracking failed: {str(e)}")
+
+
+async def system_monitor() -> Dict[str, Any]:
+    """Monitor system health and generate alerts."""
+    try:
+        # Check recent errors
+        error_sql = """
+        SELECT COUNT(*) as error_count
+        FROM system_logs
+        WHERE level = 'error'
+          AND created_at >= NOW() - INTERVAL '1 hour'
+        """
+        error_result = await query_db(error_sql)
+        error_count = error_result.get("rows", [{}])[0].get("error_count", 0)
+        
+        # Check pending transactions
+        pending_sql = """
+        SELECT COUNT(*) as pending_count
+        FROM revenue_events
+        WHERE status = 'pending'
+          AND created_at >= NOW() - INTERVAL '1 hour'
+        """
+        pending_result = await query_db(pending_sql)
+        pending_count = pending_result.get("rows", [{}])[0].get("pending_count", 0)
+        
+        return _make_response(200, {
+            "status": "ok",
+            "metrics": {
+                "errors_last_hour": error_count,
+                "pending_transactions": pending_count
+            }
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Monitoring failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +338,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            payment_data = json.loads(body or "{}")
+            return process_payment(payment_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid payment data: {str(e)}")
+    
+    # POST /revenue/delivery
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "delivery" and method == "POST":
+        try:
+            delivery_data = json.loads(body or "{}")
+            return track_delivery(delivery_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid delivery data: {str(e)}")
+    
+    # GET /revenue/monitor
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitor" and method == "GET":
+        return system_monitor()
     
     return _error_response(404, "Not found")
 
