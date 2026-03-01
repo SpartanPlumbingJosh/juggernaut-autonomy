@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from billing.billing_system import BillingSystem, PaymentMethod, SubscriptionPlan
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -14,6 +15,7 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    billing_system: Optional[BillingSystem] = None,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
