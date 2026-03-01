@@ -303,6 +303,18 @@ NO asking for permission. NO "shall I proceed?" Just DO IT.
 ### Database (Neon PostgreSQL)
 - sql_query(sql) - Execute any SQL query
 
+### Sales & Lead Generation
+- leads_find(industry, location, keywords, limit?) - Find leads from various sources
+- leads_enrich(lead_id, data_fields) - Enrich lead data with additional info  
+- email_generate_personalized(lead_id, template_id) - Generate personalized email
+- email_send_sequence(lead_id, sequence_id) - Start email sequence
+- email_track_engagement(email_id) - Check email open/click rates
+- crm_create_lead(lead_data) - Add lead to CRM
+- crm_update_pipeline(lead_id, stage) - Move lead through pipeline
+- crm_log_interaction(lead_id, interaction_data) - Log call/meeting notes
+- ab_test_create(test_name, variants) - Create A/B test
+- ab_test_get_results(test_id) - Get A/B test performance
+
 ### Railway
 - railway_list_services()
 - railway_get_deployments(service_id?, limit?)
