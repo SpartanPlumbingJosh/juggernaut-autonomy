@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment-intent - Create payment intent
+- POST /revenue/subscriptions - Manage subscriptions
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
@@ -12,6 +15,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor, PaymentGateway
+from core.subscription_manager import SubscriptionManager
+from core.product_delivery import ProductDelivery
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +238,92 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        return handle_payment_intent(body)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription(body)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(body)
+    
     return _error_response(404, "Not found")
+
+async def handle_payment_intent(body: Optional[str]) -> Dict[str, Any]:
+    """Handle payment intent creation"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+        
+        data = json.loads(body)
+        amount = data.get("amount")
+        currency = data.get("currency", "usd")
+        gateway = PaymentGateway(data.get("gateway", "stripe"))
+        metadata = data.get("metadata", {})
+        
+        processor = PaymentProcessor()
+        result = await processor.create_payment_intent(amount, currency, gateway, metadata)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment failed"))
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+async def handle_subscription(body: Optional[str]) -> Dict[str, Any]:
+    """Handle subscription management"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+        
+        data = json.loads(body)
+        action = data.get("action")
+        customer_id = data.get("customer_id")
+        plan_id = data.get("plan_id")
+        payment_method_id = data.get("payment_method_id")
+        
+        manager = SubscriptionManager()
+        
+        if action == "create":
+            result = await manager.create_subscription(customer_id, plan_id, payment_method_id)
+        elif action == "cancel":
+            result = await manager.cancel_subscription(customer_id)
+        elif action == "update":
+            result = await manager.update_subscription(customer_id, plan_id)
+        else:
+            return _error_response(400, "Invalid action")
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Subscription operation failed"))
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Subscription management failed: {str(e)}")
+
+async def handle_webhook(body: Optional[str]) -> Dict[str, Any]:
+    """Handle payment webhooks"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+        
+        data = json.loads(body)
+        gateway = PaymentGateway(data.get("gateway", "stripe"))
+        payload = data.get("payload")
+        signature = data.get("signature")
+        
+        processor = PaymentProcessor()
+        result = await processor.handle_webhook(payload, signature, gateway)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 
 __all__ = ["route_request"]
