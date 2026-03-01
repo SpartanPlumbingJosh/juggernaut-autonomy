@@ -8,10 +8,13 @@ Endpoints:
 """
 
 import json
+import hmac
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from payment_processors import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +235,66 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/webhook/<processor>
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        processor_name = parts[2]
+        return handle_payment_webhook(processor_name, body, query_params)
+    
     return _error_response(404, "Not found")
+
+
+async def handle_payment_webhook(processor_name: str, body: Optional[str], query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment processor webhooks."""
+    try:
+        if not body:
+            return _error_response(400, "Missing webhook body")
+        
+        processor = PaymentProcessor.create(processor_name)
+        if not processor:
+            return _error_response(400, f"Unsupported processor: {processor_name}")
+        
+        # Verify webhook signature
+        signature = query_params.get("signature", [""])[0] if isinstance(query_params.get("signature"), list) else query_params.get("signature", "")
+        if not processor.verify_webhook(body, signature):
+            return _error_response(401, "Invalid webhook signature")
+        
+        # Parse event
+        event = processor.parse_webhook(body)
+        if not event:
+            return _error_response(400, "Failed to parse webhook event")
+        
+        # Record revenue event
+        sql = """
+        INSERT INTO revenue_events (
+            id, experiment_id, event_type, amount_cents, currency,
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            %(experiment_id)s,
+            %(event_type)s,
+            %(amount_cents)s,
+            %(currency)s,
+            %(source)s,
+            %(metadata)s,
+            NOW(),
+            NOW()
+        )
+        """
+        params = {
+            "experiment_id": event.get("experiment_id"),
+            "event_type": "revenue",
+            "amount_cents": int(event["amount"] * 100),
+            "currency": event["currency"].upper(),
+            "source": processor_name,
+            "metadata": json.dumps(event.get("metadata", {}))
+        }
+        
+        await execute_db(sql, params)
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
 
 
 __all__ = ["route_request"]
