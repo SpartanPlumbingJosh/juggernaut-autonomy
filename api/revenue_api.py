@@ -16,6 +16,10 @@ from core.database import query_db
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
+    # Add revenue recognition categorization
+    if 'revenue_cents' in body:
+        body['revenue_type'] = 'recognized' if status_code == 200 else 'deferred'
+    """Create standardized API response."""
     return {
         "statusCode": status_code,
         "headers": {
