@@ -1,5 +1,11 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data with production-grade features.
+
+Features:
+- JWT Authentication
+- Rate Limiting (100 req/min per client)
+- Structured Logging
+- Request Validation
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals

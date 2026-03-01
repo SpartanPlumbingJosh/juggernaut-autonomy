@@ -1180,3 +1180,50 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+"""
+Service monitoring and alerting for revenue operations.
+"""
+
+import time
+import logging
+import requests
+from typing import Dict
+
+logger = logging.getLogger(__name__)
+
+class ServiceMonitor:
+    def __init__(self, endpoints: Dict[str, str]):
+        self.endpoints = endpoints
+        self.uptime = {}
+        self.response_times = {}
+        
+    def check_services(self) -> None:
+        """Check all defined endpoints for availability and latency."""
+        for name, url in self.endpoints.items():
+            try:
+                start_time = time.time()
+                response = requests.get(url, timeout=5)
+                latency = time.time() - start_time
+                
+                if response.status_code == 200:
+                    self.uptime[name] = self.uptime.get(name, 0) + 1
+                    self.response_times[name] = latency
+                    logger.info(f"Service {name} is healthy (latency: {latency:.2f}s)")
+                else:
+                    logger.error(f"Service {name} returned HTTP {response.status_code}")
+                    
+            except Exception as e:
+                logger.critical(f"Service {name} is down: {str(e)}")
+                
+    def get_status(self) -> Dict:
+        """Return current monitoring status"""
+        return {
+            "services": list(self.endpoints.keys()),
+            "uptime": self.uptime,
+            "response_times": self.response_times
+        }
+
+    def alert_on_failure(self, service_name: str) -> None:
+        """Trigger alerts when services aren't responding"""
+        # Integrate with PagerDuty/Telegram/Slack etc
+        logger.error(f"ALERT: Service {service_name} is unavailable!")
