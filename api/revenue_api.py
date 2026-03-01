@@ -9,9 +9,12 @@ Endpoints:
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import uuid
+import logging
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.payment_processor import process_payment
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +213,113 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+class APIServiceManager:
+    """Manages automated API service operations and revenue tracking."""
+    
+    def __init__(self):
+        self.logger = logging.getLogger(__name__)
+        
+    async def _record_revenue_event(self, amount_cents: int, source: str, metadata: Dict[str, Any]) -> Tuple[bool, str]:
+        """Record a revenue event in the database."""
+        try:
+            event_id = str(uuid.uuid4())
+            metadata_json = json.dumps(metadata)
+            
+            await execute_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source, 
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    '{event_id}', 'revenue', {amount_cents}, 'USD', '{source}',
+                    '{metadata_json}'::jsonb, NOW(), NOW()
+                )
+            """)
+            return True, event_id
+        except Exception as e:
+            self.logger.error(f"Failed to record revenue event: {str(e)}")
+            return False, str(e)
+            
+    async def handle_api_service_request(self, service_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle API service requests and process payments."""
+        try:
+            # Validate service type
+            valid_services = {
+                "content_generation": {
+                    "price_cents": 1000,  # $10 per request
+                    "min_params": ["topic", "word_count"]
+                },
+                "data_processing": {
+                    "price_cents": 500,   # $5 per request
+                    "min_params": ["dataset", "operation"]
+                },
+                "prediction_service": {
+                    "price_cents": 2000,  # $20 per request
+                    "min_params": ["model", "input_data"]
+                }
+            }
+            
+            if service_type not in valid_services:
+                return _error_response(400, "Invalid service type")
+                
+            service_config = valid_services[service_type]
+            
+            # Validate required parameters
+            missing_params = [
+                p for p in service_config["min_params"] 
+                if p not in params or not params[p]
+            ]
+            if missing_params:
+                return _error_response(400, f"Missing required parameters: {', '.join(missing_params)}")
+            
+            # Process payment
+            payment_result = await process_payment(
+                amount_cents=service_config["price_cents"],
+                currency="USD",
+                description=f"API Service: {service_type}"
+            )
+            
+            if not payment_result.get("success"):
+                return _error_response(402, "Payment processing failed")
+            
+            # Record revenue event
+            metadata = {
+                "service_type": service_type,
+                "params": params,
+                "payment_id": payment_result["payment_id"]
+            }
+            
+            success, event_id = await self._record_revenue_event(
+                amount_cents=service_config["price_cents"],
+                source="api_service",
+                metadata=metadata
+            )
+            
+            if not success:
+                return _error_response(500, "Failed to record revenue event")
+            
+            # Execute the actual service (stub implementation)
+            service_result = self._execute_service(service_type, params)
+            
+            return _make_response(200, {
+                "success": True,
+                "service_result": service_result,
+                "payment_id": payment_result["payment_id"],
+                "revenue_event_id": event_id
+            })
+            
+        except Exception as e:
+            self.logger.error(f"API service error: {str(e)}")
+            return _error_response(500, f"Service processing error: {str(e)}")
+            
+    def _execute_service(self, service_type: str, params: Dict[str, Any]) -> Dict[str, Any]:
+        """Execute the actual service logic (stub implementation)."""
+        # TODO: Implement actual service logic
+        return {
+            "service_type": service_type,
+            "status": "completed",
+            "result": f"Stub implementation for {service_type}"
+        }
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +341,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/api_service
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "api_service" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            service_type = body_data.get("service_type")
+            params = body_data.get("params", {})
+            
+            manager = APIServiceManager()
+            return manager.handle_api_service_request(service_type, params)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
