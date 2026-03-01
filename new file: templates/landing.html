@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MVP Vertical Landing</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="https://js.stripe.com/v3/"></script>
+    <script>
+        // Track conversion funnel
+        window.dataLayer = window.dataLayer || [];
+        function trackEvent(event, data) {
+            dataLayer.push({'event': event, ...data});
+        }
+    </script>
+</head>
+<body>
+    <header>
+        <h1>MVP Product Solution</h1>
+    </header>
+
+    <main>
+        <section id="lead-capture">
+            <h2>Get Started</h2>
+            <form id="email-form">
+                <input type="email" placeholder="Your email" required>
+                <button type="submit">Continue</button>
+            </form>
+        </section>
+
+        <section id="checkout" style="display:none;">
+            <h2>Complete Purchase</h2>
+            <div id="payment-options">
+                <button id="stripe-checkout">Pay with Card</button>
+                <div id="paypal-button-container"></div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        // Initialize Stripe
+        const stripe = Stripe('{{ stripe_public_key }}');
+        
+        // Handle email capture
+        document.getElementById('email-form').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const email = e.target.querySelector('input').value;
+            trackEvent('email_captured', {email});
+            
+            // Store email in session
+            fetch('/api/email', {
+                method: 'POST',
+                body: JSON.stringify({email}),
+                headers: {'Content-Type': 'application/json'}
+            });
+            
+            // Show checkout
+            document.getElementById('lead-capture').style.display = 'none';
+            document.getElementById('checkout').style.display = 'block';
+        });
+
+        // Handle Stripe checkout
+        document.getElementById('stripe-checkout').addEventListener('click', () => {
+            trackEvent('checkout_started', {method: 'stripe'});
+            fetch('/api/payment/checkout?price_id=mvp_price&success_url=...&cancel_url=...')
+                .then(res => res.json())
+                .then(data => window.location = data.url);
+        });
+
+        // PayPal integration would initialize here
+    </script>
+</body>
+</html>
