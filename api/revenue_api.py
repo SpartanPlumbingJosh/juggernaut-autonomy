@@ -162,6 +162,68 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_target_progress() -> Dict[str, Any]:
+    """Get progress toward $10M revenue target with milestones and growth analysis."""
+    try:
+        TARGET_CENTS = 1000000000  # $10M in cents
+        
+        # Get all-time revenue
+        sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            MIN(recorded_at) as first_revenue_at,
+            MAX(recorded_at) as last_revenue_at
+        FROM revenue_events
+        """
+        result = await query_db(sql)
+        row = result.get("rows", [{}])[0]
+        
+        total_revenue = row.get("total_revenue_cents") or 0
+        first_revenue = row.get("first_revenue_at")
+        last_revenue = row.get("last_revenue_at")
+        
+        # Calculate progress
+        progress = min(total_revenue / TARGET_CENTS, 1.0)
+        
+        # Calculate growth rate
+        growth_rate = 0.0
+        if first_revenue and last_revenue:
+            days = (last_revenue - first_revenue).days or 1
+            growth_rate = total_revenue / days
+            
+        # Milestone alerts
+        milestones = [
+            0.1, 0.25, 0.5, 0.75, 0.9, 1.0
+        ]
+        next_milestone = next((m for m in milestones if m > progress), None)
+        
+        # Anomaly detection (simple stddev based)
+        anomaly_sql = """
+        SELECT 
+            STDDEV(amount_cents) as stddev,
+            AVG(amount_cents) as mean
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        """
+        anomaly_result = await query_db(anomaly_sql)
+        anomaly_row = anomaly_result.get("rows", [{}])[0]
+        stddev = anomaly_row.get("stddev") or 0
+        mean = anomaly_row.get("mean") or 0
+        
+        return _make_response(200, {
+            "target_cents": TARGET_CENTS,
+            "current_cents": total_revenue,
+            "progress": progress,
+            "next_milestone": next_milestone,
+            "growth_rate_cents_per_day": growth_rate,
+            "anomaly_threshold_cents": mean + 3 * stddev,
+            "first_revenue_at": first_revenue,
+            "last_revenue_at": last_revenue
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate target progress: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +293,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/target-progress
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "target-progress" and method == "GET":
+        return handle_target_progress()
     
     return _error_response(404, "Not found")
 

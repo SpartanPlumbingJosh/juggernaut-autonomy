@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from core.dashboard_manager import DashboardManager
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -275,6 +276,80 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def monitor_revenue_dashboard(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Monitor revenue dashboard and trigger alerts."""
+    try:
+        dashboard = DashboardManager()
+        
+        # Get current revenue
+        sql = """
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            MIN(recorded_at) as first_revenue_at,
+            MAX(recorded_at) as last_revenue_at
+        FROM revenue_events
+        """
+        result = execute_sql(sql)
+        row = result.get("rows", [{}])[0]
+        
+        current_cents = row.get("total_revenue_cents") or 0
+        first_revenue = row.get("first_revenue_at")
+        last_revenue = row.get("last_revenue_at")
+        
+        # Check progress
+        progress = dashboard.calculate_progress(current_cents)
+        
+        # Check for milestone alerts
+        alert = dashboard.check_milestone_alerts(current_cents)
+        if alert:
+            log_action(
+                "dashboard.milestone_reached",
+                f"Revenue milestone reached: {alert['milestone'] * 100}%",
+                level="info",
+                output_data=alert
+            )
+        
+        # Analyze growth
+        growth = dashboard.analyze_growth({
+            "current_cents": current_cents,
+            "first_revenue_at": first_revenue,
+            "last_revenue_at": last_revenue
+        })
+        
+        # Get recent transactions for anomaly detection
+        transactions_sql = """
+        SELECT amount_cents 
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        ORDER BY recorded_at DESC
+        LIMIT 100
+        """
+        transactions_result = execute_sql(transactions_sql)
+        transactions = transactions_result.get("rows", [])
+        
+        anomalies = dashboard.detect_anomalies(transactions)
+        if anomalies.get("anomalies_detected", 0) > 0:
+            log_action(
+                "dashboard.anomaly_detected",
+                f"Revenue anomaly detected: {anomalies['anomalies_detected']} events",
+                level="warning",
+                output_data=anomalies
+            )
+        
+        return {
+            "success": True,
+            "progress": progress,
+            "growth": growth,
+            "anomalies": anomalies,
+            "alert": alert
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
