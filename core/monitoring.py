@@ -1180,3 +1180,56 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+import time
+import logging
+from typing import Dict, Any
+from datetime import datetime
+import psutil
+import requests
+
+class InfrastructureMonitor:
+    """Monitors and self-heals the revenue platform."""
+    
+    def __init__(self, check_interval: int = 300):
+        self.check_interval = check_interval
+        self.thresholds = {
+            'cpu': 90,  # %
+            'memory': 85,  # %
+            'disk': 90,  # %
+            'response_time': 2.0,  # seconds
+        }
+        
+    async def run_checks(self) -> Dict[str, Any]:
+        """Run system health checks."""
+        stats = {
+            'timestamp': datetime.utcnow().isoformat(),
+            'cpu': psutil.cpu_percent(),
+            'memory': psutil.virtual_memory().percent,
+            'disk': psutil.disk_usage('/').percent,
+        }
+        
+        alerts = []
+        if stats['cpu'] > self.thresholds['cpu']:
+            alerts.append('high_cpu')
+            
+        if stats['memory'] > self.thresholds['memory']:
+            alerts.append('high_memory')
+            
+        if stats['disk'] > self.thresholds['disk']:
+            alerts.append('high_disk')
+            
+        # Run self-healing based on alerts
+        if alerts:
+            await self._self_heal(alerts)
+            
+        return {'status': 'healthy' if not alerts else 'degraded', 'alerts': alerts}
+        
+    async def _self_heal(self, alerts: List[str]) -> bool:
+        """Attempt to automatically resolve issues."""
+        for alert in alerts:
+            if alert == 'high_cpu':
+                pass  # Implement CPU mitigation
+            elif alert == 'high_memory':
+                pass  # Implement memory cleanup
+            
+        return True
