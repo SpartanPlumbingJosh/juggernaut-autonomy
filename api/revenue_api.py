@@ -12,6 +12,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.billing_operations import (
+    create_subscription,
+    process_payment,
+    cancel_subscription,
+    get_subscription_details
+)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +237,71 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            customer_id = body_data.get("customer_id")
+            plan_id = body_data.get("plan_id")
+            payment_method_id = body_data.get("payment_method_id")
+            
+            if not all([customer_id, plan_id, payment_method_id]):
+                return _error_response(400, "Missing required fields")
+                
+            result = await create_subscription(customer_id, plan_id, payment_method_id)
+            if not result.get("success"):
+                return _error_response(500, result.get("error"))
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to create subscription: {str(e)}")
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            invoice_id = body_data.get("invoice_id")
+            payment_method_id = body_data.get("payment_method_id")
+            
+            if not all([invoice_id, payment_method_id]):
+                return _error_response(400, "Missing required fields")
+                
+            result = await process_payment(invoice_id, payment_method_id)
+            if not result.get("success"):
+                return _error_response(500, result.get("error"))
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to process payment: {str(e)}")
+    
+    # DELETE /revenue/subscriptions/{subscription_id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "DELETE":
+        subscription_id = parts[2]
+        if not subscription_id:
+            return _error_response(400, "Missing subscription ID")
+            
+        result = await cancel_subscription(subscription_id)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, result)
+    
+    # GET /revenue/subscriptions/{subscription_id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        subscription_id = parts[2]
+        if not subscription_id:
+            return _error_response(400, "Missing subscription ID")
+            
+        result = await get_subscription_details(subscription_id)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, result)
     
     return _error_response(404, "Not found")
 
