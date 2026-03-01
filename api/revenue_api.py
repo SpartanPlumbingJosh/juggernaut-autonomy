@@ -10,9 +10,48 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from decimal import Decimal, ROUND_HALF_UP
 
 from core.database import query_db
 
+# Pricing tiers and strategies
+PRICING_TIERS = {
+    "basic": Decimal("9.99"),
+    "pro": Decimal("29.99"),
+    "enterprise": Decimal("99.99")
+}
+
+DISCOUNT_RATES = {
+    "annual": Decimal("0.15"),  # 15% discount for annual plans
+    "semi_annual": Decimal("0.10")  # 10% discount for semi-annual plans
+}
+
+def calculate_price(tier: str, billing_cycle: str = "monthly", quantity: int = 1) -> Decimal:
+    """Calculate the total price based on tier, billing cycle and quantity."""
+    base_price = PRICING_TIERS.get(tier, Decimal("0"))
+    discount = DISCOUNT_RATES.get(billing_cycle, Decimal("0"))
+    
+    total = base_price * Decimal(str(quantity))
+    if discount > 0:
+        total -= total * discount
+    
+    return total.quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+
+def calculate_revenue_share(amount: Decimal, share_percent: Decimal) -> Decimal:
+    """Calculate revenue share amount."""
+    return (amount * share_percent / Decimal("100")).quantize(Decimal(".01"), rounding=ROUND_HALF_UP)
+
+
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through payment gateway."""
+    # TODO: Integrate with actual payment gateway
+    # Mock implementation for MVP
+    return {
+        "success": True,
+        "transaction_id": "mock_txn_123",
+        "amount": payment_data.get("amount"),
+        "currency": payment_data.get("currency", "USD")
+    }
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
@@ -32,6 +71,29 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def record_transaction(transaction_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Record a revenue transaction in the database."""
+    try:
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {int(Decimal(transaction_data.get("amount", "0")) * 100)},
+            '{transaction_data.get("currency", "USD")}',
+            '{transaction_data.get("source", "direct")}',
+            '{json.dumps(transaction_data.get("metadata", {}))}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -161,6 +223,18 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
+
+async def deliver_product(customer_id: str, product_id: str) -> Dict[str, Any]:
+    """Automated product delivery mechanism."""
+    # TODO: Integrate with actual delivery system
+    # Mock implementation for MVP
+    return {
+        "success": True,
+        "customer_id": customer_id,
+        "product_id": product_id,
+        "delivery_status": "completed",
+        "delivery_timestamp": datetime.now(timezone.utc).isoformat()
+    }
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
