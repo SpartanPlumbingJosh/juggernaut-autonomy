@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +114,25 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new payment."""
+    try:
+        processor = PaymentProcessor()
+        success, payment_id = await processor.process_payment(
+            payment_method=body.get("payment_method"),
+            amount=float(body.get("amount", 0)),
+            currency=body.get("currency", "USD"),
+            metadata=body.get("metadata", {})
+        )
+        
+        if success:
+            return _make_response(200, {"payment_id": payment_id})
+        else:
+            return _error_response(400, f"Payment failed: {payment_id}")
+            
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
@@ -224,6 +244,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
     
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+        
     # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
         return handle_revenue_transactions(query_params)
