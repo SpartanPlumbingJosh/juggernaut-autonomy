@@ -10,6 +10,8 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import numpy as np
+from scipy.optimize import minimize
 
 from core.database import query_db
 
@@ -209,6 +211,50 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+def _optimize_revenue_allocation(historical_data: List[Dict[str, Any]]) -> Dict[str, float]:
+    """Optimize revenue stream allocation using historical performance data."""
+    # Extract source performance data
+    sources = {}
+    for entry in historical_data:
+        source = entry.get('source')
+        if source:
+            sources.setdefault(source, {'revenue': 0, 'cost': 0})
+            sources[source]['revenue'] += entry.get('revenue_cents', 0)
+            sources[source]['cost'] += entry.get('cost_cents', 0)
+    
+    # Calculate ROI for each source
+    roi_data = {}
+    for source, data in sources.items():
+        if data['cost'] > 0:
+            roi = (data['revenue'] - data['cost']) / data['cost']
+            roi_data[source] = roi
+    
+    # Optimization function
+    def objective(x):
+        total_roi = 0
+        for i, source in enumerate(roi_data.keys()):
+            total_roi += x[i] * roi_data[source]
+        return -total_roi  # Minimize negative ROI
+    
+    # Constraints
+    def constraint(x):
+        return 1.0 - sum(x)
+    
+    # Initial guess (equal allocation)
+    x0 = [1.0/len(roi_data)] * len(roi_data)
+    
+    # Bounds (0-1 for each source)
+    bounds = [(0, 1) for _ in range(len(roi_data))]
+    
+    # Constraints
+    cons = {'type': 'eq', 'fun': constraint}
+    
+    # Optimize
+    result = minimize(objective, x0, method='SLSQP', bounds=bounds, constraints=cons)
+    
+    # Return optimal allocation
+    return {source: allocation for source, allocation in zip(roi_data.keys(), result.x)}
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
