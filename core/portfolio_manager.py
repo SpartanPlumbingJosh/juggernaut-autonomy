@@ -276,6 +276,62 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def check_revenue_milestones(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any]
+) -> Dict[str, Any]:
+    """Check if revenue milestones have been reached and trigger alerts."""
+    try:
+        sql = """
+        SELECT SUM(amount_cents) as total_revenue
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        """
+        result = execute_sql(sql)
+        total_revenue = float((result.get("rows", [{}])[0] or {}).get("total_revenue", 0))
+        
+        progress = api.revenue_api._calculate_progress(total_revenue)
+        
+        alerts = []
+        for milestone in progress['milestones'].values():
+            if milestone['reached']:
+                # Check if we've already logged this milestone
+                check_sql = f"""
+                SELECT COUNT(*) as count
+                FROM alerts
+                WHERE type = 'revenue_milestone' 
+                AND data->>'pct' = '{milestone["pct"]}'
+                """
+                res = execute_sql(check_sql)
+                if not res.get("rows", [{}])[0].get("count", 0):
+                    alerts.append(milestone["pct"])
+                    log_action(
+                        "revenue.milestone",
+                        f"Reached {milestone['pct']}% of revenue target",
+                        level="warning",
+                        data={
+                            "pct": milestone["pct"],
+                            "revenue": total_revenue,
+                            "target": progress["target_cents"]
+                        }
+                    )
+                    
+        return {
+            "success": True,
+            "total_revenue": total_revenue,
+            "triggered_alerts": alerts,
+            "progress": progress
+        }
+        
+    except Exception as e:
+        log_action(
+            "revenue.milestone_error",
+            f"Failed to check revenue milestones: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
