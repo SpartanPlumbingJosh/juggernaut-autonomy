@@ -225,6 +225,19 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment processor webhook."""
+    from services.payment_processor import PaymentProcessor
+    
+    processor = PaymentProcessor()
+    return await processor.handle_webhook(body)
+
+async def handle_create_refund(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a refund transaction."""
+    from services.payment_processor import PaymentProcessor
+    
+    processor = PaymentProcessor()
+    return await processor._process_refund(body)
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
