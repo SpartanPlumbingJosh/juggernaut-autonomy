@@ -7,6 +7,9 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.outbound_outreach import OutboundOutreach
+from core.lead_scoring import LeadScorer
+from core.onboarding_pipeline import OnboardingPipeline
 
 
 def generate_revenue_ideas(
