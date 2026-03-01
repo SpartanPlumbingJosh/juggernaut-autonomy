@@ -162,6 +162,55 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment transaction with failover handling."""
+    try:
+        # Primary payment processor
+        try:
+            # TODO: Integrate with primary payment processor API
+            payment_id = "txn_123"  # Mock response
+            status = "succeeded"
+        except Exception as primary_error:
+            # Fallback to secondary processor
+            try:
+                # TODO: Integrate with secondary payment processor API
+                payment_id = "txn_456"  # Mock response
+                status = "succeeded"
+            except Exception as secondary_error:
+                return _error_response(500, f"Payment processing failed: {str(secondary_error)}")
+
+        # Record transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {int(payment_data.get('amount_cents', 0))},
+            '{payment_data.get('currency', 'USD')}',
+            'payment_processor',
+            '{json.dumps({
+                'payment_id': payment_id,
+                'status': status,
+                'customer_id': payment_data.get('customer_id')
+            })}',
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "status": status,
+            "amount_cents": payment_data.get('amount_cents'),
+            "currency": payment_data.get('currency')
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,6 +259,32 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_delivery_and_onboarding(payment_id: str) -> Dict[str, Any]:
+    """Handle product delivery and customer onboarding."""
+    try:
+        # TODO: Integrate with delivery system
+        delivery_status = "shipped"
+        
+        # TODO: Integrate with onboarding system
+        onboarding_status = "completed"
+        
+        # Update payment metadata
+        sql = f"""
+        UPDATE revenue_events
+        SET metadata = metadata || '{"delivery_status": "{delivery_status}", "onboarding_status": "{onboarding_status}"}'::jsonb
+        WHERE metadata->>'payment_id' = '{payment_id}'
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "delivery_status": delivery_status,
+            "onboarding_status": onboarding_status
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process delivery and onboarding: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +306,25 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            payment_data = json.loads(body or "{}")
+            return await process_payment(payment_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid payment data: {str(e)}")
+    
+    # POST /revenue/delivery
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "delivery" and method == "POST":
+        try:
+            delivery_data = json.loads(body or "{}")
+            payment_id = delivery_data.get("payment_id")
+            if not payment_id:
+                return _error_response(400, "Missing payment_id")
+            return await handle_delivery_and_onboarding(payment_id)
+        except Exception as e:
+            return _error_response(400, f"Invalid delivery data: {str(e)}")
     
     return _error_response(404, "Not found")
 
