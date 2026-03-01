@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from payment_processor import PaymentProcessor
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -276,7 +277,7 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+async def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
@@ -308,6 +309,16 @@ def review_experiments_stub(
     running_count = 0
     completed_count = 0
     learning_triggered = 0
+    
+    # Check for failed payments and retry
+    retry_result = await PaymentProcessor.retry_failed_payments()
+    if retry_result.get("success"):
+        log_action(
+            "payment.retry",
+            f"Retried {retry_result.get('retried', 0)} failed payments",
+            level="info",
+            output_data=retry_result
+        )
     
     for exp in rows:
         exp_id = exp.get("id")
