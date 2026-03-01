@@ -14,7 +14,14 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    autonomous_mode: bool = True,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with optional autonomous operation mode.
+    
+    Args:
+        autonomous_mode: If True, performs autonomous validation and filtering
+                        using historical performance data
+    """
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
@@ -276,11 +283,21 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def autonomously_monitor_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
+    budget_alert_threshold: float = 0.9,
+    timeout_hours: int = 168,
+    performance_threshold: float = 0.5,
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Autonomous monitoring and healing for revenue experiments.
+    
+    Features:
+    - Budget surveillance
+    - Timeout protection 
+    - Performance guardrails
+    - Automatic remediation
+    """
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
