@@ -9,13 +9,33 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+from tenacity import retry, stop_after_attempt, wait_exponential
+import logging
+
+logger = logging.getLogger(__name__)
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10),
+    reraise=True
+)
+def _optimize_resource_allocation(ideas: List[Dict]) -> List[Dict]:
+    """Prioritize ideas with highest ROI potential."""
+    return sorted(
+        ideas,
+        key=lambda x: float(x.get("estimates", {}).get("roi", 0)),
+        reverse=True
+    )
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with retry logic and detailed error handling."""
     context = context or {}
+    logger.info("Generating revenue ideas with context: %s", context)
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
 
