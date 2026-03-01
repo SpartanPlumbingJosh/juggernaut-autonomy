@@ -200,9 +200,25 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         source_result = await query_db(source_sql)
         by_source = source_result.get("rows", [])
         
+        # By pricing tier
+        tier_sql = f"""
+        SELECT 
+            metadata->>'pricing_tier' as pricing_tier,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY metadata->>'pricing_tier'
+        ORDER BY revenue_cents DESC
+        """
+        
+        tier_result = await query_db(tier_sql)
+        by_tier = tier_result.get("rows", [])
+        
         return _make_response(200, {
             "daily": daily_data,
             "by_source": by_source,
+            "by_tier": by_tier,
             "period_days": days
         })
         
