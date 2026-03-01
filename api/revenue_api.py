@@ -1,15 +1,20 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing endpoints.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments/create - Create payment intent
+- POST /revenue/subscriptions/create - Create subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from billing.payment_processor import PaymentProcessor
+from billing.subscription_manager import SubscriptionManager
 
 from core.database import query_db
 
@@ -32,6 +37,61 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_payment_intent_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    processor = PaymentProcessor()
+    amount_cents = int(float(body.get("amount", 0)) * 100)
+    metadata = body.get("metadata", {})
+    
+    result = await processor.create_payment_intent(amount_cents, metadata)
+    if not result["success"]:
+        return _error_response(400, result["error"])
+        
+    return _make_response(200, {
+        "client_secret": result["client_secret"],
+        "payment_intent_id": result["payment_intent_id"]
+    })
+
+async def handle_subscription_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a subscription."""
+    manager = SubscriptionManager()
+    processor = PaymentProcessor()
+    
+    # Create customer first
+    customer_result = await manager.create_customer(
+        email=body.get("email"),
+        payment_method_id=body.get("payment_method_id"),
+        metadata=body.get("metadata", {})
+    )
+    if not customer_result["success"]:
+        return _error_response(400, customer_result["error"])
+        
+    # Create subscription
+    subscription_result = await processor.create_subscription(
+        customer_id=customer_result["customer_id"],
+        price_id=body.get("price_id"),
+        metadata=body.get("metadata", {})
+    )
+    if not subscription_result["success"]:
+        return _error_response(400, subscription_result["error"])
+        
+    return _make_response(200, {
+        "subscription_id": subscription_result["subscription_id"],
+        "client_secret": subscription_result["client_secret"],
+        "status": subscription_result["status"]
+    })
+
+async def handle_webhook_event(headers: Dict[str, Any], body: bytes) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    processor = PaymentProcessor()
+    sig_header = headers.get("Stripe-Signature")
+    
+    result = await processor.handle_webhook(body, sig_header)
+    if not result["success"]:
+        return _error_response(400, result["error"])
+        
+    return _make_response(200, {"handled": result["handled"]})
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -210,7 +270,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +291,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "create" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_payment_intent_creation(json.loads(body))
+        
+    # POST /revenue/subscriptions/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "create" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_subscription_creation(json.loads(body))
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing request body or headers")
+        return handle_webhook_event(headers, body.encode())
     
     return _error_response(404, "Not found")
 
