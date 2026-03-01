@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and management endpoints.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Payment processor webhook
+- POST /revenue/refund - Create refund
+- GET /revenue/health - System health check
 """
 
 import json
@@ -162,6 +165,19 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_health() -> Dict[str, Any]:
+    """Check system health and connectivity."""
+    try:
+        # Test database connection
+        await query_db("SELECT 1")
+        
+        return _make_response(200, {
+            "status": "healthy",
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        return _error_response(500, f"Health check failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -209,6 +225,19 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment processor webhook."""
+    from services.payment_processor import PaymentProcessor
+    
+    processor = PaymentProcessor()
+    return await processor.handle_webhook(body)
+
+async def handle_create_refund(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a refund transaction."""
+    from services.payment_processor import PaymentProcessor
+    
+    processor = PaymentProcessor()
+    return await processor._process_refund(body)
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
@@ -231,6 +260,30 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_webhook(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /revenue/refund
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "refund" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_create_refund(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # GET /revenue/health
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "health" and method == "GET":
+        return handle_revenue_health()
     
     return _error_response(404, "Not found")
 
