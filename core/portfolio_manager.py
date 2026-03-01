@@ -7,7 +7,23 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.automation_engine import AutomationEngine, StripeProcessor, database_health_check
 
+
+def initialize_automation_engine(
+    execute_sql: Callable[[str], Dict[str, Any]], 
+    log_action: Callable[..., Any]
+) -> AutomationEngine:
+    """Initialize and configure the automation engine"""
+    engine = AutomationEngine(execute_sql, log_action)
+    
+    # Add payment processors
+    engine.add_payment_processor(StripeProcessor())
+    
+    # Add health checks
+    engine.add_health_check(lambda: database_health_check(execute_sql))
+    
+    return engine
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
