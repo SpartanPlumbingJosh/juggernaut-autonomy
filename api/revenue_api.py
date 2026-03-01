@@ -34,7 +34,12 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get autonomous revenue system metrics including:
+    - MRR/ARR breakdown
+    - Churn metrics
+    - Customer acquisition costs  
+    - Lifetime value projections
+    """
     try:
         now = datetime.now(timezone.utc)
         
@@ -115,7 +120,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get detailed billing transactions including:
+    - Subscription events  
+    - Usage-based charges
+    - Marketplace transactions
+    - Failed payments/recovery
+    """
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
