@@ -231,8 +231,43 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/record
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "record" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return await _handle_record_transaction(data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
     
     return _error_response(404, "Not found")
+
+
+async def _handle_record_transaction(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle recording a transaction."""
+    required_fields = ["amount_cents", "event_type", "source"]
+    missing = [f for f in required_fields if f not in data]
+    if missing:
+        return _error_response(400, f"Missing required fields: {', '.join(missing)}")
+
+    try:
+        result = await record_revenue_event(
+            amount_cents=data["amount_cents"],
+            event_type=data["event_type"],
+            source=data["source"],
+            metadata=data.get("metadata"),
+            attribution=data.get("attribution")
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Failed to record transaction"))
+            
+        return _make_response(200, {"event_id": result["event_id"]})
+        
+    except Exception as e:
+        return _error_response(500, f"Transaction recording failed: {str(e)}")
 
 
 __all__ = ["route_request"]
