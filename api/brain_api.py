@@ -652,29 +652,7 @@ def handle_consult_stream(
         if brain is None:
             return _error_response(503, "Brain service not available")
 
-        if enable_tools and auto_execute:
-            result = brain.consult_with_tools(
-                question=question,
-                session_id=session_id,
-                context=context,
-                include_memories=include_memories,
-                system_prompt=system_prompt,
-                enable_tools=enable_tools,
-                auto_execute=auto_execute,
-            )
-        elif enable_tools:
-            result = brain.consult_with_tools(
-                question=question,
-                session_id=session_id,
-                context=context,
-                include_memories=include_memories,
-                system_prompt=system_prompt,
-                enable_tools=enable_tools,
-            )
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Brain service not available'})}\n\n"
-            return
-
-        # Stream consultation with tools
+        # Stream consultation with tools (supports mode parameter for model selection)
         for event in brain.consult_with_tools_stream(
             question=question,
             session_id=session_id,
