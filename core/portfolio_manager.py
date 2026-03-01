@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from core.payment_processor import PaymentProcessor
+from core.product_delivery import ProductDelivery
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -184,10 +187,15 @@ def score_pending_ideas(
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
+    config: Dict[str, Any],
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
 ) -> Dict[str, Any]:
+    """
+    Start revenue experiments with integrated payment processing and product delivery.
+    Config must include payment and delivery configuration keys.
+    """
     try:
         res = execute_sql(
             f"""
@@ -245,6 +253,10 @@ def start_experiments_from_top_ideas(
 
         link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
 
+        # Initialize payment and delivery systems
+        payment_processor = PaymentProcessor(config.get("payments", {}))
+        product_delivery = ProductDelivery(config.get("delivery", {}))
+        
         try:
             execute_sql(
                 f"""
@@ -254,8 +266,52 @@ def start_experiments_from_top_ideas(
                 WHERE id = '{idea_id.replace("'", "''")}'
                 """
             )
-        except Exception:
-            pass
+            
+            # Automate first charging attempt if configured
+            if config.get("auto_charge_enabled", False):
+                payment_result = await payment_processor.process_payment(
+                    amount_cents=int(budget * 100),
+                    currency="USD",
+                    payment_method=config.get("default_payment_method", "stripe"),
+                    metadata={
+                        "experiment_id": str(exp_id),
+                        "idea_id": idea_id,
+                        "description": f"Charge for idea: {idea.get('title', '')}"
+                    },
+                    customer_details=config.get("default_customer", {})
+                )
+                
+                if payment_result["status"] == "succeeded":
+                    await product_delivery.deliver_product(
+                        order_details={
+                            "product_type": config.get("product_type", "digital"),
+                            "product_name": idea.get("title", "Product"),
+                            "s3_bucket": config.get("delivery", {}).get("s3_bucket"),
+                            "s3_key": idea.get("s3_key", "")
+                        },
+                        customer_details=config.get("default_customer", {}),
+                        product_type=config.get("product_type", "digital")
+                    )
+                    
+                    log_action(
+                        "revenue.automated",
+                        f"Automated payment and delivery for experiment {exp_id}",
+                        level="info",
+                        output_data={
+                            "experiment_id": exp_id,
+                            "idea_id": idea_id,
+                            "payment_status": payment_result["status"],
+                            "amount": budget
+                        }
+                    )
+            
+        except Exception as e:
+            log_action(
+                "revenue.automation_failed",
+                f"Revenue automation failed: {str(e)}",
+                level="error",
+                error_data={"experiment_id": exp_id, "error": str(e)}
+            )
 
         created += 1
 
