@@ -8,10 +8,16 @@ Endpoints:
 """
 
 import json
+import stripe
+import hashlib
+import hmac
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+
+stripe.api_key = STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +216,82 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def create_checkout_session(product_id: str, success_url: str, cancel_url: str) -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        # Get product details from database
+        product = await query_db(f"SELECT * FROM products WHERE id = '{product_id}'")
+        if not product.get("rows"):
+            return _error_response(404, "Product not found")
+        
+        # Create Stripe session
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': product['rows'][0]['name'],
+                    },
+                    'unit_amount': int(float(product['rows'][0]['price']) * 100),
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=success_url,
+            cancel_url=cancel_url,
+        )
+        
+        return _make_response(200, {"session_id": session.id, "url": session.url})
+    except Exception as e:
+        return _error_response(500, f"Failed to create checkout session: {str(e)}")
+
+async def handle_stripe_webhook(body: str, signature: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            body, signature, STRIPE_WEBHOOK_SECRET
+        )
+        
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            await fulfill_order(session)
+            
+        return _make_response(200, {"success": True})
+    except ValueError as e:
+        return _error_response(400, f"Invalid payload: {str(e)}")
+    except stripe.error.SignatureVerificationError as e:
+        return _error_response(400, f"Invalid signature: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Webhook error: {str(e)}")
+
+async def fulfill_order(session: Dict[str, Any]) -> None:
+    """Fulfill order after successful payment."""
+    try:
+        # Record transaction
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source,
+                metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {session['amount_total']},
+                '{session['currency']}',
+                'stripe',
+                '{json.dumps(session)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        # TODO: Add product delivery logic here
+        # Could be email delivery, API access, etc
+        
+    except Exception as e:
+        # Log error but don't fail webhook
+        print(f"Failed to fulfill order: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +313,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing body")
+        data = json.loads(body)
+        return create_checkout_session(
+            data.get("product_id"),
+            data.get("success_url"),
+            data.get("cancel_url")
+        )
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing body")
+        signature = query_params.get("stripe-signature", [""])[0]
+        return handle_stripe_webhook(body, signature)
     
     return _error_response(404, "Not found")
 
