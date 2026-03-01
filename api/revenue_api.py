@@ -1,15 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and marketing automation to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /marketing/campaigns - Create new marketing campaigns
+- GET /marketing/conversions - Get conversion analytics
+- POST /sales/checkout - Process payments
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from core.marketing_manager import MarketingManager
 
 from core.database import query_db
 
@@ -164,6 +168,7 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
+    """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
         
@@ -232,7 +237,34 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /marketing/campaigns
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "campaigns" and method == "POST":
+        return handle_create_campaign(json.loads(body or "{}"))
+    
+    # GET /marketing/conversions
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "conversions" and method == "GET":
+        return handle_get_conversions(query_params)
+    
+    # POST /sales/checkout
+    if len(parts) == 2 and parts[0] == "sales" and parts[1] == "checkout" and method == "POST":
+        return handle_process_payment(json.loads(body or "{}"))
+    
     return _error_response(404, "Not found")
 
+
+async def handle_create_campaign(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle campaign creation."""
+    manager = MarketingManager(query_db, log_action)
+    return manager.create_campaign(data)
+
+async def handle_get_conversions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get conversion analytics."""
+    manager = MarketingManager(query_db, log_action)
+    return manager.get_conversion_analytics(query_params)
+
+async def handle_process_payment(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment."""
+    manager = MarketingManager(query_db, log_action)
+    return manager.process_payment(data)
 
 __all__ = ["route_request"]
