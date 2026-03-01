@@ -276,6 +276,36 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def execute_revenue_automation(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    model_type: str = "billing",
+    batch_size: int = 50
+) -> Dict[str, Any]:
+    """
+    Execute automated revenue generation based on selected model.
+    Supported models: billing, trading, arbitrage
+    """
+    try:
+        if model_type == "billing":
+            from core.revenue_models.billing import run_billing_cycle
+            return run_billing_cycle(execute_sql, log_action, batch_size)
+        elif model_type == "trading":
+            from core.revenue_models.trading import execute_trades
+            return execute_trades(execute_sql, log_action, batch_size)
+        elif model_type == "arbitrage":
+            from core.revenue_models.arbitrage import find_arbitrage_opportunities
+            return find_arbitrage_opportunities(execute_sql, log_action, batch_size)
+        else:
+            return _error_response(400, "Invalid revenue model specified")
+    except Exception as e:
+        log_action(
+            "revenue.automation.failed",
+            f"Failed to execute {model_type} automation: {str(e)}",
+            level="error"
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
