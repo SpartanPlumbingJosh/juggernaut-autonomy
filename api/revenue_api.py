@@ -162,6 +162,29 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_system_status() -> Dict[str, Any]:
+    """Get current system status and metrics"""
+    try:
+        # Get basic system stats
+        sql = """
+            SELECT 
+                COUNT(*) FILTER (WHERE status = 'pending') as pending_payments,
+                COUNT(*) FILTER (WHERE status = 'processed') as processed_payments,
+                SUM(amount_cents) FILTER (WHERE status = 'processed') as total_revenue,
+                MIN(created_at) as first_payment_at,
+                MAX(created_at) as last_payment_at
+            FROM payments
+        """
+        result = await query_db(sql)
+        stats = result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "status": "operational",
+            "stats": stats
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to get system status: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +254,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /system/status
+    if len(parts) == 2 and parts[0] == "system" and parts[1] == "status" and method == "GET":
+        return handle_system_status()
     
     return _error_response(404, "Not found")
 
