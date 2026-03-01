@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_strategies import get_strategy
 
 
 def generate_revenue_ideas(
@@ -187,6 +188,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    strategy_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -228,11 +230,16 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
+        # Initialize revenue strategy
+        strategy_type = idea.get("revenue_strategy", "affiliate")
+        strategy = get_strategy(strategy_type, strategy_config or {})
+        
         create_res = create_experiment_from_idea(
             execute_sql=execute_sql,
             log_action=log_action,
             idea=idea,
             budget=budget,
+            revenue_strategy=strategy,
         )
         if not create_res.get("success"):
             failures.append({"idea_id": idea_id, "error": str(create_res.get("error") or "unknown")[:200]})
