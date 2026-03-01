@@ -1,11 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Process new payment
+- POST /revenue/webhook - Payment processor webhook handler
 """
+```
+
+api/revenue_api.py
+```python
+<<<<<<< SEARCH
+async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 import json
 from datetime import datetime, timezone, timedelta
