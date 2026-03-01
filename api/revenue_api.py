@@ -162,6 +162,58 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_stripe_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            body,
+            headers.get("Stripe-Signature"),
+            os.getenv("STRIPE_WEBHOOK_SECRET")
+        )
+        
+        if event.type == "payment_intent.succeeded":
+            payment_intent = event.data.object
+            # Record successful payment
+            execute_sql(f"""
+                INSERT INTO payments (
+                    id, amount_cents, currency, payment_method, customer_id, status
+                ) VALUES (
+                    '{payment_intent.id}',
+                    {payment_intent.amount},
+                    '{payment_intent.currency}',
+                    '{payment_intent.payment_method}',
+                    '{payment_intent.customer}',
+                    'succeeded'
+                )
+            """)
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+async def handle_paypal_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle PayPal webhook events."""
+    try:
+        if body.get("event_type") == "PAYMENT.SALE.COMPLETED":
+            sale = body.get("resource", {})
+            # Record successful payment
+            execute_sql(f"""
+                INSERT INTO payments (
+                    id, amount_cents, currency, payment_method, customer_id, status
+                ) VALUES (
+                    '{sale.get("id")}',
+                    {int(float(sale.get("amount", {}).get("total", 0)) * 100)},
+                    '{sale.get("amount", {}).get("currency", "USD")}',
+                    'paypal',
+                    '{sale.get("payer", {}).get("payer_info", {}).get("payer_id")}',
+                    'succeeded'
+                )
+            """)
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
