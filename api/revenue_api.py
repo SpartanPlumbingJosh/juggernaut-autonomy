@@ -5,6 +5,10 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- GET /revenue/subscriptions/{id} - Get subscription details
+- POST /revenue/subscriptions/{id}/cancel - Cancel subscription
+- POST /revenue/subscriptions/{id}/charge - Process payment
 """
 
 import json
@@ -162,6 +166,150 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_id", "plan_id", "payment_method"]
+        for field in required_fields:
+            if field not in body:
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Basic fraud check - limit subscriptions per customer
+        sql = f"""
+        SELECT COUNT(*) as count
+        FROM subscriptions
+        WHERE customer_id = '{body["customer_id"]}'
+          AND status = 'active'
+        """
+        result = await query_db(sql)
+        if result.get("rows", [{}])[0].get("count", 0) >= 3:
+            return _error_response(400, "Maximum active subscriptions reached")
+
+        # Create subscription
+        subscription_id = str(uuid.uuid4())
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, payment_method,
+            status, created_at, updated_at
+        ) VALUES (
+            '{subscription_id}',
+            '{body["customer_id"]}',
+            '{body["plan_id"]}',
+            '{body["payment_method"]}',
+            'active',
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+
+        return _make_response(200, {
+            "subscription_id": subscription_id,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def get_subscription(subscription_id: str) -> Dict[str, Any]:
+    """Get subscription details."""
+    try:
+        sql = f"""
+        SELECT *
+        FROM subscriptions
+        WHERE id = '{subscription_id}'
+        """
+        result = await query_db(sql)
+        subscription = result.get("rows", [{}])[0]
+        
+        if not subscription.get("id"):
+            return _error_response(404, "Subscription not found")
+            
+        return _make_response(200, subscription)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to get subscription: {str(e)}")
+
+
+async def cancel_subscription(subscription_id: str) -> Dict[str, Any]:
+    """Cancel subscription."""
+    try:
+        sql = f"""
+        UPDATE subscriptions
+        SET status = 'canceled',
+            updated_at = NOW()
+        WHERE id = '{subscription_id}'
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {"status": "canceled"})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to cancel subscription: {str(e)}")
+
+
+async def process_payment(subscription_id: str) -> Dict[str, Any]:
+    """Process subscription payment."""
+    try:
+        # Get subscription details
+        subscription = await get_subscription(subscription_id)
+        if subscription["statusCode"] != 200:
+            return subscription
+            
+        # Get plan details
+        sql = f"""
+        SELECT *
+        FROM plans
+        WHERE id = '{subscription["body"]["plan_id"]}'
+        """
+        result = await query_db(sql)
+        plan = result.get("rows", [{}])[0]
+        
+        if not plan.get("id"):
+            return _error_response(404, "Plan not found")
+            
+        # Process payment (mock implementation)
+        payment_id = str(uuid.uuid4())
+        sql = f"""
+        INSERT INTO payments (
+            id, subscription_id, amount_cents,
+            currency, status, created_at
+        ) VALUES (
+            '{payment_id}',
+            '{subscription_id}',
+            {plan["amount_cents"]},
+            '{plan["currency"]}',
+            'pending',
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        # Simulate payment processing
+        await asyncio.sleep(1)
+        
+        # Update payment status
+        sql = f"""
+        UPDATE payments
+        SET status = 'completed',
+            updated_at = NOW()
+        WHERE id = '{payment_id}'
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "status": "completed",
+            "amount_cents": plan["amount_cents"],
+            "currency": plan["currency"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +379,23 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Subscription endpoints
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return create_subscription(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        return get_subscription(parts[2])
+    
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] and parts[3] == "cancel" and method == "POST":
+        return cancel_subscription(parts[2])
+    
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] and parts[3] == "charge" and method == "POST":
+        return process_payment(parts[2])
     
     return _error_response(404, "Not found")
 
