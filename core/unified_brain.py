@@ -185,6 +185,7 @@ MODE_MODEL_POLICIES = {
     "deep_research": "deepseek/deepseek-chat",
     "code": "deepseek/deepseek-chat",
     "ops": "google/gemini-2.0-flash-exp:free",
+    "autonomous": "qwen/qwen3.5-flash-02-23",
 }
 
 # Approximate token costs per 1M tokens (OpenRouter pricing)
@@ -195,6 +196,7 @@ TOKEN_COSTS = {
     "deepseek/deepseek-chat": {"input": 0.30, "output": 1.20},
     "google/gemini-2.0-flash-exp:free": {"input": 0.0, "output": 0.0},
     "kimi/k2": {"input": 0.0, "output": 0.0},
+    "qwen/qwen3.5-flash-02-23": {"input": 0.10, "output": 0.40},
 }
 
 
@@ -1368,7 +1370,7 @@ class BrainService:
         }
 
         normalized_mode = str(mode or "normal").strip().lower()
-        if normalized_mode not in {"normal", "deep_research", "code", "ops"}:
+        if normalized_mode not in {"normal", "deep_research", "code", "ops", "autonomous"}:
             normalized_mode = "normal"
 
         # Select model based on mode policy
@@ -1429,6 +1431,7 @@ class BrainService:
             "deep_research": {"max_iterations": 18, "max_same_failure": 2, "max_no_progress_steps": 4},
             "code": {"max_iterations": 12, "max_same_failure": 2, "max_no_progress_steps": 3},
             "ops": {"max_iterations": 6, "max_same_failure": 2, "max_no_progress_steps": 3},
+            "autonomous": {"max_iterations": 30, "max_same_failure": 3, "max_no_progress_steps": 5},
         }
 
         def _safe_int(val: Any) -> Optional[int]:
