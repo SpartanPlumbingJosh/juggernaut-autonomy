@@ -14,10 +14,28 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    retries: int = 3,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with retry logic."""
     context = context or {}
     gen = IdeaGenerator()
-    ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Retry logic for idea generation
+    ideas = []
+    for attempt in range(retries):
+        try:
+            ideas = gen.generate_ideas(context)[: int(limit)]
+            break
+        except Exception as e:
+            if attempt == retries - 1:
+                log_action(
+                    "idea_generation.failed",
+                    f"Failed to generate ideas after {retries} attempts",
+                    level="error",
+                    error=str(e)
+                )
+                return {"success": False, "error": str(e)}
+            continue
 
     created = 0
     failures: List[Dict[str, Any]] = []
