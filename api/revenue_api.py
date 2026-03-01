@@ -16,16 +16,32 @@ from core.database import query_db
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
-    return {
+    response = {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "X-Revenue-Agent-Version": "1.0",
+            "X-Revenue-Target": "10000"  # cents
         },
         "body": json.dumps(body)
     }
+    # Log response metrics
+    try:
+        from core.monitoring import log_metric
+        log_metric(
+            "api_response",
+            tags={
+                "status_code": status_code,
+                "endpoint": body.get("endpoint", "unknown")
+            },
+            value=1
+        )
+    except ImportError:
+        pass
+    return response
 
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
@@ -162,6 +178,20 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_health_check() -> Dict[str, Any]:
+    """Health check endpoint."""
+    try:
+        from core.monitoring import check_health
+        health = check_health()
+        return _make_response(200, {
+            "status": "ok",
+            "health": health,
+            "target": 10000,  # cents
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        })
+    except Exception as e:
+        return _error_response(500, f"Health check failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +261,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/health
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "health" and method == "GET":
+        return handle_health_check()
     
     return _error_response(404, "Not found")
 

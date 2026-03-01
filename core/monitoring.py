@@ -1180,3 +1180,78 @@ __all__ = [
     # Dashboard
     "get_dashboard_data",
 ]
+"""
+Monitoring and alerting for revenue operations.
+"""
+import logging
+from typing import Dict, Any
+from datetime import datetime
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('/var/log/revenue_agent.log'),
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
+
+# Track metrics in memory (would be replaced with real monitoring system in prod)
+_metrics = {}
+
+def log_metric(name: str, tags: Dict[str, str] = None, value: float = 1.0) -> None:
+    """Log a metric with optional tags."""
+    try:
+        key = f"{name}|{json.dumps(sorted(tags.items())) if tags else ''}"
+        _metrics[key] = _metrics.get(key, 0) + value
+        logger.info(f"METRIC {name}={value} {tags or ''}")
+    except Exception as e:
+        logger.error(f"Failed to log metric: {str(e)}")
+
+def check_health() -> Dict[str, Any]:
+    """Run health checks and return status."""
+    checks = {
+        "database_connected": False,
+        "revenue_tracking": False,
+        "last_transaction": None,
+        "metrics": len(_metrics)
+    }
+    
+    try:
+        from core.database import query_db
+        # Test database connection
+        res = query_db("SELECT 1")
+        checks["database_connected"] = bool(res)
+        
+        # Check recent transactions
+        tx_res = query_db("""
+            SELECT recorded_at 
+            FROM revenue_events 
+            ORDER BY recorded_at DESC 
+            LIMIT 1
+        """)
+        if tx_res and tx_res.get("rows"):
+            checks["last_transaction"] = tx_res["rows"][0].get("recorded_at")
+            checks["revenue_tracking"] = True
+            
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+    
+    return checks
+
+def get_metrics() -> Dict[str, float]:
+    """Get current metrics snapshot."""
+    return _metrics.copy()
+
+def alert_if_unhealthy() -> bool:
+    """Check health and trigger alerts if needed."""
+    health = check_health()
+    if not health["database_connected"]:
+        logger.critical("Database connection failed!")
+        return False
+    if not health["revenue_tracking"]:
+        logger.warning("No recent revenue transactions detected")
+        return False
+    return True
