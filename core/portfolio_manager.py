@@ -1,12 +1,27 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.service_delivery import ServiceDeliveryPipeline
+from core.payment_processor import PaymentProcessor
+from core.user_onboarding import UserOnboardingManager
+from core.monitoring import SystemMonitor
+
+# Initialize core systems
+service_pipeline = ServiceDeliveryPipeline()
+payment_processor = PaymentProcessor()
+onboarding_manager = UserOnboardingManager()
+system_monitor = SystemMonitor()
+
+# Thread pool for parallel operations
+executor = ThreadPoolExecutor(max_workers=16)
 
 
 def generate_revenue_ideas(
