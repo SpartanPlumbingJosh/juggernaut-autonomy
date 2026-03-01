@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Product Landing Page</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script>
+        async function purchaseProduct() {
+            const response = await fetch('/revenue/checkout', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    product_id: 'prod_123', // Replace with your product ID
+                    success_url: window.location.href + '?success=true',
+                    cancel_url: window.location.href + '?canceled=true'
+                })
+            });
+            
+            const data = await response.json();
+            if (data.statusCode === 200) {
+                window.location = data.body.url;
+            } else {
+                alert('Failed to start checkout');
+            }
+        }
+        
+        // Track conversions
+        if (new URLSearchParams(window.location.search).has('success')) {
+            // Send conversion event to analytics
+            fetch('/revenue/transactions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    event_type: 'conversion',
+                    metadata: {
+                        referrer: document.referrer,
+                        utm_source: new URLSearchParams(window.location.search).get('utm_source')
+                    }
+                })
+            });
+        }
+    </script>
+</head>
+<body>
+    <h1>Our Awesome Product</h1>
+    <p>Get started today for just $99!</p>
+    <button onclick="purchaseProduct()">Buy Now</button>
+    
+    <div id="success" style="display: none;">
+        <h2>Thank you for your purchase!</h2>
+    </div>
+    
+    <script>
+        if (new URLSearchParams(window.location.search).has('success')) {
+            document.getElementById('success').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
