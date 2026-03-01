@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from uuid import uuid4
+from services.payment_processor import PaymentProcessor, PaymentProvider
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +115,63 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def handle_create_payment(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new payment intent."""
+    try:
+        amount_cents = int(payload.get('amount_cents', 0))
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        currency = payload.get('currency', 'usd')
+        provider = PaymentProvider[payload.get('provider', 'STRIPE').upper()]
+        
+        payment_processor = PaymentProcessor()
+        result = await payment_processor.create_payment_intent(
+            amount_cents=amount_cents,
+            currency=currency,
+            provider=provider,
+            metadata={
+                'customer_email': payload.get('customer_email'),
+                'product_id': payload.get('product_id'),
+                'origin': 'api'
+            }
+        )
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_verify_payment(payment_id: str, provider: str) -> Dict[str, Any]:
+    """Verify a payment status."""
+    try:
+        payment_processor = PaymentProcessor()
+        result = await payment_processor.verify_payment(
+            payment_id=payment_id,
+            provider=PaymentProvider[provider.upper()]
+        )
+        
+        if result['success']:
+            # Record successful payment in revenue_events
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, experiment_id, event_type, amount_cents, 
+                    currency, source, metadata, recorded_at
+                ) VALUES (
+                    '{str(uuid4())}', 
+                    {f"'{result['metadata'].get('experiment_id')}'" if result['metadata'].get('experiment_id') else 'NULL'},
+                    'revenue',
+                    {result['amount']},
+                    '{result['currency']}',
+                    'payment:checkout',
+                    '{json.dumps(result['metadata'])}',
+                    NOW()
+                )
+            """)
+
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment verification failed: {str(e)}")
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
@@ -216,6 +275,19 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            return handle_create_payment(payload)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
+
+    # GET /revenue/payments/<payment_id>/verify?provider=<provider>
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "payments" and parts[3] == "verify" and method == "GET":
+        provider = query_params.get("provider", ["stripe"])[0]
+        return handle_verify_payment(parts[2], provider)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
