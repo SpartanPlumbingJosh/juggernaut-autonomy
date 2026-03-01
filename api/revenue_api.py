@@ -3,15 +3,24 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create Stripe payment link
+- POST /revenue/webhook - Stripe payment webhook handler
 """
+
+import stripe
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+import os
+
+# Initialize Stripe
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+STRIPE_WEBHOOK_SECRET = os.getenv('STRIPE_WEBHOOK_SECRET')
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +219,71 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_stripe_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        amount = int(float(body.get("amount", 0)) * 100)  # Convert to cents
+        description = body.get("description", "Payment")
+        metadata = body.get("metadata", {})
+        
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': 'usd',
+                    'product_data': {
+                        'name': description,
+                    },
+                    'unit_amount': amount,
+                },
+                'quantity': 1,
+            }],
+            mode='payment',
+            success_url=f"{os.getenv('BASE_URL')}/payment/success",
+            cancel_url=f"{os.getenv('BASE_URL')}/payment/cancel",
+            metadata=metadata
+        )
+        
+        return _make_response(200, {
+            "checkout_url": session.url,
+            "session_id": session.id
+        })
+    except Exception as e:
+        return _error_response(400, f"Checkout error: {str(e)}")
+
+async def handle_stripe_webhook(headers: Dict[str, Any], body: str) -> Dict[str, Any]:
+    """Handle Stripe payment webhooks."""
+    try:
+        sig_header = headers.get("stripe-signature")
+        event = stripe.Webhook.construct_event(
+            body, sig_header, STRIPE_WEBHOOK_SECRET
+        )
+
+        if event.type == "checkout.session.completed":
+            session = event.data.object
+            if session.payment_status == "paid":
+                await execute_db(
+                    f"""
+                    INSERT INTO revenue_events (
+                        id, event_type, amount_cents, 
+                        currency, source, metadata
+                    ) VALUES (
+                        gen_random_uuid(),
+                        'revenue',
+                        {session.amount_total},
+                        '{session.currency.upper()}',
+                        'stripe',
+                        '{json.dumps(session.metadata)}'::jsonb
+                    )
+                    """
+                )
+                return _make_response(200, {"status": "success"})
+
+        return _make_response(200, {"status": "ignored"})
+    except Exception as e:
+        return _error_response(400, f"Webhook error: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +304,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST" and body:
+        return handle_stripe_checkout(json.loads(body))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST" and body and headers:
+        return handle_stripe_webhook(headers, body)
     
     return _error_response(404, "Not found")
 
