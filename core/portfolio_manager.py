@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -14,6 +18,8 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    max_retries: int = 3,
+    retry_delay: float = 2.0,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
@@ -61,46 +67,53 @@ def generate_revenue_ideas(
         except Exception:
             pass
 
-        try:
-            execute_sql(
-                f"""
-                INSERT INTO revenue_ideas (
-                    id, title, description, hypothesis,
-                    score, score_breakdown, status,
-                    created_at, updated_at,
-                    estimates,
-                    research_sources, timeliness,
-                    evidence_type, evidence_details,
-                    reported_revenue, reported_timeline,
-                    capabilities_required,
-                    tags,
-                    constraints
-                ) VALUES (
-                    gen_random_uuid(),
-                    '{title_esc}',
-                    '{desc_esc}',
-                    '{hyp_esc}',
-                    NULL,
-                    NULL,
-                    'pending',
-                    NOW(),
-                    NOW(),
-                    '{estimates_json}'::jsonb,
-                    '{research_sources_json}'::jsonb,
-                    {f"'{timeliness_esc}'" if timeliness_esc else "NULL"},
-                    {f"'{evidence_type_esc}'" if evidence_type_esc else "NULL"},
-                    '{evidence_details_json}'::jsonb,
-                    {reported_revenue_sql},
-                    {f"'{reported_timeline_esc}'" if reported_timeline_esc else "NULL"},
-                    '{capabilities_required_json}'::jsonb,
-                    '{tags_json}'::jsonb,
-                    '{constraints_json}'::jsonb
-                )
+        retries = 0
+        while retries <= max_retries:
+            try:
+                execute_sql(
+                    f"""
+                    INSERT INTO revenue_ideas (
+                        id, title, description, hypothesis,
+                        score, score_breakdown, status,
+                        created_at, updated_at,
+                        estimates,
+                        research_sources, timeliness,
+                        evidence_type, evidence_details,
+                        reported_revenue, reported_timeline,
+                        capabilities_required,
+                        tags,
+                        constraints
+                    ) VALUES (
+                        gen_random_uuid(),
+                        '{title_esc}',
+                        '{desc_esc}',
+                        '{hyp_esc}',
+                        NULL,
+                        NULL,
+                        'pending',
+                        NOW(),
+                        NOW(),
+                        '{estimates_json}'::jsonb,
+                        '{research_sources_json}'::jsonb,
+                        {f"'{timeliness_esc}'" if timeliness_esc else "NULL"},
+                        {f"'{evidence_type_esc}'" if evidence_type_esc else "NULL"},
+                        '{evidence_details_json}'::jsonb,
+                        {reported_revenue_sql},
+                        {f"'{reported_timeline_esc}'" if reported_timeline_esc else "NULL"},
+                        '{capabilities_required_json}'::jsonb,
+                        '{tags_json}'::jsonb,
+                        '{constraints_json}'::jsonb
+                    )
                 """
-            )
-            created += 1
-        except Exception:
-            continue
+                )
+                created += 1
+                break
+            except Exception as e:
+                retries += 1
+                if retries > max_retries:
+                    logger.error(f"Failed to insert idea after {max_retries} retries: {str(e)}")
+                    continue
+                time.sleep(retry_delay)
 
     try:
         log_action(
