@@ -16,7 +16,7 @@ from core.database import query_db
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
-    return {
+    response = {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
@@ -26,6 +26,20 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         },
         "body": json.dumps(body)
     }
+    
+    # Log all API responses for audit purposes
+    try:
+        from core.database import query_db
+        query_db(
+            f"""
+            INSERT INTO api_logs (endpoint, status_code, response_body)
+            VALUES ('revenue_api', {status_code}, '{json.dumps(body).replace("'", "''")}')
+            """
+        )
+    except Exception as e:
+        print(f"Failed to log API response: {str(e)}")
+    
+    return response
 
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:

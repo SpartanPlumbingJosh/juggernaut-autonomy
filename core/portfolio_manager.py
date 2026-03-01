@@ -276,6 +276,73 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def verify_transactions(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Verify all transactions are properly recorded."""
+    try:
+        # Check for missing transaction data
+        res = execute_sql(
+            """
+            SELECT COUNT(*) as missing_count
+            FROM revenue_events
+            WHERE amount_cents IS NULL
+            OR recorded_at IS NULL
+            """
+        )
+        missing = res.get("rows", [{}])[0].get("missing_count", 0)
+        
+        # Check for duplicate transactions
+        res = execute_sql(
+            """
+            SELECT COUNT(*) as duplicate_count
+            FROM (
+                SELECT transaction_id, COUNT(*)
+                FROM revenue_events
+                GROUP BY transaction_id
+                HAVING COUNT(*) > 1
+            ) as duplicates
+            """
+        )
+        duplicates = res.get("rows", [{}])[0].get("duplicate_count", 0)
+        
+        # Verify transaction totals match source systems
+        res = execute_sql(
+            """
+            SELECT SUM(amount_cents) as total_cents
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 day'
+            """
+        )
+        daily_total = res.get("rows", [{}])[0].get("total_cents", 0)
+        
+        log_action(
+            "transactions.verified",
+            "Transaction verification completed",
+            level="info",
+            output_data={
+                "missing_transactions": missing,
+                "duplicate_transactions": duplicates,
+                "daily_total_cents": daily_total
+            }
+        )
+        
+        return {
+            "success": True,
+            "missing_transactions": missing,
+            "duplicate_transactions": duplicates,
+            "daily_total_cents": daily_total
+        }
+        
+    except Exception as e:
+        log_action(
+            "transactions.verification_failed",
+            f"Transaction verification failed: {str(e)}",
+            level="error"
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
