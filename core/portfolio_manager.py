@@ -276,6 +276,63 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_experiment_revenue(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    experiment_id: str,
+    amount_cents: int,
+    source: str,
+    metadata: Optional[Dict] = None
+) -> Dict[str, Any]:
+    """Record revenue for an experiment."""
+    try:
+        event_id = str(uuid.uuid4())
+        metadata_json = json.dumps(metadata or {})
+        attribution_json = json.dumps({"experiment_id": experiment_id})
+        
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            experiment_id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            attribution,
+            recorded_at,
+            created_at
+        ) VALUES (
+            '{event_id}',
+            '{experiment_id}',
+            'revenue',
+            {amount_cents},
+            'USD',
+            '{source}',
+            '{metadata_json}'::jsonb,
+            '{attribution_json}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        
+        execute_sql(sql)
+        
+        # Update experiment metrics
+        update_sql = f"""
+        UPDATE experiments
+        SET 
+            revenue_generated = COALESCE(revenue_generated, 0) + {amount_cents},
+            last_revenue_at = NOW(),
+            updated_at = NOW()
+        WHERE id = '{experiment_id}'
+        """
+        execute_sql(update_sql)
+        
+        return {"success": True, "event_id": event_id}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
