@@ -8,10 +8,76 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 from core.database import query_db
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+class RevenueAutomation:
+    """Automated revenue tracking and transaction processing."""
+    
+    def __init__(self, api_base_url: str):
+        self.api_base_url = api_base_url
+        self.session = None
+        
+    async def _make_api_request(self, endpoint: str, method: str = "GET", params: Optional[Dict] = None) -> Dict:
+        """Make API request with error handling."""
+        url = f"{self.api_base_url}/{endpoint}"
+        try:
+            parsed_url = urlparse(url)
+            logger.info(f"Making {method} request to {parsed_url.netloc}{parsed_url.path}")
+            
+            # Simulate API call (would use httpx or aiohttp in real implementation)
+            if endpoint == "revenue/summary":
+                return await handle_revenue_summary()
+            elif endpoint == "revenue/transactions":
+                return await handle_revenue_transactions(params or {})
+            elif endpoint == "revenue/charts":
+                return await handle_revenue_charts(params or {})
+            else:
+                return _error_response(404, "Endpoint not found")
+                
+        except Exception as e:
+            logger.error(f"API request failed: {str(e)}")
+            return _error_response(500, f"API request failed: {str(e)}")
+    
+    async def log_transaction(self, transaction_data: Dict) -> Dict:
+        """Log a revenue transaction with validation."""
+        required_fields = ["event_type", "amount_cents", "source"]
+        if not all(field in transaction_data for field in required_fields):
+            logger.error(f"Missing required fields: {required_fields}")
+            return _error_response(400, f"Missing required fields: {required_fields}")
+            
+        try:
+            # Simulate database insert
+            logger.info(f"Logging transaction: {transaction_data}")
+            return _make_response(200, {"status": "success", "transaction": transaction_data})
+        except Exception as e:
+            logger.error(f"Failed to log transaction: {str(e)}")
+            return _error_response(500, f"Failed to log transaction: {str(e)}")
+    
+    async def get_daily_summary(self) -> Dict:
+        """Get daily revenue summary."""
+        return await self._make_api_request("revenue/summary")
+    
+    async def get_transaction_history(self, limit: int = 50, offset: int = 0) -> Dict:
+        """Get transaction history with pagination."""
+        params = {"limit": limit, "offset": offset}
+        return await self._make_api_request("revenue/transactions", params=params)
+    
+    async def get_revenue_trends(self, days: int = 30) -> Dict:
+        """Get revenue trends over time."""
+        params = {"days": days}
+        return await self._make_api_request("revenue/charts", params=params)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
