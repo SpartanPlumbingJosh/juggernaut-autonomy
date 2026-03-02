@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- GET /revenue/subscriptions - List subscriptions
+- POST /revenue/subscriptions/{id}/cancel - Cancel subscription
 """
 
 import json
@@ -162,6 +165,47 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    from services.billing_service import BillingService
+    
+    try:
+        required_fields = ["customer_id", "plan_id", "payment_method_id"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+        
+        billing = BillingService()
+        result = await billing.create_subscription(
+            body["customer_id"],
+            body["plan_id"],
+            body["payment_method_id"]
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Failed to create subscription"))
+            
+        return _make_response(201, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_subscription_cancel(subscription_id: str) -> Dict[str, Any]:
+    """Cancel a subscription."""
+    from services.billing_service import BillingService
+    
+    try:
+        billing = BillingService()
+        result = await billing.cancel_subscription(subscription_id)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Failed to cancel subscription"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to cancel subscription: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +275,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_create(json.loads(body or "{}"))
+        
+    # POST /revenue/subscriptions/{id}/cancel
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2].endswith("cancel") and method == "POST":
+        subscription_id = parts[1]
+        return handle_subscription_cancel(subscription_id)
     
     return _error_response(404, "Not found")
 
