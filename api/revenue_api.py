@@ -162,6 +162,34 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from services.billing_service import BillingService
+from services.provisioning_service import ProvisioningService
+
+async def handle_billing_webhook(body: bytes, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    sig_header = headers.get('stripe-signature', '')
+    success, event_data = BillingService.handle_webhook(body, sig_header)
+    
+    if not success:
+        return _error_response(400, "Invalid webhook payload")
+    
+    if event_data:
+        # Process the event
+        if event_data['event_type'] == 'payment_success':
+            # Provision or update account
+            ProvisioningService.provision_account(
+                event_data['customer_id'],
+                event_data['metadata'].get('plan_id', 'default')
+            )
+        elif event_data['event_type'] == 'payment_failed':
+            # Handle payment failure (retry logic, notifications, etc.)
+            pass
+        elif event_data['event_type'] == 'subscription_canceled':
+            # Schedule deprovisioning
+            ProvisioningService.deprovision_account(event_data['customer_id'])
+    
+    return _make_response(200, {"status": "processed"})
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,7 +238,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +259,12 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing webhook payload")
+        return handle_billing_webhook(body.encode(), headers)
     
     return _error_response(404, "Not found")
 
