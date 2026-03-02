@@ -10,6 +10,7 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from core.payment_processor import PaymentProcessor
 
 from core.database import query_db
 
@@ -211,7 +212,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue API requests including payment processing."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,6 +232,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        processor = PaymentProcessor()
+        return processor.handle_webhook(
+            body.encode(),
+            query_params.get("signature", ""),
+            PaymentProvider.STRIPE
+        )
+    
+    # POST /revenue/webhook/paddle
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "paddle" and method == "POST":
+        processor = PaymentProcessor()
+        return processor.handle_webhook(
+            body.encode(),
+            query_params.get("signature", ""),
+            PaymentProvider.PADDLE
+        )
     
     return _error_response(404, "Not found")
 
