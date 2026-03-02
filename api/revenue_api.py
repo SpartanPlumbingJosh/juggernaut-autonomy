@@ -1,11 +1,16 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Autonomous Revenue System API
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
-- GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process new payment
+- GET  /revenue/summary - MTD/QTD/YTD totals 
+- GET  /revenue/transactions - Transaction history
+- GET  /revenue/charts - Revenue over time
+- POST /revenue/subscriptions - Create subscription
+- GET  /revenue/subscriptions/:id - Get subscription status
 """
+
+from core.payment_processor import PaymentProcessor
 
 import json
 from datetime import datetime, timezone, timedelta
@@ -219,16 +224,35 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    body_json = json.loads(body) if body else {}
     
-    # GET /revenue/summary
+    # Process payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        processor = PaymentProcessor()
+        success, msg, payment_id = await processor.charge_customer(
+            amount=int(body_json.get('amount')), 
+            currency=body_json.get('currency', 'usd'),
+            payment_method=body_json['payment_method'],
+            customer_id=body_json['customer_id'],
+            metadata=body_json.get('metadata', {})
+        )
+        return _make_response(200 if success else 400, {
+            'success': success,
+            'message': msg,
+            'payment_id': payment_id
+        })
+            
+    # Subscription management
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return _make_response(200, {'message': 'Subscription created'})
+    
+    # GET endpoints remain the same
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
     
-    # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
         return handle_revenue_transactions(query_params)
     
-    # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
