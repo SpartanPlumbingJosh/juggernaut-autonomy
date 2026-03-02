@@ -81,6 +81,21 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        # Add monitoring metrics
+        prometheus_push_gateway = os.getenv('PROMETHEUS_PUSH_GATEWAY')
+        if prometheus_push_gateway:
+            try:
+                from prometheus_client import CollectorRegistry, Gauge, push_to_gateway
+                registry = CollectorRegistry()
+                g = Gauge('revenue_summary', 'Revenue summary metrics', 
+                         ['period'], registry=registry)
+                g.labels('mtd').set(mtd.get("total_revenue_cents") or 0)
+                g.labels('qtd').set(qtd.get("total_revenue_cents") or 0)
+                g.labels('ytd').set(ytd.get("total_revenue_cents") or 0)
+                push_to_gateway(prometheus_push_gateway, job='revenue_api', registry=registry)
+            except ImportError:
+                pass
+
         return _make_response(200, {
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
