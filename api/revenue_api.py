@@ -11,7 +11,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+import json
 from core.database import query_db
+from payment.stripe_processor import StripeProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +164,38 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        metadata = body.get("metadata", {})
+        
+        processor = StripeProcessor(api_key="sk_test_...")  # Should come from config
+        result = await processor.create_payment_intent(amount_cents, metadata)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment failed"))
+            
+        return _make_response(200, {
+            "client_secret": result["client_secret"]
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment: {str(e)}")
+
+async def handle_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook."""
+    try:
+        sig_header = headers.get("stripe-signature", "")
+        processor = StripeProcessor(api_key="sk_test_...")  # Should come from config
+        result = await processor.handle_webhook(body, sig_header, "whsec_...")  # Webhook secret from config
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook failed"))
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +265,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(body or "", headers=query_params)
     
     return _error_response(404, "Not found")
 
