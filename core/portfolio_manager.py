@@ -276,11 +276,19 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    
+    This function:
+    - Monitors experiment budgets
+    - Automatically completes experiments when budgets are exhausted
+    - Triggers learning loops for completed experiments
+    - Tracks ROI and performance metrics
+    - Logs all critical events for monitoring
+    """
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
