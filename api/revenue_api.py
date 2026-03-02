@@ -12,6 +12,14 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment.payment_gateway import PaymentGateway
+from delivery.delivery_manager import DeliveryManager
+from onboarding.customer_onboarding import CustomerOnboarding
+
+# Initialize services
+payment_gateway = PaymentGateway(stripe_secret_key="your_stripe_secret_key")
+delivery_manager = DeliveryManager()
+onboarding_manager = CustomerOnboarding()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +224,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Handle payment webhook
+    if path == "/payment/webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing payload")
+        return payment_gateway.handle_webhook(
+            payload=body,
+            sig_header=query_params.get("stripe-signature", ""),
+            webhook_secret="your_webhook_secret"
+        )
     
     # Parse path
     parts = [p for p in path.split("/") if p]
