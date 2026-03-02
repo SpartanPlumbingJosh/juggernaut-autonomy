@@ -10,8 +10,10 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import uuid
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from api.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,6 +117,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get transaction history with pagination and create new transactions."""
+    if query_params.get("action") == "create":
+        return await create_revenue_transaction(query_params)
+        
+    return await get_revenue_transactions(query_params)
+async def get_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -156,6 +164,52 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
             "total": total,
             "limit": limit,
             "offset": offset
+        })
+
+async def create_revenue_transaction(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new revenue transaction."""
+    try:
+        amount = float(params.get("amount", 0))
+        currency = params.get("currency", "usd")
+        payment_method = params.get("payment_method", "stripe")
+        description = params.get("description", "")
+        metadata = json.loads(params.get("metadata", "{}"))
+        
+        # Create payment
+        payment_result = await PaymentProcessor.create_payment(
+            amount=amount,
+            currency=currency,
+            payment_method=payment_method,
+            metadata={
+                "description": description,
+                **metadata
+            }
+        )
+        
+        if not payment_result.get("success"):
+            return _error_response(400, f"Payment failed: {payment_result.get('error')}")
+        
+        # Log transaction
+        transaction_id = str(uuid.uuid4())
+        await execute_db(f"""
+            INSERT INTO revenue_transactions (
+                id, amount_cents, currency, payment_method,
+                payment_id, status, metadata, created_at
+            ) VALUES (
+                '{transaction_id}',
+                {int(amount * 100)},
+                '{currency}',
+                '{payment_method}',
+                '{payment_result["payment_id"]}',
+                'pending',
+                '{json.dumps(metadata)}',
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {
+            "transaction_id": transaction_id,
+            "payment": payment_result
         })
         
     except Exception as e:
