@@ -1,17 +1,62 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API Service - Expose revenue tracking data and service endpoints.
 
-Endpoints:
+Features:
+- API endpoints for revenue analytics
+- Self-service provisioning
+- Tiered access controls
+- Usage monitoring
+- Health checks
+
+Standard Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+
+Service Endpoints:  
+- POST /revenue/service - Provision new service instance
+- GET /revenue/service/{id} - Get service status
+- GET /revenue/service/limits - Check usage limits
 """
 
 import json
+import hashlib
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
 
 from core.database import query_db
+from core.limiter import check_rate_limit, record_api_call
+
+
+class ServiceTier(Enum):
+    FREE = "free"
+    BASIC = "basic"
+    PRO = "pro"
+    ENTERPRISE = "enterprise"
+
+
+@dataclass
+class ServiceInstance:
+    id: str
+    owner_id: str
+    tier: ServiceTier  
+    created_at: datetime
+    last_active: datetime
+    monthly_calls: int
+    api_key: str
+    rate_limit: int  # Calls per minute
+    is_active: bool
+
+
+def _validate_service_request(data: Dict[str, Any]) -> Tuple[bool, str]:
+    """Validate service provisioning request."""
+    if not data.get("owner_id"):
+        return False, "Missing owner_id"
+    if not data.get("tier") or data["tier"] not in [t.value for t in ServiceTier]:
+        return False, "Invalid tier"
+    return True, ""
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,8 +78,12 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(service_id: Optional[str] = None) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
+    if service_id:
+        limit_reached, _ = await check_rate_limit("revenue_summary", service_id)
+        if limit_reached:
+            return _error_response(429, "Rate limit exceeded")
     try:
         now = datetime.now(timezone.utc)
         
@@ -236,3 +285,134 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
 
 
 __all__ = ["route_request"]
+"""
+Revenue Service Provisioning - Handle automated onboarding and management 
+of revenue service instances.
+"""
+import uuid
+import json
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional
+
+from core.database import query_db
+from .revenue_api import ServiceTier, ServiceInstance, _validate_service_request
+
+
+def provision_service(execute_sql: callable, data: Dict[str, Any]) -> Dict[str, Any]:
+    """Provision new revenue service instance."""
+    # Validate request
+    is_valid, msg = _validate_service_request(data)
+    if not is_valid:
+        return {
+            "success": False,
+            "error": msg,
+            "status_code": 400
+        }
+
+    # Generate API key
+    api_key = str(uuid.uuid4())
+    hashed_key = hashlib.sha256(api_key.encode()).hexdigest()
+    
+    # Set defaults based on tier
+    tier = ServiceTier(data["tier"])
+    rate_limit = {
+        ServiceTier.FREE: 120,
+        ServiceTier.BASIC: 1000,
+        ServiceTier.PRO: 5000,
+        ServiceTier.ENTERPRISE: 25000
+    }[tier]
+
+    try:
+        execute_sql(
+            f"""
+            INSERT INTO revenue_services (
+                id, owner_id, tier, created_at, 
+                last_active, api_key_hash, rate_limit,  
+                monthly_calls, is_active
+            ) VALUES (
+                gen_random_uuid(),
+                '{data['owner_id']}',
+                '{tier.value}',
+                NOW(),
+                NOW(),
+                '{hashed_key}',
+                {rate_limit},
+                0,
+                TRUE
+            )
+            RETURNING id
+            """
+        )
+        return {
+            "success": True,
+            "api_key": api_key,
+            "tier": tier.value,
+            "rate_limit": rate_limit
+        }
+    except Exception as e:
+        return {
+            "success": False, 
+            "error": str(e),
+            "status_code": 500
+        }
+
+
+def get_service_status(execute_sql: callable, service_id: str) -> Optional[ServiceInstance]:
+    """Get current status of a service instance."""
+    try:
+        res = execute_sql(
+            f"""
+            SELECT 
+                id, owner_id, tier, created_at, last_active,
+                api_key_hash, rate_limit, monthly_calls, is_active
+            FROM revenue_services
+            WHERE id = '{service_id}'
+            """
+        )
+        row = res.get("rows", [{}])[0]
+        
+        last_active = row["last_active"].isoformat() if row["last_active"] else None
+        
+        return ServiceInstance(
+            id=row["id"],
+            owner_id=row["owner_id"],
+            tier=ServiceTier(row["tier"]),
+            created_at=row["created_at"],
+            last_active=row["last_active"],
+            monthly_calls=row["monthly_calls"],
+            api_key=row["api_key_hash"],
+            rate_limit=row["rate_limit"],
+            is_active=row["is_active"]
+        )
+    except Exception:
+        return None
+
+
+def check_service_limits(execute_sql: callable, service_id: str) -> Dict[str, Any]:
+    """Check usage against tier limits."""
+    service = get_service_status(execute_sql, service_id)
+    if not service:
+        return {"error": "Service not found"}
+
+    return {
+        "tier": service.tier.value,
+        "rate_limit": service.rate_limit,
+        "monthly_calls": service.monthly_calls,
+        "current_month": datetime.now(timezone.utc).strftime("%Y-%m")
+    }
+
+
+def record_usage(execute_sql: callable, service_id: str) -> None:
+    """Record API usage."""
+    try:
+        execute_sql(
+            f"""
+            UPDATE revenue_services
+            SET 
+                monthly_calls = monthly_calls + 1,
+                last_active = NOW()
+            WHERE id = '{service_id}'
+            """
+        )
+    except Exception:
+        pass
