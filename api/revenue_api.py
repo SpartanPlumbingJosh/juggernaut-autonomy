@@ -1,17 +1,26 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Integrated with payment processing and authentication.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/create-payment - Creates payment intent
+- POST /revenue/subscribe - Creates subscription
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+
 from core.database import query_db
+from auth.service import AuthService
+from payment.service import PaymentService
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,7 +220,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue API requests with auth and payments."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
