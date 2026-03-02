@@ -162,6 +162,62 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_monitoring() -> Dict[str, Any]:
+    """Get system health and payment processing status."""
+    try:
+        # Check recent payment success rate
+        payment_sql = """
+        SELECT 
+            COUNT(*) FILTER (WHERE status = 'success') as success_count,
+            COUNT(*) FILTER (WHERE status = 'failed') as failed_count,
+            COUNT(*) as total_count
+        FROM payments
+        WHERE created_at >= NOW() - INTERVAL '24 hours'
+        """
+        payment_result = await query_db(payment_sql)
+        payment_stats = payment_result.get("rows", [{}])[0]
+        
+        # Check error rates
+        error_sql = """
+        SELECT 
+            COUNT(*) FILTER (WHERE level = 'error') as error_count,
+            COUNT(*) FILTER (WHERE level = 'critical') as critical_count
+        FROM system_logs
+        WHERE created_at >= NOW() - INTERVAL '24 hours'
+        """
+        error_result = await query_db(error_sql)
+        error_stats = error_result.get("rows", [{}])[0]
+        
+        # Check revenue capture
+        revenue_sql = """
+        SELECT 
+            SUM(amount_cents) FILTER (WHERE event_type = 'revenue') as revenue_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '24 hours'
+        """
+        revenue_result = await query_db(revenue_sql)
+        revenue_stats = revenue_result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "payments": {
+                "success_rate": payment_stats.get("success_count", 0) / payment_stats.get("total_count", 1) if payment_stats.get("total_count", 0) > 0 else 0,
+                "failed_count": payment_stats.get("failed_count", 0),
+                "total_count": payment_stats.get("total_count", 0)
+            },
+            "errors": {
+                "error_count": error_stats.get("error_count", 0),
+                "critical_count": error_stats.get("critical_count", 0)
+            },
+            "revenue": {
+                "amount_cents": revenue_stats.get("revenue_cents", 0),
+                "transaction_count": revenue_stats.get("transaction_count", 0)
+            }
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch monitoring data: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +287,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/monitoring
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitoring" and method == "GET":
+        return handle_revenue_monitoring()
     
     return _error_response(404, "Not found")
 

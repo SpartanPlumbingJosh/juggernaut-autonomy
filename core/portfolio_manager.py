@@ -14,10 +14,22 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    marketing_channels: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
-    ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Generate marketing-specific ideas if channels are provided
+    if marketing_channels:
+        marketing_context = {
+            "channels": marketing_channels,
+            "goal": "customer_acquisition",
+            "budget": context.get("marketing_budget", 1000)
+        }
+        marketing_ideas = gen.generate_ideas(marketing_context)
+        ideas = marketing_ideas[: int(limit)]
+    else:
+        ideas = gen.generate_ideas(context)[: int(limit)]
 
     created = 0
     failures: List[Dict[str, Any]] = []
@@ -187,6 +199,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    onboarding_flow: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -228,6 +241,10 @@ def start_experiments_from_top_ideas(
         except Exception:
             pass
 
+        # Add onboarding flow tracking if provided
+        if onboarding_flow:
+            idea["onboarding_flow"] = onboarding_flow
+            
         create_res = create_experiment_from_idea(
             execute_sql=execute_sql,
             log_action=log_action,
