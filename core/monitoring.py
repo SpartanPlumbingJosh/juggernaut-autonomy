@@ -6,12 +6,15 @@ anomaly detection, alerting, and dashboard data generation.
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import uuid4
 import statistics
 
-from .database import execute_query, log_execution, _db
+from .database import execute_query, log_execution, _db, query_db
+
+logger = logging.getLogger(__name__)
 
 
 def _escape_sql_value(val: Any) -> str:
@@ -765,6 +768,39 @@ def _get_recent_alerts(limit: int = 10) -> List[Dict]:
     )
     return result.get("rows", [])
 
+
+async def log_event(event_type: str, data: Dict[str, Any]) -> None:
+    """Log system event"""
+    try:
+        await query_db(
+            f"""
+            INSERT INTO system_logs (event_type, data, created_at)
+            VALUES ('{event_type}', '{json.dumps(data)}', NOW())
+            """
+        )
+        logger.info(f"Logged {event_type} event")
+    except Exception as e:
+        logger.error(f"Failed to log event: {str(e)}")
+
+async def monitor_system() -> Dict[str, Any]:
+    """Check system health"""
+    try:
+        # Check database connection
+        await query_db("SELECT 1")
+        
+        # Check recent errors
+        res = await query_db(
+            "SELECT COUNT(*) as error_count FROM system_logs WHERE event_type = 'error' AND created_at > NOW() - INTERVAL '1 hour'"
+        )
+        
+        return {
+            "success": True,
+            "status": "healthy",
+            "recent_errors": res["rows"][0]["error_count"]
+        }
+    except Exception as e:
+        logger.error(f"System monitoring failed: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 # =============================================================================
 # EXPORTS
