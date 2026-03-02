@@ -12,6 +12,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
+import os
+
+payment_processor = PaymentProcessor(api_key=os.getenv('STRIPE_SECRET_KEY'))
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +166,33 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent for a purchase."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        metadata = body.get("metadata", {})
+        metadata["source"] = "direct_payment"
+        
+        result = await payment_processor.create_payment_intent(
+            amount_cents=amount_cents,
+            metadata=metadata
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment processing failed"))
+            
+        return _make_response(200, {
+            "client_secret": result["client_secret"],
+            "payment_intent_id": result["payment_intent_id"],
+            "amount_cents": amount_cents
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment intent: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,12 +241,33 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook(headers: Dict[str, Any], body: str) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        sig_header = headers.get("stripe-signature", "")
+        result = await payment_processor.handle_webhook(
+            payload=body,
+            sig_header=sig_header,
+            webhook_secret=os.getenv('STRIPE_WEBHOOK_SECRET')
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Handle webhooks
+    if path == "/revenue/webhook" and method == "POST":
+        return handle_payment_webhook(headers=query_params, body=body or "")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -231,6 +283,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_create_payment_intent(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
