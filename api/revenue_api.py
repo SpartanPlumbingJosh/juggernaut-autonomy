@@ -33,6 +33,51 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def handle_payment_webhook(event_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook from Stripe/Paddle."""
+    try:
+        payment_id = event_data.get('id')
+        amount = int(float(event_data.get('amount', 0)) * 100)  # Convert to cents
+        currency = event_data.get('currency', 'usd')
+        customer_email = event_data.get('customer_email', '')
+        product_id = event_data.get('product_id', '')
+        metadata = event_data.get('metadata', {})
+
+        # Record transaction
+        await query_db(f"""
+            INSERT INTO revenue_transactions (
+                id, amount_cents, currency, status,
+                payment_provider, customer_email, product_id,
+                metadata, recorded_at
+            ) VALUES (
+                '{payment_id}', {amount}, '{currency}', 'completed',
+                'stripe', '{customer_email.replace("'", "''")}', 
+                '{product_id.replace("'", "''")}',
+                '{json.dumps(metadata).replace("'", "''")}'::jsonb,
+                NOW()
+            )
+        """)
+
+        # Create revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at
+            ) VALUES (
+                gen_random_uuid(), 'revenue', {amount}, '{currency}',
+                'product_sale', '{json.dumps({
+                    'payment_id': payment_id,
+                    'product_id': product_id,
+                    **metadata
+                }).replace("'", "''")}'::jsonb,
+                NOW()
+            )
+        """)
+
+        return _make_response(200, {'status': 'processed'})
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +276,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Payment webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return handle_payment_webhook(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
