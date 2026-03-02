@@ -276,7 +276,7 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+async def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
