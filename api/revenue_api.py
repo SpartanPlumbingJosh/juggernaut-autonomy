@@ -3,8 +3,10 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/target-progress - Progress toward $14M Year 6 target
+- GET /revenue/mrr - Monthly recurring revenue metrics
 """
 
 import json
@@ -162,6 +164,122 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def get_target_progress() -> Dict[str, Any]:
+    """Get progress toward $14M Year 6 target."""
+    try:
+        # Year 6 target is $14M (14,000,000 dollars = 1,400,000,000 cents)
+        TARGET_CENTS = 1_400_000_000
+        
+        # Get actual revenue to date
+        result = await query_db("""
+            SELECT EXTRACT(YEAR FROM recorded_at) as year,
+                   SUM(amount_cents) as revenue_cents
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+            GROUP BY year
+            ORDER BY year
+        """)
+        
+        # Transform to percentages
+        years = result.get("rows", [])
+        progress = []
+        cumulative_percent = 0
+        cumulative_cents = 0
+        
+        for year_data in years:
+            year = int(year_data['year'])
+            cents = int(year_data['revenue_cents'] or 0)
+            cumulative_cents += cents
+            
+            # Each year target is 1/6th of total target
+            year_target_percent = (year)/6 * 100
+            actual_percent = (cumulative_cents/TARGET_CENTS)*100
+            
+            progress.append({
+                "year": year,
+                "target_percent": min(year_target_percent, 100),
+                "actual_percent": min(actual_percent, 100),
+                "gap_percent": max(0, year_target_percent - actual_percent),
+                "revenue_cents": cents,
+                "cumulative_cents": cumulative_cents,
+                "annual_target_cents": TARGET_CENTS/6
+            })
+        
+        alert = None
+        if progress and progress[-1]['gap_percent'] > 5:  # >5% behind target
+            alert = {
+                "level": "warning",
+                "message": f"Currently {progress[-1]['gap_percent']:.1f}% behind target",
+                "recommendation": "Consider accelerating high-ROI experiments"
+            }
+            
+        return _make_response(200, {
+            "target_cents": TARGET_CENTS,
+            "years": progress,
+            "alert": alert
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate target progress: {str(e)}")
+
+
+async def get_mrr_metrics() -> Dict[str, Any]:
+    """Get monthly recurring revenue metrics."""
+    try:
+        # Get MRR by month
+        result = await query_db("""
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) as mrr_cents,
+                COUNT(DISTINCT attribution->>'customer_id') as customers
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+              AND attribution->>'subscription' = 'true'
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT 24
+        """)
+        
+        monthly_data = result.get("rows", [])
+        
+        # Calculate growth rates if we have at least 2 months
+        growth_rates = {}
+        if len(monthly_data) >= 2:
+            current = monthly_data[0]
+            prev = monthly_data[1]
+            mrr_growth = (current['mrr_cents'] - prev['mrr_cents'])/prev['mrr_cents']*100
+            customer_growth = (current['customers'] - prev['customers'])/prev['customers']*100
+            
+            growth_rates = {
+                "mrr_pct": mrr_growth,
+                "customers_pct": customer_growth
+            }
+            
+            # Check for negative growth
+            alerts = []
+            if mrr_growth < 0:
+                alerts.append({
+                    "level": "critical",
+                    "message": f"MRR declined by {abs(mrr_growth):.1f}%",
+                    "metric": "mrr"
+                })
+            elif mrr_growth < 5:  # Less than 5% growth
+                alerts.append({
+                    "level": "warning", 
+                    "message": f"MRR growth slowing (+{mrr_growth:.1f}%)",
+                    "metric": "mrr"
+                })
+                
+        return _make_response(200, {
+            "monthly": monthly_data,
+            "growth": growth_rates,
+            "alerts": alerts if 'alerts' in locals() else []
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to calculate MRR metrics: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +349,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # GET /revenue/target-progress
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "target-progress" and method == "GET":
+        return get_target_progress()
+
+    # GET /revenue/mrr
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "mrr" and method == "GET":
+        return get_mrr_metrics()
     
     return _error_response(404, "Not found")
 

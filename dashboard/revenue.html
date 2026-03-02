@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Revenue Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        .dashboard { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; }
+        .card { border: 1px solid #ddd; border-radius: 5px; padding: 15px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .alert { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .alert-warning { background-color: #fff3cd; border-left: 5px solid #ffc107; }
+        .alert-critical { background-color: #f8d7da; border-left: 5px solid #dc3545; }
+    </style>
+</head>
+<body>
+    <h1>Revenue Dashboard</h1>
+    
+    <div class="dashboard">
+        <div class="card">
+            <h2>Annual Target Progress</h2>
+            <div id="target-alerts"></div>
+            <canvas id="targetChart" height="300"></canvas>
+        </div>
+        
+        <div class="card">
+            <h2>MRR Growth</h2>
+            <div id="mrr-alerts"></div>
+            <canvas id="mrrChart" height="300"></canvas>
+        </div>
+    </div>
+
+    <script>
+        async function fetchRevenueData() {
+            try {
+                const [targetRes, mrrRes] = await Promise.all([
+                    fetch('/revenue/target-progress'),
+                    fetch('/revenue/mrr')
+                ]);
+                
+                return {
+                    target: await targetRes.json(),
+                    mrr: await mrrRes.json()
+                };
+            } catch (error) {
+                console.error('Failed to fetch data:', error);
+                return null;
+            }
+        }
+
+        function renderAlerts(data) {
+            const targetAlertContainer = document.getElementById('target-alerts');
+            const mrrAlertContainer = document.getElementById('mrr-alerts');
+            
+            targetAlertContainer.innerHTML = '';
+            mrrAlertContainer.innerHTML = '';
+            
+            if (data.target.alert) {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert alert-${data.target.alert.level}`;
+                alertDiv.textContent = data.target.alert.message;
+                targetAlertContainer.appendChild(alertDiv);
+            }
+            
+            data.mrr.alerts.forEach(alert => {
+                const alertDiv = document.createElement('div');
+                alertDiv.className = `alert alert-${alert.level}`;
+                alertDiv.textContent = alert.message;
+                mrrAlertContainer.appendChild(alertDiv);
+            });
+        }
+
+        function renderCharts(data) {
+            // Target progress burn-up chart
+            new Chart(
+                document.getElementById('targetChart'),
+                {
+                    type: 'line',
+                    data: {
+                        labels: data.target.years.map(y => `Year ${y.year}`),
+                        datasets: [
+                            {
+                                label: 'Revenue Target',
+                                data: data.target.years.map(y => y.target_percent),
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                backgroundColor: 'rgba(54, 162, 235, 0.1)',
+                                fill: false,
+                                tension: 0.1
+                            },
+                            {
+                                label: 'Actual Revenue',
+                                data: data.target.years.map(y => y.actual_percent),
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                backgroundColor: 'rgba(75, 192, 192, 0.1)',
+                                fill: false,
+                                tension: 0.1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                min: 0,
+                                max: 100,
+                                title: { display: true, text: '% of $14M Target' }
+                            }
+                        }
+                    }
+                }
+            );
+
+            // MRR chart
+            new Chart(
+                document.getElementById('mrrChart'),
+                {
+                    type: 'bar',
+                    data: {
+                        labels: data.mrr.monthly.map(m => new Date(m.month).toLocaleDateString('en-US', {month: 'short', year:'numeric'})).reverse(),
+                        datasets: [{
+                            label: 'MRR',
+                            data: data.mrr.monthly.map(m => m.mrr_cents / 100).reverse(), // Convert cents to dollars
+                            backgroundColor: 'rgba(153, 102, 255, 0.6)',
+                            borderColor: 'rgba(153, 102, 255, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'USD' }
+                            }
+                        }
+                    }
+                }
+            );
+        }
+
+        // Initialize dashboard
+        fetchRevenueData().then(data => {
+            if (data) {
+                renderAlerts(data);
+                renderCharts(data);
+            }
+        });
+    </script>
+</body>
+</html>
