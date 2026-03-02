@@ -15,6 +15,10 @@ def generate_revenue_ideas(
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with automated monitoring and error handling."""
+    try:
+        # Track start time for performance monitoring
+        start_time = time.time()
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
@@ -112,7 +116,28 @@ def generate_revenue_ideas(
     except Exception:
         pass
 
-    return {"success": True, "created": created, "attempted": len(ideas)}
+        # Log performance metrics
+        duration = time.time() - start_time
+        log_action(
+            "revenue.idea_generation.completed",
+            f"Idea generation completed in {duration:.2f}s",
+            level="info",
+            output_data={
+                "duration": duration,
+                "created": created,
+                "attempted": len(ideas)
+            }
+        )
+        
+        return {"success": True, "created": created, "attempted": len(ideas)}
+    except Exception as e:
+        log_action(
+            "revenue.idea_generation.failed",
+            f"Idea generation failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
 
 
 def score_pending_ideas(
