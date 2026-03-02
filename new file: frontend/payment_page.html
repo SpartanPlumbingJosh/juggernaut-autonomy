@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Buy Our Product</title>
+    <script src="https://js.stripe.com/v3/"></script>
+    <script src="https://cdn.jsdelivr.net/npm/segment-analytics@latest/analytics.min.js"></script>
+    <link rel="stylesheet" href="/static/css/styles.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Premium Product</h1>
+        <div class="product-card">
+            <h2>$49.99</h2>
+            <p>Get instant access to:</p>
+            <ul>
+                <li>Feature 1</li>
+                <li>Feature 2</li>
+                <li>Feature 3</li>
+            </ul>
+            <button id="checkout-button" class="primary-button">Buy Now</button>
+        </div>
+    </div>
+
+    <script>
+        // Initialize analytics
+        analytics.init('<your-segment-key>');
+        document.getElementById('checkout-button').addEventListener('click', function() {
+            analytics.track('Checkout Started');
+            
+            fetch('/create-checkout-session', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            })
+            .then(response => response.json())
+            .then(session => {
+                analytics.track('Checkout Session Created');
+                const stripe = Stripe('<your-stripe-key>');
+                return stripe.redirectToCheckout({ sessionId: session.id });
+            })
+            .then(result => {
+                if (result.error) {
+                    analytics.track('Checkout Error', { error: result.error.message });
+                    alert(result.error.message);
+                }
+            });
+        });
+    </script>
+</body>
+</html>
