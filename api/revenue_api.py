@@ -1,7 +1,9 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payments and revenue tracking.
 
-Endpoints:
+Key Endpoints:
+- POST /payment/create - Initiate payment
+- POST /payment/confirm - Confirm payment
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
