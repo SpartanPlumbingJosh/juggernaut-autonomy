@@ -162,6 +162,37 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription"""
+    try:
+        user_id = query_params.get("user_id")
+        plan_id = query_params.get("plan_id")
+        payment_method = query_params.get("payment_method", "stripe")
+        
+        if not user_id or not plan_id:
+            return _error_response(400, "Missing required parameters")
+            
+        subscription_manager = SubscriptionManager()
+        result = await subscription_manager.create_subscription(user_id, plan_id, payment_method)
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_cancel_subscription(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Cancel an existing subscription"""
+    try:
+        subscription_id = query_params.get("subscription_id")
+        if not subscription_id:
+            return _error_response(400, "Missing subscription_id")
+            
+        subscription_manager = SubscriptionManager()
+        result = await subscription_manager.cancel_subscription(subscription_id)
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to cancel subscription: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +262,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "create" and method == "POST":
+        return handle_create_subscription(query_params)
+    
+    # POST /revenue/subscriptions/cancel
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "cancel" and method == "POST":
+        return handle_cancel_subscription(query_params)
     
     return _error_response(404, "Not found")
 
