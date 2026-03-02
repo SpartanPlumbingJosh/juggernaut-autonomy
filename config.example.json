@@ -1,0 +1,21 @@
+{
+    "api_key": "your_api_key_here",
+    "payment_address": "0xYourCryptoAddressOrPartnerPayID",
+    "base_url": "https://api.example.com/v1",
+    "max_retries": 5,
+    "rate_limit_rpm": 60,
+    "default_strategies": {
+        "content_generation": {
+            "content_type": "blog_post",
+            "default_word_count": 800
+        },
+        "microtasks": {
+            "batch_size": 10,
+            "default_amount": 0.50
+        },
+        "arbitrage": {
+            "max_cycles": 3,
+            "min_profit_percent": 1.5
+        }
+    }
+}
