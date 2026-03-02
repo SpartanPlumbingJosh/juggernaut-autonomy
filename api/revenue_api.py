@@ -8,10 +8,20 @@ Endpoints:
 """
 
 import json
+import stripe
+import paypalrestsdk
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+
+# Initialize payment processors
+stripe.api_key = "sk_live_..."  # Set from environment
+paypalrestsdk.configure({
+    "mode": "live",  # "sandbox" or "live"
+    "client_id": "live_client_id_...",
+    "client_secret": "live_client_secret_..."
+})
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,12 +220,86 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+def _log_transaction(event_type: str, amount_cents: int, currency: str, source: str, metadata: Dict[str, Any]) -> Dict[str, Any]:
+    """Log a revenue transaction to the database."""
+    try:
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source, metadata,
+            recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{event_type}',
+            {amount_cents},
+            '{currency}',
+            '{source}',
+            '{json.dumps(metadata)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        result = query_db(sql)
+        return {"success": True, "transaction_id": result.get("rows", [{}])[0].get("id")}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def _handle_stripe_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Process Stripe webhook event."""
+    event_type = event.get("type")
+    data = event.get("data", {}).get("object", {})
+    
+    if event_type == "payment_intent.succeeded":
+        amount_cents = data.get("amount")
+        currency = data.get("currency")
+        metadata = {
+            "stripe_event_id": event.get("id"),
+            "payment_intent_id": data.get("id"),
+            "customer_email": data.get("receipt_email")
+        }
+        return _log_transaction("revenue", amount_cents, currency, "stripe", metadata)
+    
+    return {"success": False, "error": "Unhandled event type"}
+
+def _handle_paypal_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Process PayPal webhook event."""
+    event_type = event.get("event_type")
+    resource = event.get("resource", {})
+    
+    if event_type == "PAYMENT.CAPTURE.COMPLETED":
+        amount_cents = int(float(resource.get("amount", {}).get("value", 0)) * 100)
+        currency = resource.get("amount", {}).get("currency_code")
+        metadata = {
+            "paypal_event_id": event.get("id"),
+            "capture_id": resource.get("id"),
+            "payer_email": resource.get("payer", {}).get("email_address")
+        }
+        return _log_transaction("revenue", amount_cents, currency, "paypal", metadata)
+    
+    return {"success": False, "error": "Unhandled event type"}
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Handle payment processor webhooks
+    if method == "POST":
+        if path == "/webhooks/stripe":
+            try:
+                event = json.loads(body or "{}")
+                return _make_response(200, _handle_stripe_webhook(event))
+            except Exception as e:
+                return _error_response(400, f"Invalid Stripe webhook: {str(e)}")
+                
+        if path == "/webhooks/paypal":
+            try:
+                event = json.loads(body or "{}")
+                return _make_response(200, _handle_paypal_webhook(event))
+            except Exception as e:
+                return _error_response(400, f"Invalid PayPal webhook: {str(e)}")
     
     # Parse path
     parts = [p for p in path.split("/") if p]

@@ -181,6 +181,54 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
+def _initiate_revenue_generation(execute_sql: Callable[[str], Dict[str, Any]], experiment_id: str) -> Dict[str, Any]:
+    """Start autonomous revenue generation for an experiment."""
+    try:
+        # Get experiment details
+        res = execute_sql(f"""
+            SELECT id, name, budget_limit, metadata 
+            FROM experiments 
+            WHERE id = '{experiment_id}'
+        """)
+        experiment = res.get("rows", [{}])[0]
+        
+        # Initialize revenue streams based on experiment type
+        metadata = experiment.get("metadata", {})
+        revenue_type = metadata.get("revenue_type", "direct_sales")
+        
+        if revenue_type == "direct_sales":
+            # Example: Create Stripe payment link
+            product = stripe.Product.create(
+                name=experiment.get("name"),
+                description=f"Autonomous revenue generation for experiment {experiment_id}"
+            )
+            price = stripe.Price.create(
+                unit_amount=int(float(experiment.get("budget_limit", 0)) * 100),
+                currency="usd",
+                product=product.id
+            )
+            payment_link = stripe.PaymentLink.create(
+                line_items=[{"price": price.id, "quantity": 1}],
+                metadata={"experiment_id": experiment_id}
+            )
+            
+            # Store payment link
+            execute_sql(f"""
+                UPDATE experiments
+                SET metadata = jsonb_set(
+                    metadata,
+                    '{{payment_link}}',
+                    '{json.dumps({"url": payment_link.url})}'::jsonb
+                )
+                WHERE id = '{experiment_id}'
+            """)
+            
+            return {"success": True, "payment_link": payment_link.url}
+        
+        return {"success": False, "error": "Unsupported revenue type"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -244,6 +292,12 @@ def start_experiments_from_top_ideas(
             continue
 
         link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
+
+        # Initiate revenue generation
+        revenue_res = _initiate_revenue_generation(execute_sql, str(exp_id))
+        if not revenue_res.get("success"):
+            failures.append({"idea_id": idea_id, "error": f"Revenue init failed: {revenue_res.get('error')}"})
+            continue
 
         try:
             execute_sql(
