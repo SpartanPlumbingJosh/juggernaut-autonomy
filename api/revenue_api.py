@@ -162,6 +162,41 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_track(query_params: Dict[str, Any], body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Track a new revenue event."""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        amount = Decimal(str(body.get("amount", 0)))
+        currency = body.get("currency", "USD")
+        source = body.get("source", "manual")
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Amount must be positive")
+            
+        engine = RevenueEngine(query_db, lambda *args, **kwargs: None)
+        result = await engine.create_transaction(
+            amount=amount,
+            currency=currency,
+            source=source,
+            metadata=metadata
+        )
+        
+        if not result["success"]:
+            return _error_response(500, result.get("error", "Failed to create transaction"))
+            
+        return _make_response(201, {
+            "transaction_id": result["transaction_id"],
+            "amount": float(amount),
+            "currency": currency,
+            "source": source
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to track revenue: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +266,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/track
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "track" and method == "POST":
+        return handle_revenue_track(query_params, json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
