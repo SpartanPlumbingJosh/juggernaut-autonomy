@@ -162,6 +162,13 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from services.payment_handler import PaymentHandler
+
+async def handle_webhook(payload: Dict) -> Dict[str, Any]:
+    """Handle payment processor webhooks."""
+    handler = PaymentHandler()
+    return await handler.handle_webhook(payload)
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +238,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            payload = json.loads(body) if body else {}
+            return await handle_webhook(payload)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
