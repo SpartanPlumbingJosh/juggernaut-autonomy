@@ -232,7 +232,58 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/transactions
+    elif len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "POST":
+        try:
+            payload = json.loads(body) if body else {}
+            return await handle_create_transaction(payload)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
+    
+    # GET /revenue/transactions/{transaction_id}
+    elif len(parts) == 3 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
+        transaction_id = parts[2]
+        return await handle_get_transaction(transaction_id)
+
     return _error_response(404, "Not found")
+
+async def handle_create_transaction(payload: Dict) -> Dict:
+    """Handle new transaction creation"""
+    from revenue.automation_service import RevenueAutomationService
+    
+    try:
+        service = RevenueAutomationService()
+        amount_cents = int(payload.get("amount_cents", 0))
+        customer_data = payload.get("customer", {})
+        product_data = payload.get("product", {})
+        
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = await service.process_transaction(
+            amount_cents=amount_cents,
+            customer_data=customer_data,
+            product_data=product_data
+        )
+        
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Transaction failed: {str(e)}")
+
+async def handle_get_transaction(transaction_id: str) -> Dict:
+    """Get transaction status"""
+    from revenue.automation_service import RevenueAutomationService
+    
+    try:
+        service = RevenueAutomationService()
+        transaction = await service.get_transaction_status(transaction_id)
+        
+        if not transaction:
+            return _error_response(404, "Transaction not found")
+            
+        return _make_response(200, transaction)
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch transaction: {str(e)}")
 
 
 __all__ = ["route_request"]
