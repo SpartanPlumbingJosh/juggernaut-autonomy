@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment-intent - Create payment intent
+- POST /revenue/webhook/stripe - Handle Stripe webhook
 """
 
 import json
@@ -162,6 +164,35 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment intent creation."""
+    from api.billing_integration import create_payment_intent
+    
+    amount_cents = int(body.get("amount_cents", 0))
+    currency = body.get("currency", "usd")
+    metadata = body.get("metadata", {})
+    
+    if amount_cents <= 0:
+        return _error_response(400, "Invalid amount")
+    
+    result = await create_payment_intent(amount_cents, currency, metadata)
+    if "error" in result:
+        return _error_response(500, result["error"])
+    
+    return _make_response(200, result)
+
+async def handle_stripe_webhook(body: bytes, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    from api.billing_integration import handle_stripe_webhook
+    
+    sig_header = headers.get("Stripe-Signature", "")
+    result = await handle_stripe_webhook(body, sig_header)
+    
+    if "error" in result:
+        return _error_response(400, result["error"])
+    
+    return _make_response(200, {"success": True})
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,7 +241,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +262,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_payment_intent(json.loads(body))
+    
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing request body or headers")
+        return handle_stripe_webhook(body.encode(), headers)
     
     return _error_response(404, "Not found")
 
