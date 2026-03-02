@@ -10,8 +10,15 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import uuid
+import hashlib
+from concurrent.futures import ThreadPoolExecutor
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.logging import log_action
+
+# Thread pool for concurrent transaction processing
+transaction_executor = ThreadPoolExecutor(max_workers=10)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +37,56 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
+    log_action("api.error", f"API error {status_code}: {message}", level="error")
     return _make_response(status_code, {"error": message})
+
+async def _process_transaction(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a single transaction in a thread-safe manner."""
+    try:
+        # Generate unique idempotency key
+        idempotency_key = hashlib.sha256(
+            f"{event['source']}:{event['transaction_id']}".encode()
+        ).hexdigest()
+        
+        # Check for duplicate transaction
+        duplicate_check = await query_db(
+            f"SELECT id FROM revenue_events WHERE idempotency_key = '{idempotency_key}' LIMIT 1"
+        )
+        if duplicate_check.get("rows"):
+            return {"success": True, "message": "Duplicate transaction ignored"}
+            
+        # Insert transaction
+        event_id = str(uuid.uuid4())
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source,
+                metadata, recorded_at, created_at, idempotency_key
+            ) VALUES (
+                '{event_id}', '{event['event_type']}', {event['amount_cents']},
+                '{event['currency']}', '{event['source']}', '{json.dumps(event.get('metadata', {}))}',
+                NOW(), NOW(), '{idempotency_key}'
+            )
+            """
+        )
+        
+        # Update related experiment if present
+        if "experiment_id" in event.get("metadata", {}):
+            exp_id = event["metadata"]["experiment_id"]
+            await execute_db(
+                f"""
+                UPDATE experiments
+                SET revenue_generated = COALESCE(revenue_generated, 0) + {event['amount_cents']}
+                WHERE id = '{exp_id}'
+                """
+            )
+            
+        log_action("transaction.processed", f"Processed transaction {event_id}", level="info")
+        return {"success": True, "event_id": event_id}
+        
+    except Exception as e:
+        log_action("transaction.failed", f"Failed to process transaction: {str(e)}", level="error")
+        return {"success": False, "error": str(e)}
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -113,6 +169,26 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def handle_payment_webhook(event: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhook events."""
+    try:
+        # Validate required fields
+        required_fields = ["transaction_id", "amount_cents", "currency", "source"]
+        if not all(field in event for field in required_fields):
+            return _error_response(400, "Missing required fields")
+            
+        # Process transaction asynchronously
+        future = transaction_executor.submit(_process_transaction, event)
+        result = future.result()
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Transaction processing failed"))
+            
+        return _make_response(200, {"success": True, "event_id": result["event_id"]})
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
@@ -210,7 +286,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -230,7 +306,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+        return await handle_revenue_charts(query_params)
+    
+    # POST /webhook/payment
+    if len(parts) == 2 and parts[0] == "webhook" and parts[1] == "payment" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            event = json.loads(body)
+            return await handle_payment_webhook(event)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
     
     return _error_response(404, "Not found")
 
