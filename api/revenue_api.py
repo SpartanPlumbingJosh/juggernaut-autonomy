@@ -12,6 +12,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment_processor import PaymentProcessor
+from fulfillment_manager import FulfillmentManager
+
+payment_processor = PaymentProcessor()
+fulfillment_manager = FulfillmentManager()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -113,6 +118,53 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
+
+async def handle_payment_intent(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment intent for checkout."""
+    try:
+        amount = float(query_params.get("amount", [0])[0])
+        currency = query_params.get("currency", ["usd"])[0]
+        provider = query_params.get("provider", ["stripe"])[0]
+        
+        if provider == "stripe":
+            intent = stripe.PaymentIntent.create(
+                amount=int(amount * 100),
+                currency=currency,
+                automatic_payment_methods={"enabled": True},
+            )
+            return _make_response(200, {"client_secret": intent.client_secret})
+        elif provider == "paypal":
+            order = await payment_processor.create_paypal_order(amount, currency)
+            if order["success"]:
+                return _make_response(200, {"order_id": order["payment_id"]})
+            return _error_response(400, order["error"])
+        return _error_response(400, "Invalid payment provider")
+    except Exception as e:
+        return _error_response(500, f"Payment intent creation failed: {str(e)}")
+
+async def handle_order_fulfillment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process order fulfillment."""
+    try:
+        # Capture payment
+        capture_result = await payment_processor.capture_payment(
+            body.get("provider"),
+            body.get("payment_id")
+        )
+        if not capture_result["success"]:
+            return _error_response(400, capture_result["error"])
+            
+        # Process fulfillment
+        fulfillment_result = await fulfillment_manager.process_order(body)
+        if not fulfillment_result["success"]:
+            return _error_response(400, fulfillment_result["error"])
+            
+        return _make_response(200, {
+            "success": True,
+            "access_token": fulfillment_result["access_token"],
+            "fulfilled_at": fulfillment_result["fulfilled_at"]
+        })
+    except Exception as e:
+        return _error_response(500, f"Order fulfillment failed: {str(e)}")
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
@@ -231,6 +283,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payment-intent
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment-intent" and method == "POST":
+        return await handle_payment_intent(query_params)
+        
+    # POST /revenue/fulfill-order
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "fulfill-order" and method == "POST":
+        return await handle_order_fulfillment(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
