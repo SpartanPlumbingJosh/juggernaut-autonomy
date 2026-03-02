@@ -162,6 +162,27 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new payment intent."""
+    from api.payment_processor import PaymentProcessor
+    processor = PaymentProcessor()
+    return await processor.create_payment_intent(
+        amount_cents=int(body.get("amount_cents", 0)),
+        currency=str(body.get("currency", "usd")),
+        metadata=body.get("metadata", {}),
+        payment_method=str(body.get("payment_method", "stripe"))
+    )
+
+async def handle_payment_webhook(payload: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook notifications."""
+    from api.payment_processor import PaymentProcessor
+    processor = PaymentProcessor()
+    return await processor.handle_payment_webhook(
+        payload=payload,
+        sig_header=headers.get("Stripe-Signature"),
+        source=str(payload.get("source", "stripe"))
+    )
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,7 +252,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
-    
+
+    # POST /payment/create
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create" and method == "POST":
+        return handle_payment_create(json.loads(body or "{}"))
+
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"), headers)
+
     return _error_response(404, "Not found")
 
 
