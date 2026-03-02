@@ -99,6 +99,34 @@ def generate_revenue_ideas(
                 """
             )
             created += 1
+            
+            if auto_deploy:
+                # Trigger automated deployment
+                try:
+                    execute_sql(
+                        f"""
+                        INSERT INTO deployment_queue (
+                            experiment_id, status, 
+                            priority, created_at
+                        ) VALUES (
+                            '{exp_id}', 'pending',
+                            {round(idea["score"])}, NOW()
+                        )
+                        """
+                    )
+                    log_action(
+                        "experiment.scheduled",
+                        f"Scheduled deployment for experiment {exp_id}",
+                        level="info",
+                        output_data={"experiment_id": exp_id}
+                    )
+                except Exception as e:
+                    log_action(
+                        "deployment.schedule_failed",
+                        f"Failed to schedule deployment: {str(e)}",
+                        level="error",
+                        error_data={"experiment_id": exp_id, "error": str(e)}
+                    )
         except Exception:
             continue
 
@@ -187,6 +215,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    auto_deploy: bool = True
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
