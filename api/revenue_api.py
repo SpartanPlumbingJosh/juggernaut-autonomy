@@ -232,6 +232,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # Payment webhooks
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook":
+        from api.payment_processor import handle_stripe_webhook
+        
+        if parts[2] == "stripe" and method == "POST":
+            try:
+                body_json = json.loads(body or "{}")
+                return handle_stripe_webhook(body_json)
+            except Exception as e:
+                return _error_response(400, f"Invalid webhook payload: {str(e)}")
+    
     return _error_response(404, "Not found")
 
 
