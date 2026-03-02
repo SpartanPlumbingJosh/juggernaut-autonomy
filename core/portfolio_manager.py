@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from core.revenue_metrics import generate_metrics_report
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -280,7 +281,39 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Review running experiments and trigger learning loop for completed ones.
+    Also generates and logs revenue metrics report."""
+    
+    # First generate revenue metrics report
+    try:
+        revenue_data = execute_sql("""
+            SELECT event_type, amount_cents, recorded_at
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 year'
+        """).get("rows", [])
+        
+        metrics = generate_metrics_report(revenue_data)
+        log_action(
+            "revenue.metrics_report",
+            "Generated revenue metrics report",
+            level="info",
+            output_data=metrics
+        )
+        
+        # Trigger alerts if needed
+        if metrics.get("status") != "ok":
+            log_action(
+                "revenue.alert",
+                f"Revenue alert: {metrics.get('status')}",
+                level=metrics.get("status"),
+                output_data=metrics
+            )
+    except Exception as e:
+        log_action(
+            "revenue.metrics_error",
+            f"Failed to generate revenue metrics: {str(e)}",
+            level="error"
+        )
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
