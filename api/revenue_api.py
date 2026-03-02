@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Handle payment gateway webhooks
 """
 
 import json
@@ -231,6 +232,21 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing webhook payload")
+        try:
+            payload = json.loads(body)
+            gateway = query_params.get("gateway", [""])[0]
+            signature = query_params.get("signature", [""])[0]
+            from core.billing import BillingSystem
+            billing = BillingSystem(query_db, lambda *args, **kwargs: None)
+            result = billing.handle_webhook(gateway, payload, signature)
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
