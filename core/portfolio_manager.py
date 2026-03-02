@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import asyncio
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_engine import RevenueEngine
 
 
 def generate_revenue_ideas(
@@ -285,6 +287,9 @@ def review_experiments_stub(
         from core.learning_loop import on_experiment_complete
     except ImportError:
         on_experiment_complete = None
+        
+    # Initialize revenue engine
+    revenue_engine = RevenueEngine(execute_sql)
     
     try:
         res = execute_sql(
@@ -403,9 +408,18 @@ def review_experiments_stub(
     except Exception:
         pass
 
+    # Generate daily revenue report
+    revenue_report = await revenue_engine.generate_daily_revenue_report()
+    
+    # Attempt to recover failed transactions
+    recovery_result = await revenue_engine.recover_failed_transactions()
+    
     return {
         "success": True,
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "daily_revenue": revenue_report.get('total_revenue', 0),
+        "daily_cost": revenue_report.get('total_cost', 0),
+        "recovered_transactions": recovery_result.get('recovered', 0)
     }
