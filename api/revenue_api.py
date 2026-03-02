@@ -9,9 +9,11 @@ Endpoints:
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from core.database import query_db
+from api.payment_processor import payment_processor
+from api.customer_manager import customer_manager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,8 +233,50 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        try:
+            parsed_body = json.loads(body or "{}")
+        except Exception:
+            parsed_body = {}
+        return await handle_create_checkout(parsed_body)
+
+    # POST /revenue/webhook/stripe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+        return await handle_stripe_webhook(body, headers)
     
     return _error_response(404, "Not found")
 
+
+async def handle_create_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle checkout session creation"""
+    try:
+        result = await payment_processor.create_checkout_session(
+            customer_id=body.get("customer_id"),
+            price_id=body.get("price_id"),
+            success_url=body.get("success_url", ""),
+            cancel_url=body.get("cancel_url", ""),
+            metadata=body.get("metadata", {})
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def handle_stripe_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle stripe webhook"""
+    try:
+        # Convert to FastAPI request-like object
+        class FakeRequest:
+            def __init__(self):
+                self.body = body
+                self.headers = headers
+                
+        result = await payment_processor.handle_webhook(FakeRequest())
+        if result.get("error"):
+            return _error_response(result.get("status", 400), result["error"])
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
 
 __all__ = ["route_request"]
