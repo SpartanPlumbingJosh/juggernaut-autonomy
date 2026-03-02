@@ -7,6 +7,12 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.autonomous_agents import (
+    PriceOptimizationAgent,
+    ResourceAllocationAgent,
+    DemandScalingAgent,
+    RevenueGrowthMonitor
+)
 
 
 def generate_revenue_ideas(
@@ -285,6 +291,12 @@ def review_experiments_stub(
         from core.learning_loop import on_experiment_complete
     except ImportError:
         on_experiment_complete = None
+        
+    # Initialize autonomous agents
+    price_agent = PriceOptimizationAgent(execute_sql, log_action)
+    resource_agent = ResourceAllocationAgent(execute_sql, log_action)
+    scaling_agent = DemandScalingAgent(execute_sql, log_action)
+    growth_monitor = RevenueGrowthMonitor(execute_sql, log_action)
     
     try:
         res = execute_sql(
@@ -403,9 +415,19 @@ def review_experiments_stub(
     except Exception:
         pass
 
+    # Run autonomous optimizations
+    price_result = await price_agent.optimize_prices()
+    resource_result = await resource_agent.allocate_budgets()
+    scaling_result = await scaling_agent.scale_resources()
+    growth_result = await growth_monitor.adjust_strategies()
+    
     return {
         "success": True,
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "price_optimization": price_result,
+        "resource_allocation": resource_result,
+        "demand_scaling": scaling_result,
+        "growth_strategy": growth_result
     }
