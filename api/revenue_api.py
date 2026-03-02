@@ -1,10 +1,14 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Autonomous Revenue Generation System
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/charge - Process a payment
+- POST /revenue/subscribe - Create a subscription
+- POST /revenue/refund - Process a refund
+- POST /revenue/webhook - Handle payment gateway webhooks
 """
 
 import json
@@ -162,6 +166,149 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_charge(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment"""
+    try:
+        from core.payment_gateways import get_payment_gateway
+        
+        gateway = get_payment_gateway(body['gateway'], body['config'])
+        result = gateway.charge(
+            amount=body['amount'],
+            currency=body['currency'],
+            customer_data=body['customer']
+        )
+        
+        if result['success']:
+            # Log revenue event
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency,
+                    source, metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {int(body['amount'] * 100)},
+                    '{body['currency']}',
+                    '{body.get('source', 'direct')}',
+                    '{json.dumps(body.get('metadata', {}))}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200 if result['success'] else 400, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process charge: {str(e)}")
+
+async def handle_revenue_subscribe(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a subscription"""
+    try:
+        from core.payment_gateways import get_payment_gateway
+        
+        gateway = get_payment_gateway(body['gateway'], body['config'])
+        
+        # Create customer
+        customer_result = gateway.create_customer(body['customer'])
+        if not customer_result['success']:
+            return _error_response(400, customer_result)
+            
+        # Create subscription
+        subscription_result = gateway.create_subscription(
+            customer_id=customer_result['customer_id'],
+            plan_id=body['plan_id'],
+            payment_method=body['payment_method']
+        )
+        
+        if subscription_result['success']:
+            # Log subscription event
+            await query_db(f"""
+                INSERT INTO subscriptions (
+                    id, customer_id, plan_id, status,
+                    start_date, end_date, metadata, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    '{customer_result['customer_id']}',
+                    '{body['plan_id']}',
+                    'active',
+                    NOW(),
+                    NULL,
+                    '{json.dumps(body.get('metadata', {}))}'::jsonb,
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200 if subscription_result['success'] else 400, subscription_result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_revenue_refund(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a refund"""
+    try:
+        from core.payment_gateways import get_payment_gateway
+        
+        gateway = get_payment_gateway(body['gateway'], body['config'])
+        result = gateway.refund(
+            transaction_id=body['transaction_id'],
+            amount=body['amount']
+        )
+        
+        if result['success']:
+            # Log refund event
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency,
+                    source, metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'refund',
+                    {int(body['amount'] * 100)},
+                    '{body['currency']}',
+                    '{body.get('source', 'direct')}',
+                    '{json.dumps(body.get('metadata', {}))}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200 if result['success'] else 400, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process refund: {str(e)}")
+
+async def handle_revenue_webhook(body: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhooks"""
+    try:
+        from core.payment_gateways import get_payment_gateway
+        
+        gateway = get_payment_gateway(body['gateway'], body['config'])
+        event = gateway.handle_webhook(body, headers)
+        
+        # Process webhook event
+        if event['type'] == 'payment_succeeded':
+            # Log revenue event
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency,
+                    source, metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {int(event['amount'] * 100)},
+                    '{event['currency']}',
+                    'webhook',
+                    '{json.dumps(event.get('metadata', {}))}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+            
+        return _make_response(200, {'success': True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +378,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/charge
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charge" and method == "POST":
+        return handle_revenue_charge(json.loads(body or '{}'))
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_revenue_subscribe(json.loads(body or '{}'))
+    
+    # POST /revenue/refund
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "refund" and method == "POST":
+        return handle_revenue_refund(json.loads(body or '{}'))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_revenue_webhook(json.loads(body or '{}'), query_params)
     
     return _error_response(404, "Not found")
 
