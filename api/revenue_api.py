@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing operations.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/subscribe - Create new subscription
+- POST /billing/payment - Process payment
+- POST /billing/webhook - Handle payment provider webhooks
 """
 
 import json
@@ -12,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.billing_manager import BillingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -213,6 +217,8 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
+    billing_manager = BillingManager()
+    
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
@@ -231,6 +237,33 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /billing/subscribe
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscribe" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            result = billing_manager.create_subscription(data["customer"], data["plan_id"])
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Subscription failed: {str(e)}")
+    
+    # POST /billing/payment
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "payment" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            result = billing_manager.process_payment(data["amount"], data["currency"], data["payment_method"])
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Payment failed: {str(e)}")
+    
+    # POST /billing/webhook
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            result = billing_manager.handle_webhook(data["provider"], data["payload"])
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Webhook handling failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
