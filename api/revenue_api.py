@@ -11,8 +11,17 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+import stripe
+import paypalrestsdk
 
+# Configure payment processors
+stripe.api_key = os.getenv('STRIPE_SECRET_KEY')
+paypalrestsdk.configure({
+    "mode": os.getenv('PAYPAL_MODE', 'sandbox'),
+    "client_id": os.getenv('PAYPAL_CLIENT_ID'),
+    "client_secret": os.getenv('PAYPAL_CLIENT_SECRET')
+})
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
@@ -209,6 +218,41 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def process_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through configured gateway."""
+    try:
+        amount = int(float(payment_data['amount']) * 100)  # Convert to cents
+        currency = payment_data.get('currency', 'usd')
+        
+        if payment_data['gateway'] == 'stripe':
+            payment_intent = stripe.PaymentIntent.create(
+                amount=amount,
+                currency=currency,
+                payment_method=payment_data['payment_method_id'],
+                confirmation_method='manual',
+                confirm=True
+            )
+            return {'success': True, 'payment_id': payment_intent.id}
+            
+        elif payment_data['gateway'] == 'paypal':
+            payment = paypalrestsdk.Payment({
+                "intent": "sale",
+                "payer": {"payment_method": "paypal"},
+                "transactions": [{
+                    "amount": {
+                        "total": f"{amount/100:.2f}",
+                        "currency": currency
+                    }
+                }]
+            })
+            if payment.create():
+                return {'success': True, 'payment_id': payment.id}
+            return {'success': False, 'reason': payment.error}
+            
+        return {'success': False, 'reason': 'Invalid gateway'}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
