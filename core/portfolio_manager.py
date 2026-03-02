@@ -276,6 +276,62 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def process_payment(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    payment_data: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Process a payment transaction and record it in the database."""
+    try:
+        # Validate required fields
+        required_fields = ["amount_cents", "currency", "payment_method", "customer_id"]
+        for field in required_fields:
+            if field not in payment_data:
+                return {"success": False, "error": f"Missing required field: {field}"}
+
+        # Record the transaction
+        execute_sql(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {int(payment_data["amount_cents"])},
+                '{payment_data["currency"]}',
+                '{payment_data.get("source", "direct")}',
+                '{json.dumps({
+                    "payment_method": payment_data["payment_method"],
+                    "customer_id": payment_data["customer_id"],
+                    "description": payment_data.get("description", "")
+                })}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+
+        log_action(
+            "payment.processed",
+            f"Processed payment of {payment_data['amount_cents']} {payment_data['currency']}",
+            level="info",
+            output_data={
+                "amount_cents": payment_data["amount_cents"],
+                "currency": payment_data["currency"]
+            }
+        )
+
+        return {"success": True}
+
+    except Exception as e:
+        log_action(
+            "payment.failed",
+            f"Payment processing failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
