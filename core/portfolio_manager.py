@@ -9,6 +9,45 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+SCALING_THRESHOLDS = {
+    'high_load': 1000,  # Transactions per minute
+    'low_load': 100,    # Transactions per minute
+    'high_cost': 10000, # Daily cost in USD
+    'low_revenue': 5000 # Daily revenue in USD
+}
+
+def check_scaling_needs(execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, bool]:
+    """Check if scaling is needed based on current load and revenue."""
+    try:
+        # Get current transaction rate
+        trans_rate = execute_sql(
+            """
+            SELECT COUNT(*) as count 
+            FROM revenue_events 
+            WHERE recorded_at >= NOW() - INTERVAL '1 minute'
+            """
+        ).get("rows", [{}])[0].get("count", 0)
+        
+        # Get daily revenue and cost
+        daily_stats = execute_sql(
+            """
+            SELECT 
+                SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+                SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as cost_cents
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 day'
+            """
+        ).get("rows", [{}])[0]
+        
+        return {
+            'scale_up': trans_rate > SCALING_THRESHOLDS['high_load'],
+            'scale_down': trans_rate < SCALING_THRESHOLDS['low_load'],
+            'cost_warning': daily_stats.get('cost_cents', 0)/100 > SCALING_THRESHOLDS['high_cost'],
+            'revenue_warning': daily_stats.get('revenue_cents', 0)/100 < SCALING_THRESHOLDS['low_revenue']
+        }
+    except Exception:
+        return {}
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

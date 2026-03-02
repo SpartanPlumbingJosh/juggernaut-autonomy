@@ -11,7 +11,15 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.payment_processor import PaymentProcessor
+from core.service_delivery import ServiceDeliverySystem
+import logging
+from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+payment_processor = PaymentProcessor()
+service_delivery = ServiceDeliverySystem()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +40,30 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def log_transaction(event_type: str, amount_cents: int, currency: str, source: str, metadata: Dict) -> bool:
+    """Log a revenue transaction in real-time."""
+    try:
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                {amount_cents},
+                '{currency}',
+                '{source}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Failed to log transaction: {str(e)}")
+        return False
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
