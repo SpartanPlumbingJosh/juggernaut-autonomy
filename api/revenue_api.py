@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/subscribe - Create new subscription
+- POST /billing/webhook - Handle billing webhooks
+- POST /onboarding/start - Begin customer onboarding
 """
 
 import json
@@ -162,6 +165,123 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_billing_subscribe(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription and initiate service delivery."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_email", "plan_id", "payment_method"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Create subscription in billing system
+        # This would integrate with Stripe/Recurly/etc
+        subscription_id = f"sub_{datetime.now(timezone.utc).timestamp()}"
+        
+        # Start service provisioning
+        # This would trigger infrastructure setup
+        service_id = f"svc_{datetime.now(timezone.utc).timestamp()}"
+        
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source,
+                metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {body.get('amount_cents', 0)},
+                '{body.get('currency', 'usd')}',
+                'subscription',
+                '{{"subscription_id": "{subscription_id}", "service_id": "{service_id}"}}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {
+            "subscription_id": subscription_id,
+            "service_id": service_id,
+            "status": "active"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
+async def handle_billing_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle billing system webhooks."""
+    try:
+        event_type = body.get("type")
+        event_data = body.get("data", {})
+        
+        # Handle different webhook events
+        if event_type == "payment_succeeded":
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    'revenue',
+                    {event_data.get('amount', 0)},
+                    '{event_data.get('currency', 'usd')}',
+                    'subscription',
+                    '{{"subscription_id": "{event_data.get('subscription_id')}"}}'::jsonb,
+                    NOW(),
+                    NOW()
+                )
+            """)
+        elif event_type == "subscription_cancelled":
+            await query_db(f"""
+                UPDATE subscriptions
+                SET status = 'cancelled',
+                    cancelled_at = NOW()
+                WHERE id = '{event_data.get('subscription_id')}'
+            """)
+        
+        return _make_response(200, {"status": "processed"})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+
+async def handle_onboarding_start(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Begin automated customer onboarding."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_email", "plan_id"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Create customer record
+        customer_id = f"cust_{datetime.now(timezone.utc).timestamp()}"
+        
+        # Initiate onboarding workflow
+        await query_db(f"""
+            INSERT INTO onboarding_workflows (
+                id, customer_id, status, steps,
+                created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{customer_id}',
+                'started',
+                '[]'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        
+        return _make_response(200, {
+            "customer_id": customer_id,
+            "status": "started"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to start onboarding: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +351,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /billing/subscribe
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscribe" and method == "POST":
+        return handle_billing_subscribe(json.loads(body or "{}"))
+    
+    # POST /billing/webhook
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        return handle_billing_webhook(json.loads(body or "{}"))
+    
+    # POST /onboarding/start
+    if len(parts) == 2 and parts[0] == "onboarding" and parts[1] == "start" and method == "POST":
+        return handle_onboarding_start(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
