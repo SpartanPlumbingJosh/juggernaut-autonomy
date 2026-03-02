@@ -210,6 +210,37 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    try:
+        event_type = body.get("event_type")
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = body.get("currency", "USD")
+        source = body.get("source", "unknown")
+        metadata = body.get("metadata", {})
+        
+        # Record the payment event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'payment',
+            {amount_cents},
+            '{currency}',
+            '{source.replace("'", "''")}',
+            '{json.dumps(metadata).replace("'", "''")}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +262,42 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_webhook(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
+    # GET /revenue/dashboard/config
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "dashboard" and parts[2] == "config" and method == "GET":
+        return _make_response(200, {
+            "widgets": [
+                {
+                    "type": "summary",
+                    "title": "Revenue Overview",
+                    "refresh_interval": 300
+                },
+                {
+                    "type": "chart",
+                    "title": "Daily Revenue",
+                    "refresh_interval": 600,
+                    "days": 30
+                },
+                {
+                    "type": "transactions",
+                    "title": "Recent Transactions",
+                    "refresh_interval": 300,
+                    "limit": 10
+                }
+            ],
+            "default_period": "month",
+            "currency": "USD"
+        })
     
     return _error_response(404, "Not found")
 

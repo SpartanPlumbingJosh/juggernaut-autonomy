@@ -276,6 +276,49 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def create_portfolio_profile(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    profile_name: str,
+    budget: float,
+    risk_level: str = "medium",
+    focus_areas: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """Create a new portfolio profile with specific investment parameters."""
+    try:
+        focus_areas_json = json.dumps(focus_areas or [])
+        execute_sql(
+            f"""
+            INSERT INTO portfolio_profiles (
+                id, name, budget, risk_level, focus_areas,
+                created_at, updated_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{profile_name.replace("'", "''")}',
+                {float(budget)},
+                '{risk_level}',
+                '{focus_areas_json}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        log_action(
+            "portfolio.profile_created",
+            f"Created portfolio profile: {profile_name}",
+            level="info",
+            output_data={"profile_name": profile_name, "budget": budget}
+        )
+        return {"success": True}
+    except Exception as e:
+        log_action(
+            "portfolio.profile_creation_failed",
+            f"Failed to create portfolio profile: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -409,3 +452,32 @@ def review_experiments_stub(
         "completed": completed_count,
         "learning_triggered": learning_triggered
     }
+
+def generate_automation_template(
+    template_type: str,
+    parameters: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Generate automation templates for various tasks."""
+    templates = {
+        "bidding": {
+            "strategy": parameters.get("strategy", "cost_per_click"),
+            "max_bid": float(parameters.get("max_bid", 10.0)),
+            "target_roi": float(parameters.get("target_roi", 200.0)),
+            "daily_budget": float(parameters.get("daily_budget", 100.0)),
+            "bid_adjustments": parameters.get("bid_adjustments", {}),
+            "schedule": parameters.get("schedule", "24/7")
+        },
+        "content_generation": {
+            "content_type": parameters.get("content_type", "blog_post"),
+            "target_keywords": parameters.get("keywords", []),
+            "word_count": int(parameters.get("word_count", 1000)),
+            "tone": parameters.get("tone", "professional"),
+            "call_to_action": parameters.get("call_to_action", "Learn more"),
+            "seo_optimization": parameters.get("seo_optimization", True)
+        }
+    }
+    
+    if template_type not in templates:
+        return {"success": False, "error": f"Unknown template type: {template_type}"}
+    
+    return {"success": True, "template": templates[template_type]}
