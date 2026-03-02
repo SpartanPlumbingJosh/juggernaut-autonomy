@@ -11,7 +11,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.payments import PaymentProcessor
+from core.auth import authenticate_request
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +34,32 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_create_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent for processing a transaction."""
+    try:
+        # Validate required fields
+        amount_cents = int(body.get("amount_cents", 0))
+        currency = body.get("currency", "usd")
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+        
+        # Create payment intent
+        processor = PaymentProcessor()
+        intent = await processor.create_payment_intent(
+            amount_cents=amount_cents,
+            currency=currency,
+            metadata=body.get("metadata", {})
+        )
+        
+        return _make_response(200, {
+            "client_secret": intent.client_secret,
+            "payment_intent_id": intent.id,
+            "amount_cents": amount_cents,
+            "currency": currency
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment intent: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -216,6 +244,11 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Authenticate request
+    auth_result = authenticate_request(query_params)
+    if not auth_result.get("authenticated"):
+        return _error_response(401, "Unauthorized")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -231,6 +264,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_create_payment_intent(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 

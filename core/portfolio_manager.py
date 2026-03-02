@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from core.analytics import track_event
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -15,6 +16,11 @@ def generate_revenue_ideas(
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with analytics tracking."""
+    track_event("revenue_idea_generation_started", {
+        "context": context,
+        "limit": limit
+    })
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
@@ -112,7 +118,9 @@ def generate_revenue_ideas(
     except Exception:
         pass
 
-    return {"success": True, "created": created, "attempted": len(ideas)}
+    result = {"success": True, "created": created, "attempted": len(ideas)}
+    track_event("revenue_idea_generation_completed", result)
+    return result
 
 
 def score_pending_ideas(
