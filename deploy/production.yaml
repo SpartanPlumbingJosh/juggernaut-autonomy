@@ -1,0 +1,56 @@
+# Production deployment configuration
+api:
+  replicas: 3
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 80
+
+database:
+  enabled: true
+  resources:
+    requests:
+      cpu: "1000m"
+      memory: "2Gi"
+    limits:
+      cpu: "2000m"
+      memory: "4Gi"
+  storageSize: "100Gi"
+
+monitoring:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+  alerts:
+    cpuThreshold: 80%
+    memoryThreshold: 90%
+    errorRateThreshold: 5%
+    revenueDropThreshold: 20%
+
+cronJobs:
+  - name: "revenue-summary"
+    schedule: "0 * * * *" # Hourly
+    command: ["python", "manage.py", "run_revenue_summary"]
+  - name: "transaction-sync"
+    schedule: "*/5 * * * *" # Every 5 minutes
+    command: ["python", "manage.py", "sync_transactions"]
+  - name: "daily-report"
+    schedule: "0 8 * * *" # Daily at 8am
+    command: ["python", "manage.py", "generate_daily_report"]
+
+webhooks:
+  paymentProcessors:
+    - stripe
+    - paypal
+  timeout: 5000 # 5 seconds
+  retries: 3
+  alertThreshold: 10% # Alert if >10% webhook failures

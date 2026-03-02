@@ -1,0 +1,38 @@
+groups:
+- name: revenue-system
+  rules:
+  - alert: HighErrorRate
+    expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High error rate detected in revenue system"
+      description: "Error rate is above 5% for the last 5 minutes"
+  
+  - alert: RevenueDrop
+    expr: (sum(revenue_total{type="daily"}) - sum(revenue_total{type="daily"} offset 1d)) / sum(revenue_total{type="daily"} offset 1d) < -0.2
+    for: 1h
+    labels:
+      severity: warning
+    annotations:
+      summary: "Significant revenue drop detected"
+      description: "Revenue has dropped more than 20% compared to yesterday"
+  
+  - alert: WebhookFailureRate
+    expr: rate(webhook_failures_total[5m]) > 0.1
+    for: 5m
+    labels:
+      severity: critical
+    annotations:
+      summary: "High webhook failure rate"
+      description: "Webhook failure rate is above 10% for the last 5 minutes"
+  
+  - alert: SystemCPUHigh
+    expr: rate(process_cpu_seconds_total[1m]) > 0.8
+    for: 5m
+    labels:
+      severity: warning
+    annotations:
+      summary: "High CPU usage"
+      description: "System CPU usage is above 80% for the last 5 minutes"

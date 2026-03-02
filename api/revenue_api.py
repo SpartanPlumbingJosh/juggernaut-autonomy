@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /health - System health check
+- GET /metrics - Prometheus metrics endpoint
 """
 
 import json
@@ -216,6 +218,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Health check endpoint
+    if path == "/health" and method == "GET":
+        return _make_response(200, {"status": "healthy"})
+        
+    # Metrics endpoint
+    if path == "/metrics" and method == "GET":
+        # TODO: Add Prometheus metrics collection
+        return _make_response(200, {"status": "metrics_not_implemented"})
     
     # Parse path
     parts = [p for p in path.split("/") if p]
