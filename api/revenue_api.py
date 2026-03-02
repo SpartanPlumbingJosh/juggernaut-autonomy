@@ -11,7 +11,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from flask import Flask, request
 from core.database import query_db
+from billing.service import BillingService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,6 +117,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get transaction history with pagination.
+
+    Also handles creating new transactions via HTTP POST.
+    """
+    if request.method == "POST":
+        return await handle_create_transaction(request.get_json())
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -210,7 +218,11 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def initialize_billing(config: Dict[str, Any], logger=None) -> BillingService:
+    """Initialize billing service."""
+    return BillingService(config, logger)
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, billing_service: BillingService = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
