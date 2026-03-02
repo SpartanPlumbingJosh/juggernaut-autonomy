@@ -181,6 +181,10 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
+import os
+from typing import Dict, Any, Callable
+from datadog import statsd  # type: ignore
+
 def start_experiments_from_top_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -269,6 +273,15 @@ def start_experiments_from_top_ideas(
     except Exception:
         pass
 
+    # Track metrics in Datadog
+    try:
+        statsd.increment('portfolio.experiments_started', created)
+        statsd.gauge('portfolio.candidate_ideas', len(ideas))
+        if failures:
+            statsd.increment('portfolio.experiment_failures', len(failures))
+    except Exception:
+        pass
+        
     out = {"success": True, "new_experiments": created, "candidates": len(ideas)}
     if failures:
         out["failures"] = failures[:10]
