@@ -38,6 +38,17 @@ async def handle_revenue_summary() -> Dict[str, Any]:
     try:
         now = datetime.now(timezone.utc)
         
+        # Track subscription revenue
+        subscription_sql = """
+        SELECT 
+            SUM(amount_cents) as total_revenue_cents,
+            COUNT(*) as transaction_count
+        FROM subscription_payments
+        WHERE status = 'success'
+        """
+        subscription_result = await query_db(subscription_sql)
+        subscription_data = subscription_result.get("rows", [{}])[0]
+        
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         quarter_month = ((now.month - 1) // 3) * 3 + 1
@@ -107,6 +118,10 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
                 "transaction_count": all_time.get("transaction_count") or 0
+            },
+            "subscriptions": {
+                "total_revenue_cents": subscription_data.get("total_revenue_cents") or 0,
+                "transaction_count": subscription_data.get("transaction_count") or 0
             }
         })
         
