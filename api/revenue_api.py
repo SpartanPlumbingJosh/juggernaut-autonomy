@@ -232,7 +232,144 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # GET /revenue/monitor
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitor" and method == "GET":
+        from api.revenue_monitor import get_revenue_dashboard
+        dashboard = await get_revenue_dashboard()
+        return _make_response(200, dashboard)
+    
     return _error_response(404, "Not found")
 
 
 __all__ = ["route_request"]
+"""
+Automated Revenue Monitoring System
+
+Features:
+- Real-time MRR/ARR calculation
+- Customer cohort tracking
+- Revenue trajectory projection
+- Alerting for revenue shortfalls
+- Dashboard APIs for metrics visualization
+"""
+
+from datetime import datetime, timedelta
+from typing import Dict, List, Optional
+import math
+
+from core.database import query_db
+
+# Constants
+TARGET_REVENUE = 8_000_000  # $8M annual target
+ALERT_THRESHOLD = 0.9  # 90% of target
+
+async def calculate_mrr_arr() -> Dict[str, float]:
+    """Calculate Monthly and Annual Recurring Revenue."""
+    try:
+        # Get recurring revenue from last 30 days
+        sql = """
+        SELECT SUM(amount_cents)/100 as revenue
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+          AND recorded_at >= NOW() - INTERVAL '30 days'
+          AND metadata->>'recurring' = 'true'
+        """
+        result = await query_db(sql)
+        mrr = float(result.get("rows", [{}])[0].get("revenue", 0))
+        arr = mrr * 12
+        return {"mrr": mrr, "arr": arr}
+    except Exception as e:
+        return {"error": str(e)}
+
+async def track_customer_cohorts() -> Dict[str, Dict]:
+    """Track customer cohorts by acquisition month."""
+    try:
+        sql = """
+        SELECT 
+            DATE_TRUNC('month', recorded_at) as cohort_month,
+            COUNT(DISTINCT metadata->>'customer_id') as customers,
+            SUM(amount_cents)/100 as revenue
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+        GROUP BY cohort_month
+        ORDER BY cohort_month DESC
+        """
+        result = await query_db(sql)
+        cohorts = {}
+        for row in result.get("rows", []):
+            month = row["cohort_month"].strftime("%Y-%m")
+            cohorts[month] = {
+                "customers": row["customers"],
+                "revenue": row["revenue"]
+            }
+        return cohorts
+    except Exception as e:
+        return {"error": str(e)}
+
+async def project_revenue_trajectory() -> Dict[str, Any]:
+    """Project revenue trajectory toward $8M target."""
+    try:
+        # Get current ARR
+        arr_data = await calculate_mrr_arr()
+        current_arr = arr_data.get("arr", 0)
+        
+        # Get growth rate from last 3 months
+        sql = """
+        SELECT 
+            SUM(amount_cents)/100 as revenue
+        FROM revenue_events
+        WHERE event_type = 'revenue'
+          AND recorded_at >= NOW() - INTERVAL '3 months'
+        """
+        result = await query_db(sql)
+        three_month_revenue = float(result.get("rows", [{}])[0].get("revenue", 0))
+        monthly_growth = three_month_revenue / 3
+        
+        # Project trajectory
+        months_needed = math.ceil((TARGET_REVENUE - current_arr) / monthly_growth)
+        projection_date = (datetime.now() + timedelta(days=months_needed*30)).strftime("%Y-%m-%d")
+        
+        return {
+            "current_arr": current_arr,
+            "monthly_growth": monthly_growth,
+            "months_needed": months_needed,
+            "projection_date": projection_date,
+            "target_revenue": TARGET_REVENUE
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+async def check_revenue_alerts() -> Dict[str, Any]:
+    """Check for revenue shortfall alerts."""
+    try:
+        arr_data = await calculate_mrr_arr()
+        current_arr = arr_data.get("arr", 0)
+        
+        if current_arr < TARGET_REVENUE * ALERT_THRESHOLD:
+            return {
+                "alert": True,
+                "message": f"Revenue shortfall: Current ARR ${current_arr:,.0f} is below {ALERT_THRESHOLD*100}% of target",
+                "current_arr": current_arr,
+                "target": TARGET_REVENUE
+            }
+        return {"alert": False}
+    except Exception as e:
+        return {"error": str(e)}
+
+async def get_revenue_dashboard() -> Dict[str, Any]:
+    """Get all revenue metrics for dashboard."""
+    try:
+        mrr_arr = await calculate_mrr_arr()
+        cohorts = await track_customer_cohorts()
+        trajectory = await project_revenue_trajectory()
+        alerts = await check_revenue_alerts()
+        
+        return {
+            "mrr": mrr_arr.get("mrr"),
+            "arr": mrr_arr.get("arr"),
+            "cohorts": cohorts,
+            "trajectory": trajectory,
+            "alerts": alerts
+        }
+    except Exception as e:
+        return {"error": str(e)}
