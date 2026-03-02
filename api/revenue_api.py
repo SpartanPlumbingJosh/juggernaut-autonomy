@@ -162,6 +162,58 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment transaction."""
+    try:
+        from core.portfolio_manager import process_payment
+        from core.database import query_db
+        
+        # Validate required fields
+        required_fields = ["amount_cents", "currency", "payment_method", "customer_id"]
+        for field in required_fields:
+            if field not in body:
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Process payment
+        result = process_payment(
+            execute_sql=query_db,
+            log_action=lambda *args, **kwargs: None,  # TODO: Add proper logging
+            payment_data=body
+        )
+
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment processing failed"))
+
+        return _make_response(200, {"success": True})
+
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+
+async def handle_verify_transaction(transaction_id: str) -> Dict[str, Any]:
+    """Verify a transaction was recorded successfully."""
+    try:
+        sql = f"""
+        SELECT id, amount_cents, currency, source, metadata, recorded_at
+        FROM revenue_events
+        WHERE id = '{transaction_id}'
+        LIMIT 1
+        """
+        result = await query_db(sql)
+        transaction = result.get("rows", [{}])[0]
+
+        if not transaction.get("id"):
+            return _error_response(404, "Transaction not found")
+
+        return _make_response(200, {
+            "verified": True,
+            "transaction": transaction
+        })
+
+    except Exception as e:
+        return _error_response(500, f"Verification failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +283,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_process_payment(json.loads(body or "{}"))
+    
+    # GET /revenue/transactions/{id}/verify
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "transactions" and parts[2] == "verify" and method == "GET":
+        transaction_id = query_params.get("id", [""])[0]
+        return handle_verify_transaction(transaction_id)
     
     return _error_response(404, "Not found")
 
