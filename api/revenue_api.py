@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing functionality.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/customers - Create new billing customer
+- POST /billing/subscriptions - Create new subscription
+- POST /billing/webhook - Handle payment webhooks
 """
 
 import json
@@ -162,6 +165,66 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_billing_customer(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new billing customer."""
+    try:
+        from billing.payment_processor import PaymentProcessor
+        processor = PaymentProcessor(stripe_secret_key="your_stripe_secret_key")
+        
+        result = await processor.create_customer(
+            email=body.get("email"),
+            name=body.get("name"),
+            metadata=body.get("metadata", {})
+        )
+        
+        if not result["success"]:
+            return _error_response(400, result["error"])
+            
+        return _make_response(200, {
+            "customer_id": result["customer"].id
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create customer: {str(e)}")
+
+async def handle_billing_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription."""
+    try:
+        from billing.payment_processor import PaymentProcessor
+        processor = PaymentProcessor(stripe_secret_key="your_stripe_secret_key")
+        
+        result = await processor.create_subscription(
+            customer_id=body.get("customer_id"),
+            price_id=body.get("price_id")
+        )
+        
+        if not result["success"]:
+            return _error_response(400, result["error"])
+            
+        return _make_response(200, {
+            "subscription_id": result["subscription"].id
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_billing_webhook(request: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhooks."""
+    try:
+        from billing.payment_processor import PaymentProcessor
+        processor = PaymentProcessor(stripe_secret_key="your_stripe_secret_key")
+        
+        result = await processor.handle_webhook(
+            payload=request["body"],
+            sig_header=request["headers"].get("stripe-signature"),
+            webhook_secret="your_webhook_secret"
+        )
+        
+        if not result["success"]:
+            return _error_response(400, result["error"])
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +294,21 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /billing/customers
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "customers" and method == "POST":
+        return handle_billing_customer(json.loads(body or "{}"))
+        
+    # POST /billing/subscriptions
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscriptions" and method == "POST":
+        return handle_billing_subscription(json.loads(body or "{}"))
+        
+    # POST /billing/webhook
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        return handle_billing_webhook({
+            "body": body or "",
+            "headers": query_params
+        })
     
     return _error_response(404, "Not found")
 
