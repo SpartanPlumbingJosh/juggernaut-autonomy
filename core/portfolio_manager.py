@@ -1,6 +1,27 @@
 from __future__ import annotations
 
 import json
+from typing import TypedDict
+
+
+class ServiceOrder(TypedDict):
+    """Service order tracking."""
+    id: str
+    customer_email: str
+    service_type: str
+    amount_cents: int
+    description: str
+    metadata: dict
+    recorded_at: str
+
+
+class ServiceFulfillment(TypedDict):
+    """Service fulfillment tracking."""
+    id: str
+    order_id: str
+    status: str  # received|processing|completed|cancelled
+    created_at: str
+    updated_at: str
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 

@@ -162,6 +162,109 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_service_order(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a new service order."""
+    try:
+        required_fields = ["service_type", "customer_email", "amount_cents", "description"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Insert order
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, experiment_id, event_type,
+            amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {int(body['amount_cents'])},
+            '{body.get('currency', 'USD')}',
+            'service_order',
+            '{json.dumps({
+                "service_type": body['service_type'],
+                "customer_email": body['customer_email'],
+                "description": body['description'],
+                "status": "received"
+            }).replace("'", "''")}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        order_id = result.get("rows", [{}])[0].get("id")
+        
+        # Create fulfillment record
+        fulfillment_sql = f"""
+        INSERT INTO service_fulfillment (
+            id, order_id, status,
+            created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{order_id}',
+            'received',
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(fulfillment_sql)
+
+        return _make_response(200, {
+            "success": True,
+            "order_id": order_id,
+            "message": "Order received and being processed"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process order: {str(e)}")
+
+
+async def handle_service_fulfillment_update(order_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    """Update fulfillment status for a service order."""
+    try:
+        if not body.get("status"):
+            return _error_response(400, "Missing status")
+
+        valid_statuses = ["processing", "completed", "cancelled"]
+        if body["status"] not in valid_statuses:
+            return _error_response(400, f"Invalid status, must be one of: {', '.join(valid_statuses)}")
+
+        # Update fulfillment status
+        sql = f"""
+        UPDATE service_fulfillment
+        SET status = '{body['status']}',
+            updated_at = NOW()
+        WHERE order_id = '{order_id}'
+        RETURNING id
+        """
+        await query_db(sql)
+
+        # Update revenue event metadata with status
+        update_meta_sql = f"""
+        UPDATE revenue_events
+        SET metadata = jsonb_set(
+            COALESCE(metadata, '{{}}'::jsonb),
+            '{{status}}',
+            '{json.dumps(body['status']).replace("'", "''")}'::jsonb
+        )
+        WHERE id = '{order_id}'
+        """
+        await query_db(update_meta_sql)
+
+        return _make_response(200, {
+            "success": True,
+            "order_id": order_id,
+            "status": body['status']
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to update order status: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +334,23 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /service/orders - Create new service order
+    if len(parts) == 2 and parts[0] == "service" and parts[1] == "orders" and method == "POST":
+        try:
+            body_data = json.loads(body) if body else {}
+            return handle_service_order(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # POST /service/orders/{order_id}/fulfillment - Update fulfillment status
+    if len(parts) == 3 and parts[0] == "service" and parts[1] == "orders" and parts[2].endswith("fulfillment") and method == "POST":
+        try:
+            order_id = parts[2].split("/")[0]
+            body_data = json.loads(body) if body else {}
+            return handle_service_fulfillment_update(order_id, body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
