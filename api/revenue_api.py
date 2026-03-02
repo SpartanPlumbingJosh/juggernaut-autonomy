@@ -1,5 +1,11 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core revenue operations handling payments, subscriptions and billing.
+
+Key Features:
+- Payment processing
+- Subscription management 
+- Billing & invoicing
+- Revenue analytics
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
@@ -11,7 +17,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from datetime import datetime, timedelta
+import uuid
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
