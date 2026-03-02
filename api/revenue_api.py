@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/create-customer - Create payment customer
+- POST /revenue/create-subscription - Create subscription
+- POST /revenue/webhook - Payment webhook handler
 """
 
 import json
@@ -216,6 +219,12 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+
+    # Parse JSON body if present
+    try:
+        json_body = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        return _error_response(400, "Invalid JSON body")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -232,6 +241,36 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/create-customer
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-customer" and method == "POST":
+        if not json_body.get("email"):
+            return _error_response(400, "Email required")
+        if not json_body.get("name"):
+            return _error_response(400, "Name required")
+        result = await PaymentProcessor.create_customer(
+            email=json_body["email"],
+            name=json_body["name"]
+        )
+        return _make_response(200 if result["success"] else 400, result)
+
+    # POST /revenue/create-subscription 
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-subscription" and method == "POST":
+        required_fields = ["customer_id", "price_id"]
+        for field in required_fields:
+            if not json_body.get(field):
+                return _error_response(400, f"{field} required")
+        result = await PaymentProcessor.create_subscription(
+            customer_id=json_body["customer_id"],
+            price_id=json_body["price_id"],
+            metadata=json_body.get("metadata", {})
+        )
+        return _make_response(200 if result["success"] else 400, result)
+
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = request.headers.get("stripe-signature", "")
+        return await handle_stripe_webhook(body.encode(), sig_header)
+
     return _error_response(404, "Not found")
 
 
