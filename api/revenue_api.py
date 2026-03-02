@@ -11,7 +11,11 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+from flask import request
 from core.database import query_db
+from billing.service import BillingService
+
+billing_service = BillingService()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
