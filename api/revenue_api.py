@@ -1,10 +1,11 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and handle payments.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process new payment
 """
 
 import json
@@ -162,6 +163,38 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a new payment."""
+    try:
+        from api.payment_processor import payment_processor
+        
+        amount = float(body.get("amount", 0))
+        payment_method = body.get("payment_method", "stripe")
+        customer_info = body.get("customer_info", {})
+        product_info = body.get("product_info", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        success, result = await payment_processor.process_payment(
+            amount=amount,
+            payment_method=payment_method,
+            customer_info=customer_info,
+            product_info=product_info
+        )
+        
+        if not success:
+            return _error_response(500, result.get("error", "Payment failed"))
+            
+        return _make_response(200, {
+            "status": "success",
+            "payment": result.get("payment"),
+            "delivery": result.get("delivery")
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +264,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return handle_payment(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
