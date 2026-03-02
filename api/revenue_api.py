@@ -1,17 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and payment endpoints.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Create payment intent
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import json
 
 from core.database import query_db
+from api.payment_integration import create_payment_intent, handle_stripe_webhook
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +235,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            amount_cents = int(payload.get("amount_cents", 0))
+            currency = payload.get("currency", "usd")
+            metadata = payload.get("metadata", {})
+            result = await create_payment_intent(amount_cents, currency, metadata)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        sig_header = headers.get("stripe-signature", "")
+        result = await handle_stripe_webhook(body.encode(), sig_header)
+        return _make_response(200, result)
     
     return _error_response(404, "Not found")
 
