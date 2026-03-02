@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from freelance.proposal_generator import ProposalGenerator
+from freelance.webhook_handler import WebhookHandler
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -275,6 +277,68 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def handle_freelance_proposals(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    limit: int = 5
+) -> Dict[str, Any]:
+    """Generate and submit freelance proposals."""
+    try:
+        generator = ProposalGenerator()
+        webhook_handler = WebhookHandler()
+        
+        # Get open gigs
+        res = execute_sql(
+            f"""
+            SELECT id, title, description, budget, skills_required
+            FROM freelance_gigs
+            WHERE status = 'open'
+            ORDER BY created_at DESC
+            LIMIT {limit}
+            """
+        )
+        gigs = res.get("rows", []) or []
+        
+        submitted = 0
+        for gig in gigs:
+            proposal = generator.generate_proposal({
+                'task': gig.get('title'),
+                'deliverables': gig.get('description')
+            })
+            
+            if proposal.get('success'):
+                try:
+                    execute_sql(
+                        f"""
+                        INSERT INTO freelance_proposals (
+                            id, gig_id, proposal_text, rate, timeframe, status, created_at
+                        ) VALUES (
+                            gen_random_uuid(),
+                            '{gig.get('id')}',
+                            '{proposal.get('proposal')}',
+                            '{proposal.get('rate')}',
+                            '{proposal.get('timeframe')}',
+                            'submitted',
+                            NOW()
+                        )
+                        """
+                    )
+                    submitted += 1
+                except Exception:
+                    continue
+        
+        return {
+            'success': True,
+            'submitted': submitted,
+            'total_gigs': len(gigs)
+        }
+        
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
