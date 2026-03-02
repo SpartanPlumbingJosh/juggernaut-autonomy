@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_api import route_payment_request
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,7 +212,12 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route API requests."""
+    
+    # First try payment routes
+    payment_response = route_payment_request(path, method, query_params, body)
+    if payment_response.get("statusCode") != 404:
+        return payment_response
     
     # Handle CORS preflight
     if method == "OPTIONS":
