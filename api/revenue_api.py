@@ -5,11 +5,13 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/monitoring - MRR/ARR/churn and progress metrics
 """
 
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Callable
+from api.monitoring import get_revenue_monitoring_summary
 
 from core.database import query_db
 
@@ -231,6 +233,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/monitoring
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitoring" and method == "GET":
+        return await get_revenue_monitoring_summary(query_db)
     
     return _error_response(404, "Not found")
 
