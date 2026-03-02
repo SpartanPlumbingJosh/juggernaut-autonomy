@@ -114,6 +114,36 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
+async def log_revenue_event(source: str, amount_cents: int, metadata: Dict[str, Any]) -> bool:
+    """Log a revenue event to the database."""
+    try:
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, 
+                event_type,
+                amount_cents,  
+                currency,
+                source,
+                metadata,
+                recorded_at,
+                created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                'usd',
+                '{SOURCE_API}',
+                '{json.dumps(metadata)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        return True
+    except Exception as e:
+        print(f"Failed to log revenue: {str(e)}")
+        return False
+
+
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
