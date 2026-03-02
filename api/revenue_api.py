@@ -1,13 +1,16 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing services.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscribe - Create new subscription
+- POST /revenue/webhook - Stripe webhook handler
 """
 
 import json
+from billing.service import BillingService
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -210,7 +213,45 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new subscription creation."""
+    try:
+        billing = BillingService()
+        customer_id = body.get("customer_id")
+        price_id = body.get("price_id")
+        
+        if not customer_id or not price_id:
+            return _error_response(400, "Missing required fields")
+            
+        result = await billing.create_subscription(customer_id, price_id)
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Subscription failed"))
+            
+        return _make_response(200, {
+            "subscription_id": result["subscription_id"],
+            "client_secret": result["client_secret"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription error: {str(e)}")
+
+async def handle_webhook(headers: Dict[str, Any], body: bytes) -> Dict[str, Any]:
+    """Process Stripe webhook."""
+    try:
+        billing = BillingService()
+        sig_header = headers.get("stripe-signature", "")
+        result = await billing.handle_webhook(body, sig_header)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook failed"))
+            
+        return _make_response(200, {})
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook error: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -219,6 +260,7 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    parsed_body = json.loads(body) if body else {}
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
@@ -231,6 +273,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return handle_create_subscription(parsed_body)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(headers or {}, body.encode() if body else b'')
     
     return _error_response(404, "Not found")
 
