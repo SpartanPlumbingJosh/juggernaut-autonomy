@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import math
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
@@ -274,6 +275,82 @@ def start_experiments_from_top_ideas(
         out["failures"] = failures[:10]
         out["failed"] = len(failures)
     return out
+
+
+def calculate_runway_and_forecast(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    target_revenue: float = 14_000_000.0,
+) -> Dict[str, Any]:
+    """Calculate runway to target revenue and forecast trajectory."""
+    try:
+        # Get current revenue and growth rate
+        res = execute_sql("""
+            SELECT 
+                SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END)/100.0 as total_revenue,
+                COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
+                MIN(recorded_at) as first_revenue_at,
+                MAX(recorded_at) as last_revenue_at
+            FROM revenue_events
+        """)
+        data = res.get("rows", [{}])[0]
+        
+        total_revenue = float(data.get("total_revenue") or 0)
+        transaction_count = int(data.get("transaction_count") or 0)
+        first_revenue_at = data.get("first_revenue_at")
+        last_revenue_at = data.get("last_revenue_at")
+        
+        if not first_revenue_at or not last_revenue_at:
+            return {"success": False, "error": "Insufficient revenue history"}
+            
+        # Calculate growth rate
+        days_running = (datetime.fromisoformat(last_revenue_at) - 
+                       datetime.fromisoformat(first_revenue_at)).days or 1
+        avg_daily_revenue = total_revenue / days_running
+        
+        # Calculate runway
+        remaining_revenue = target_revenue - total_revenue
+        if remaining_revenue <= 0:
+            return {"success": True, "status": "target_reached", "total_revenue": total_revenue}
+            
+        runway_days = math.ceil(remaining_revenue / avg_daily_revenue)
+        
+        # Forecast next 90 days
+        forecast_days = 90
+        forecast = []
+        cumulative = total_revenue
+        for day in range(forecast_days):
+            cumulative += avg_daily_revenue
+            forecast.append({
+                "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d"),
+                "projected_revenue": cumulative
+            })
+            
+        # Check for milestone risks
+        milestones = [5_000_000, 10_000_000, target_revenue]
+        risk_alerts = []
+        for milestone in milestones:
+            if total_revenue < milestone:
+                days_to_milestone = math.ceil((milestone - total_revenue) / avg_daily_revenue)
+                if days_to_milestone > 90:
+                    risk_alerts.append({
+                        "milestone": milestone,
+                        "projected_days": days_to_milestone,
+                        "status": "at_risk"
+                    })
+        
+        return {
+            "success": True,
+            "total_revenue": total_revenue,
+            "transaction_count": transaction_count,
+            "avg_daily_revenue": avg_daily_revenue,
+            "runway_days": runway_days,
+            "forecast": forecast,
+            "risk_alerts": risk_alerts
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def review_experiments_stub(

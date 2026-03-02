@@ -162,6 +162,29 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_forecast(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get revenue forecast and runway analysis."""
+    try:
+        from core.portfolio_manager import calculate_runway_and_forecast
+        from core.database import query_db
+        
+        target_revenue = float(query_params.get("target", ["14000000"])[0] if isinstance(query_params.get("target"), list) else query_params.get("target", 14000000))
+        
+        forecast = calculate_runway_and_forecast(
+            execute_sql=query_db,
+            log_action=lambda *args, **kwargs: None,
+            target_revenue=target_revenue
+        )
+        
+        if not forecast.get("success"):
+            return _error_response(500, forecast.get("error", "Forecast failed"))
+            
+        return _make_response(200, forecast)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to generate forecast: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +254,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/forecast
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "forecast" and method == "GET":
+        return handle_revenue_forecast(query_params)
     
     return _error_response(404, "Not found")
 
