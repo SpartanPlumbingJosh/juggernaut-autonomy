@@ -3,17 +3,20 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from billing.service import BillingService
+from billing.models import SubscriptionPlan, Subscription
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
-def generate_revenue_ideas(
+async def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    billing_service: Optional[BillingService] = None,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
