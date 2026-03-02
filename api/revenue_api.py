@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/customers - Create new customer
+- POST /billing/subscriptions - Create new subscription
+- POST /billing/webhook - Handle payment webhooks
 """
 
 import json
@@ -12,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.payment_gateway import PaymentGateway
+from billing.invoice_manager import InvoiceManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -217,6 +222,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if method == "OPTIONS":
         return _make_response(200, {})
     
+    # Initialize billing services
+    payment_gateway = PaymentGateway()
+    invoice_manager = InvoiceManager()
+    
     # Parse path
     parts = [p for p in path.split("/") if p]
     
@@ -231,6 +240,54 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /billing/customers
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "customers" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            email = body_data.get("email")
+            name = body_data.get("name")
+            if not email or not name:
+                return _error_response(400, "Email and name are required")
+            
+            result = await payment_gateway.create_customer(email, name)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Failed to create customer"))
+            
+            return _make_response(200, {"customer_id": result["customer_id"]})
+        except Exception as e:
+            return _error_response(500, f"Failed to create customer: {str(e)}")
+    
+    # POST /billing/subscriptions
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            customer_id = body_data.get("customer_id")
+            price_id = body_data.get("price_id")
+            if not customer_id or not price_id:
+                return _error_response(400, "Customer ID and price ID are required")
+            
+            result = await payment_gateway.create_subscription(customer_id, price_id)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Failed to create subscription"))
+            
+            return _make_response(200, {
+                "subscription_id": result["subscription_id"],
+                "client_secret": result["client_secret"]
+            })
+        except Exception as e:
+            return _error_response(500, f"Failed to create subscription: {str(e)}")
+    
+    # POST /billing/webhook
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        try:
+            sig_header = headers.get("Stripe-Signature")
+            result = await payment_gateway.handle_webhook(body, sig_header)
+            if not result.get("success"):
+                return _error_response(400, result.get("error", "Webhook processing failed"))
+            return _make_response(200, {})
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
