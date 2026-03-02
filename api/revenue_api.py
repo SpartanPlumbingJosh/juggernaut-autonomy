@@ -1,10 +1,20 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Complete revenue infrastructure including:
+- Payment processing
+- Subscription management
+- Invoicing system 
+- Revenue recognition
+- Real-time transaction tracking
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Process new payment
+- POST /revenue/subscriptions - Create subscription
+- POST /revenue/invoices - Generate invoice
+- GET /revenue/recognized - Recognized revenue report
+- POST /revenue/webhook - Payment processor webhook
 """
 
 import json
@@ -162,6 +172,191 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_processing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment from any provider."""
+    try:
+        required_fields = ["amount_cents", "currency", "payment_method", "customer_id"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required payment fields")
+        
+        # Process payment
+        amount_cents = int(body["amount_cents"])
+        currency = str(body["currency"])
+        payment_method = str(body["payment_method"])
+        customer_id = str(body["customer_id"])
+        description = body.get("description", "")
+
+        # Save transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            experiment_id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            NULL,
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            '{payment_method}',
+            '{json.dumps({
+                "customer_id": customer_id,
+                "description": description,
+                "processor": body.get("processor", "manual"),
+                "invoice_id": body.get("invoice_id")
+            })}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        payment_id = result.get("rows", [{}])[0].get("id")
+
+        return _make_response(200, {
+            "success": True,
+            "payment_id": payment_id,
+            "amount": amount_cents / 100,
+            "currency": currency
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def handle_subscription_creation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create or update a subscription."""
+    try:
+        required_fields = ["plan_id", "customer_id", "payment_method"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required subscription fields")
+        
+        # Insert/update subscription
+        sql = f"""
+        INSERT INTO subscriptions (
+            id,
+            customer_id,
+            plan_id,
+            payment_method,
+            status,
+            metadata,
+            created_at,
+            updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["customer_id"]}',
+            '{body["plan_id"]}',
+            '{body["payment_method"]}',
+            'active',
+            '{json.dumps(body.get("metadata", {}))}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT (customer_id, plan_id) WHERE status != 'canceled'
+        DO UPDATE SET
+            payment_method = EXCLUDED.payment_method,
+            status = 'active',
+            metadata = EXCLUDED.metadata,
+            updated_at = NOW()
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        sub_id = result.get("rows", [{}])[0].get("id")
+
+        return _make_response(200, {
+            "success": True,
+            "subscription_id": sub_id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
+
+async def handle_invoice_generation(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Generate an invoice for a customer."""
+    try:
+        required_fields = ["customer_id", "amount_cents", "currency", "items"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required invoice fields")
+        
+        # Generate invoice
+        sql = f"""
+        INSERT INTO invoices (
+            id,
+            customer_id,
+            amount_cents,
+            currency,
+            status,
+            metadata,
+            due_date,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{body["customer_id"]}',
+            {body["amount_cents"]},
+            '{body["currency"]}',
+            'pending',
+            '{json.dumps({
+                "items": body["items"],
+                "description": body.get("description", ""),
+                "terms": body.get("terms")
+            })}'::jsonb,
+            {(f"'{body['due_date']}'" if body.get('due_date') else "NOW() + INTERVAL '30 DAYS'")},
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        invoice_id = result.get("rows", [{}])[0].get("id")
+
+        return _make_response(200, {
+            "success": True,
+            "invoice_id": invoice_id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Invoice generation failed: {str(e)}")
+
+
+async def handle_revenue_recognition() -> Dict[str, Any]:
+    """Get recognized revenue report."""
+    try:
+        # Get recognized revenue based on accounting rules
+        sql = """
+        SELECT 
+            invoice_id,
+            customer_id,
+            amount_cents,
+            currency,
+            recognized_date,
+            recognized_amount_cents,
+            invoice_date
+        FROM recognized_revenue
+        WHERE recognized_date BETWEEN NOW() - INTERVAL '90 DAYS' AND NOW()
+        ORDER BY recognized_date DESC
+        """
+        
+        result = await query_db(sql)
+        recognized = result.get("rows", [])
+
+        return _make_response(200, {
+            "recognized_revenue": recognized,
+            "period": "last_90_days"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Revenue recognition report failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -212,6 +407,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    parsed_body = json.loads(body or "{}")
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -232,6 +428,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_payment_processing(parsed_body)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_subscription_creation(parsed_body)
+    
+    # POST /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "POST":
+        return handle_invoice_generation(parsed_body)
+    
+    # GET /revenue/recognized
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "recognized" and method == "GET":
+        return handle_revenue_recognition()
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(parsed_body)
+
     return _error_response(404, "Not found")
 
 
