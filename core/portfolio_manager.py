@@ -276,6 +276,44 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_product_revenue(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    product_id: str,
+    revenue_cents: int,
+    currency: str = "usd"
+) -> Dict[str, Any]:
+    """Track revenue from product sales."""
+    try:
+        execute_sql(
+            f"""
+            INSERT INTO product_revenue (
+                id, product_id, revenue_cents, currency, recorded_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{product_id}',
+                {revenue_cents},
+                '{currency}',
+                NOW()
+            )
+            """
+        )
+        log_action(
+            "product.revenue_tracked",
+            f"Tracked revenue for product {product_id}",
+            level="info",
+            output_data={"product_id": product_id, "revenue_cents": revenue_cents}
+        )
+        return {"success": True}
+    except Exception as e:
+        log_action(
+            "product.revenue_tracking_failed",
+            f"Failed to track revenue for product {product_id}",
+            level="error",
+            error_data={"product_id": product_id, "error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

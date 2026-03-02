@@ -33,6 +33,32 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def get_product_revenue(product_id: str) -> Dict[str, Any]:
+    """Get revenue for a specific product."""
+    try:
+        sql = f"""
+        SELECT 
+            SUM(revenue_cents) as total_revenue_cents,
+            COUNT(*) as transaction_count,
+            MIN(recorded_at) as first_sale_at,
+            MAX(recorded_at) as last_sale_at
+        FROM product_revenue
+        WHERE product_id = '{product_id}'
+        """
+        result = await query_db(sql)
+        data = result.get("rows", [{}])[0]
+        
+        return {
+            "product_id": product_id,
+            "total_revenue_cents": data.get("total_revenue_cents") or 0,
+            "transaction_count": data.get("transaction_count") or 0,
+            "first_sale_at": data.get("first_sale_at"),
+            "last_sale_at": data.get("last_sale_at")
+        }
+    except Exception as e:
+        logger.error(f"Failed to get product revenue: {str(e)}")
+        return {}
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
