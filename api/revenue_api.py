@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/subscriptions - Active subscriptions
+- GET /revenue/invoices - Generated invoices
 """
 
 import json
@@ -162,6 +164,79 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_subscriptions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get active subscriptions."""
+    try:
+        limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
+        offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
+        
+        sql = f"""
+        SELECT 
+            id, customer_id, plan_id, status,
+            current_period_start, current_period_end,
+            created_at, updated_at, metadata
+        FROM subscriptions
+        WHERE status = 'active'
+        ORDER BY current_period_end DESC
+        LIMIT {limit}
+        OFFSET {offset}
+        """
+        
+        result = await query_db(sql)
+        subscriptions = result.get("rows", [])
+        
+        # Get total count
+        count_sql = "SELECT COUNT(*) as total FROM subscriptions WHERE status = 'active'"
+        count_result = await query_db(count_sql)
+        total = count_result.get("rows", [{}])[0].get("total", 0)
+        
+        return _make_response(200, {
+            "subscriptions": subscriptions,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch subscriptions: {str(e)}")
+
+
+async def handle_revenue_invoices(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get generated invoices."""
+    try:
+        limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
+        offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
+        
+        sql = f"""
+        SELECT 
+            id, customer_id, amount_cents, currency,
+            status, due_date, paid_at, created_at,
+            metadata
+        FROM invoices
+        ORDER BY created_at DESC
+        LIMIT {limit}
+        OFFSET {offset}
+        """
+        
+        result = await query_db(sql)
+        invoices = result.get("rows", [])
+        
+        # Get total count
+        count_sql = "SELECT COUNT(*) as total FROM invoices"
+        count_result = await query_db(count_sql)
+        total = count_result.get("rows", [{}])[0].get("total", 0)
+        
+        return _make_response(200, {
+            "invoices": invoices,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch invoices: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +306,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        return handle_revenue_subscriptions(query_params)
+    
+    # GET /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "GET":
+        return handle_revenue_invoices(query_params)
     
     return _error_response(404, "Not found")
 
