@@ -11,7 +11,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+import json
+from core.database import query_db, execute_sql
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +164,11 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment."""
+    processor = PaymentProcessor()
+    return await processor.process_payment(payment_data)
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -216,6 +223,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+        
+    # Handle POST /revenue/payment
+    if method == "POST" and len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment":
+        try:
+            payment_data = json.loads(body or "{}")
+            return await handle_payment(payment_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid payment data: {str(e)}")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
