@@ -33,6 +33,64 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+from services.payment_processor import PaymentProcessor
+
+payment_processor = PaymentProcessor()
+
+async def process_transaction(
+    amount_cents: int,
+    source: str,
+    metadata: Dict
+) -> Dict[str, Any]:
+    """Process a new revenue transaction."""
+    try:
+        # Capture payment
+        payment_intent_id = metadata.get("payment_intent_id")
+        if not payment_intent_id:
+            return {"success": False, "error": "Missing payment_intent_id"}
+            
+        capture_result = await payment_processor.capture_payment(
+            payment_intent_id=payment_intent_id,
+            amount_cents=amount_cents
+        )
+        
+        if not capture_result.get("success"):
+            return capture_result
+        
+        # Record revenue event
+        result = await query_db(
+            f"""
+            INSERT INTO revenue_events (
+                id,
+                event_type,
+                amount_cents,
+                currency,
+                source,
+                metadata,
+                recorded_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                '{capture_result["currency"]}',
+                '{source.replace("'", "''")}',
+                '{json.dumps(metadata).replace("'", "''")}',
+                NOW()
+            )
+            RETURNING id
+            """
+        )
+        
+        return {
+            "success": True,
+            "transaction_id": result.get("rows", [{}])[0].get("id"),
+            "amount_cents": amount_cents,
+            "currency": capture_result["currency"]
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +289,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            transaction_result = await process_transaction(
+                amount_cents=int(body_data.get("amount_cents", 0)),
+                source=str(body_data.get("source", "")),
+                metadata=body_data.get("metadata", {})
+            )
+            return _make_response(
+                200 if transaction_result["success"] else 400,
+                transaction_result
+            )
+        except Exception as e:
+            return _error_response(400, str(e))
     
     return _error_response(404, "Not found")
 

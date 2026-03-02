@@ -7,6 +7,27 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from datetime import datetime, timedelta
+
+def calculate_revenue_velocity(execute_sql: Callable[[str], Dict[str, Any]], idea_id: str) -> float:
+    """Calculate revenue velocity for an idea."""
+    try:
+        res = execute_sql(f"""
+            SELECT 
+                COALESCE(SUM(amount_cents)/100, 0) as total_revenue_usd,
+                EXTRACT(EPOCH FROM (NOW() - MIN(recorded_at)))/3600 as hours_running
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+              AND metadata->>'idea_id' = '{idea_id.replace("'", "''")}'
+        """)
+        
+        row = res.get("rows", [{}])[0]
+        total_revenue = float(row.get("total_revenue_usd", 0))
+        hours = float(row.get("hours_running", 1))
+        
+        return round(total_revenue / max(1, hours) * 24, 2)  # Daily revenue rate
+    except Exception:
+        return 0.0
 
 
 def generate_revenue_ideas(
