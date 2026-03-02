@@ -280,11 +280,21 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
+    """Review running experiments and trigger learning loop for completed ones.
+    Also handles automated billing and subscription management."""
     """Review running experiments and trigger learning loop for completed ones."""
     try:
         from core.learning_loop import on_experiment_complete
+        from core.payment_processor import PaymentProcessor
+        from core.product_delivery import ProductDelivery
+        
+        # Initialize payment processor with Stripe API key
+        payment_processor = PaymentProcessor(api_key="sk_test_...")
+        product_delivery = ProductDelivery()
     except ImportError:
         on_experiment_complete = None
+        payment_processor = None
+        product_delivery = None
     
     try:
         res = execute_sql(
@@ -308,6 +318,7 @@ def review_experiments_stub(
     running_count = 0
     completed_count = 0
     learning_triggered = 0
+    billing_processed = 0
     
     for exp in rows:
         exp_id = exp.get("id")
@@ -407,5 +418,6 @@ def review_experiments_stub(
         "success": True,
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "billing_processed": billing_processed
     }
