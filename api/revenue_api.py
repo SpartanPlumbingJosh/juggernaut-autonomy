@@ -1,17 +1,24 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and subscription management data.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- PUT /revenue/subscriptions/{id} - Update subscription
+- DELETE /revenue/subscriptions/{id} - Cancel subscription
+- POST /revenue/webhooks - Handle payment gateway webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import json
 
 from core.database import query_db
+from services.subscription_service import SubscriptionService
+from services.payment_gateway import PaymentGatewayService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +239,94 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return handle_create_subscription(data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
+    # PUT /revenue/subscriptions/{id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "PUT":
+        subscription_id = parts[2]
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return handle_update_subscription(subscription_id, data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
+    # DELETE /revenue/subscriptions/{id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "DELETE":
+        subscription_id = parts[2]
+        return handle_cancel_subscription(subscription_id)
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return handle_webhook(data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
     return _error_response(404, "Not found")
+
+async def handle_create_subscription(data: Dict) -> Dict[str, Any]:
+    """Handle subscription creation."""
+    try:
+        subscription_service = SubscriptionService(query_db)
+        result = await subscription_service.create_subscription(
+            data["user_id"],
+            data["plan_id"],
+            data["payment_method"]
+        )
+        if result.get("error"):
+            return _error_response(400, result["error"])
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def handle_update_subscription(subscription_id: str, data: Dict) -> Dict[str, Any]:
+    """Handle subscription update."""
+    try:
+        subscription_service = SubscriptionService(query_db)
+        result = await subscription_service.update_subscription(
+            subscription_id,
+            data
+        )
+        if result.get("error"):
+            return _error_response(400, result["error"])
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def handle_cancel_subscription(subscription_id: str) -> Dict[str, Any]:
+    """Handle subscription cancellation."""
+    try:
+        subscription_service = SubscriptionService(query_db)
+        result = await subscription_service.cancel_subscription(subscription_id)
+        if result.get("error"):
+            return _error_response(400, result["error"])
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def handle_webhook(data: Dict) -> Dict[str, Any]:
+    """Handle payment gateway webhooks."""
+    try:
+        payment_gateway = PaymentGatewayService()
+        result = await payment_gateway.handle_webhook(data)
+        if result.get("error"):
+            return _error_response(400, result["error"])
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
 
 
 __all__ = ["route_request"]
