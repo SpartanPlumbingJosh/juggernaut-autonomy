@@ -1,17 +1,24 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/create-payment - Create a payment intent
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
-
+from fastapi import Depends, HTTPException, status
+from auth_service import get_current_user, Token
+from stripe_integration import StripePaymentProcessor
 from core.database import query_db
+
+# Initialize Stripe
+stripe_processor = StripePaymentProcessor(api_key="your-stripe-secret-key")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +217,40 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_payment(body: Dict[str, Any], current_user: User = Depends(get_current_user)) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        amount = int(body.get("amount", 0))
+        currency = body.get("currency", "usd")
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Amount must be positive")
+            
+        result = await stripe_processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
+
+async def handle_webhook(request: Request) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature")
+    
+    try:
+        result = await stripe_processor.handle_webhook(
+            payload=payload,
+            sig_header=sig_header,
+            webhook_secret="your-webhook-secret"
+        )
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, str(e))
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +272,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/create-payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "create-payment" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(body)
     
     return _error_response(404, "Not found")
 
