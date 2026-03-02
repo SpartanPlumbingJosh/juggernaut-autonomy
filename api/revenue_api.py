@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from api.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,56 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_customer(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new customer."""
+    try:
+        email = body.get("email")
+        name = body.get("name")
+        if not email or not name:
+            return _error_response(400, "Email and name are required")
+        
+        result = await PaymentProcessor.create_customer(email, name)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+        
+        return _make_response(200, {"customer_id": result["customer_id"]})
+    except Exception as e:
+        return _error_response(500, f"Failed to create customer: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer_id = body.get("customer_id")
+        price_id = body.get("price_id")
+        if not customer_id or not price_id:
+            return _error_response(400, "Customer ID and price ID are required")
+        
+        result = await PaymentProcessor.create_subscription(customer_id, price_id)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+        
+        return _make_response(200, {
+            "subscription_id": result["subscription_id"],
+            "client_secret": result["client_secret"]
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_payment_webhook(headers: Dict[str, Any], body: bytes) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        sig_header = headers.get("stripe-signature")
+        if not sig_header:
+            return _error_response(400, "Missing signature header")
+        
+        result = await PaymentProcessor.handle_webhook(body, sig_header)
+        if not result.get("success"):
+            return _error_response(400, result.get("error"))
+        
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +282,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/customers
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customers" and method == "POST":
+        return handle_create_customer(json.loads(body or "{}"))
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(headers, body.encode() if isinstance(body, str) else body)
     
     return _error_response(404, "Not found")
 
