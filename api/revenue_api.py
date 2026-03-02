@@ -218,6 +218,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
         return _make_response(200, {})
     
     # Parse path
+    if path.startswith("/payment/webhook"):
+        from services.payment_processor import PaymentProcessor
+        processor = PaymentProcessor()
+        try:
+            result = await processor.handle_webhook(
+                body.encode() if body else b'',
+                query_params.get("stripe-signature", "")
+            )
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(400, str(e))
+    
     parts = [p for p in path.split("/") if p]
     
     # GET /revenue/summary
