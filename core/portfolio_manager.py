@@ -9,6 +9,23 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+import logging
+from functools import wraps
+
+logger = logging.getLogger(__name__)
+
+def log_errors(func):
+    """Decorator to log errors and wrap in response dict"""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            logger.error(f"Error in {func.__name__}: {str(e)}", exc_info=True)
+            return {"success": False, "error": str(e)}
+    return wrapper
+
+@log_errors
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
