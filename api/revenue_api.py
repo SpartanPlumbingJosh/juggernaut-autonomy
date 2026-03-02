@@ -10,8 +10,10 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import json
 
 from core.database import query_db
+from api.stripe_integration import StripePayment
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +34,34 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription for API access."""
+    try:
+        email = body.get("email")
+        name = body.get("name")
+        price_id = body.get("price_id")
+        
+        if not all([email, name, price_id]):
+            return _error_response(400, "Missing required fields")
+            
+        # Create customer
+        customer_id = await StripePayment.create_customer(email, name)
+        if not customer_id:
+            return _error_response(500, "Failed to create customer")
+            
+        # Create subscription
+        subscription = await StripePayment.create_subscription(customer_id, price_id)
+        if not subscription:
+            return _error_response(500, "Failed to create subscription")
+            
+        return _make_response(200, {
+            "subscription_id": subscription["subscription_id"],
+            "client_secret": subscription["client_secret"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -211,6 +241,13 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    # Parse body if present
+    parsed_body = {}
+    if body:
+        try:
+            parsed_body = json.loads(body)
+        except:
+            pass
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +268,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(parsed_body)
     
     return _error_response(404, "Not found")
 
