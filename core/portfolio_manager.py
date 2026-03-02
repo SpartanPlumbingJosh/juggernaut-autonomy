@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_strategies import RevenueStrategy, create_strategy
 
 
 def generate_revenue_ideas(
@@ -14,10 +15,25 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    strategy: RevenueStrategy = RevenueStrategy.MICRO_SAAS,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
+    strategy_instance = create_strategy(strategy, execute_sql, log_action)
+    
+    # Generate ideas specific to the selected strategy
+    context["strategy"] = strategy.value
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Add strategy-specific metadata to ideas
+    for idea in ideas:
+        idea["strategy"] = strategy.value
+        if strategy == RevenueStrategy.ARBITRAGE:
+            idea["estimates"]["profit_margin"] = 0.15  # Example arbitrage margin
+        elif strategy == RevenueStrategy.MICRO_SAAS:
+            idea["estimates"]["mrr"] = 5000  # Example monthly recurring revenue
+        elif strategy == RevenueStrategy.TRADING:
+            idea["estimates"]["risk_factor"] = 0.1  # Example risk factor
 
     created = 0
     failures: List[Dict[str, Any]] = []
