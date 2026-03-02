@@ -28,9 +28,12 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _error_response(status_code: int, message: str) -> Dict[str, Any]:
-    """Create error response."""
-    return _make_response(status_code, {"error": message})
+def _error_response(status_code: int, message: str, error_code: Optional[str] = None) -> Dict[str, Any]:
+    """Create error response with additional error details."""
+    response = {"error": message}
+    if error_code:
+        response["error_code"] = error_code
+    return _make_response(status_code, response)
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:

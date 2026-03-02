@@ -187,7 +187,15 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    circuit_breaker: Optional[bool] = False,
 ) -> Dict[str, Any]:
+    """Start new experiments from top ideas with circuit breaker support."""
+    if circuit_breaker:
+        return {
+            "success": False,
+            "error": "Circuit breaker tripped - experiment creation paused",
+            "error_code": "CIRCUIT_BREAKER_TRIPPED"
+        }
     try:
         res = execute_sql(
             f"""
