@@ -1,17 +1,26 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue & Payment API - Handle payments and revenue tracking.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payments/webhook - Payment gateway webhook
+- POST /payments/subscribe - Create new subscriber
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_service import PaymentService
+
+logger = logging.getLogger(__name__)
+
+# Initialize payment service
+payment_service = PaymentService()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
