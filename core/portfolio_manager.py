@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from api.payment_service import PaymentService
+from core.delivery_service import DeliveryService
+
+logger = logging.getLogger(__name__)
+payment_service = PaymentService()
+delivery_service = DeliveryService()
 
 
 def generate_revenue_ideas(
