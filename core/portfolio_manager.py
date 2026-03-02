@@ -1,12 +1,69 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from services.arbitrage_bot import ArbitrageBot
+
+
+async def analyze_arbitrage_opportunities(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Run arbitrage analysis and execute profitable trades"""
+    try:
+        bot = ArbitrageBot(config)
+        opportunities = await bot.find_opportunities()
+        
+        executed = 0
+        profit = 0.0
+        for opportunity in opportunities:
+            if executed >= config.get('max_trades_per_run', 3):
+                break
+                
+            await log_action(
+                "arbitrage.found",
+                f"Found arbitrage opportunity for {opportunity['pair']}",
+                level="info",
+                output_data=opportunity
+            )
+            
+            result = await bot.execute_trade(opportunity)
+            if result['success']:
+                executed += 1
+                profit += result['net_profit']
+                
+                await log_action(
+                    "arbitrage.completed",
+                    f"Completed arbitrage trade for {opportunity['pair']}",
+                    level="info",
+                    output_data={
+                        **opportunity,
+                        'execution_result': result
+                    }
+                )
+                
+        return {
+            'success': True,
+            'opportunities_evaluated': len(opportunities),
+            'trades_executed': executed,
+            'total_profit': profit
+        }
+        
+    except Exception as e:
+        await log_action(
+            "arbitrage.error",
+            f"Arbitrage analysis failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {'success': False, 'error': str(e)}
 
 
 def generate_revenue_ideas(
