@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_engine import RevenueEngine
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,15 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        engine = RevenueEngine(query_db, lambda *args, **kwargs: None)
+        result = await engine.process_payment_webhook(body)
+        return _make_response(200 if result["success"] else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +241,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
