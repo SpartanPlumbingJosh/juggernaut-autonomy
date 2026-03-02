@@ -14,7 +14,15 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    monitoring_tags: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
+    """
+    Generate revenue ideas with enhanced monitoring and automation.
+    
+    Args:
+        monitoring_tags: Key-value pairs for transaction tracking
+            Example: {"feature": "automated_revenue", "source": "cron_job"}
+    """
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]

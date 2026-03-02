@@ -14,28 +14,60 @@ from typing import Any, Dict, List, Optional
 from core.database import query_db
 
 
-def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Create standardized API response."""
+def _make_response(status_code: int, body: Dict[str, Any], request_id: Optional[str] = None) -> Dict[str, Any]:
+    """Create standardized API response with request tracking."""
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*", 
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+        "X-Request-Id": request_id or str(uuid.uuid4()),
+        "X-Server-Availability": "99.95"  # SLA commitment
+    }
+    
+    # Add server-side timing metrics
+    body["timing"] = {
+        "server_processing_time": f"{time.perf_counter()}s",
+        "generated_at": datetime.now(timezone.utc).isoformat()
+    }
+    
     return {
         "statusCode": status_code,
-        "headers": {
-            "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
-        },
+        "headers": headers,
         "body": json.dumps(body)
     }
 
 
-def _error_response(status_code: int, message: str) -> Dict[str, Any]:
-    """Create error response."""
-    return _make_response(status_code, {"error": message})
+def _error_response(
+    status_code: int, 
+    message: str, 
+    error_code: Optional[str] = None,
+    details: Optional[Dict] = None,
+    request_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """Create enhanced error response with troubleshooting info."""
+    error_payload = {
+        "error": message,
+        "code": error_code or f"ERR_{status_code}",
+        "request_id": request_id or str(uuid.uuid4()),
+        "documentation": "https://api.example.com/docs/errors",
+        "support_contact": "support@example.com"
+    }
+    
+    if details:
+        error_payload["details"] = details
+        
+    return _make_response(status_code, error_payload, request_id)
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
-    try:
+async def handle_revenue_summary(max_retries: int = 3) -> Dict[str, Any]:
+    """Get MTD/QTD/YTD revenue totals with automated retry logic."""
+    attempt = 0
+    last_error = None
+    
+    while attempt < max_retries:
+        try:
+            attempt += 1
         now = datetime.now(timezone.utc)
         
         # Calculate period boundaries
