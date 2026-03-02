@@ -210,6 +210,9 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+from payment_processor.stripe_handler import handle_stripe_webhook
+from payment_processor.paddle_handler import handle_paddle_webhook
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -219,6 +222,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # Payment provider webhooks
+    if len(parts) == 3 and parts[0] == "webhooks":
+        if parts[1] == "stripe" and method == "POST":
+            sig_header = query_params.get("stripe-signature", "")
+            return handle_stripe_webhook(json.loads(body), sig_header)
+        elif parts[1] == "paddle" and method == "POST":
+            return handle_paddle_webhook(json.loads(body))
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
