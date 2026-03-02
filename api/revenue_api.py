@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core revenue functionality including payments, delivery, and analytics.
 
 Endpoints:
+- POST /revenue/payment - Process payment
+- POST /revenue/delivery - Track service delivery
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/users - User revenue stats
 """
 
 import json
@@ -31,6 +34,108 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
+
+
+async def process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment and create revenue event."""
+    try:
+        amount_cents = int(float(body.get("amount", 0)) * 100)
+        user_id = body.get("user_id")
+        service_id = body.get("service_id")
+        
+        if not user_id or not service_id or amount_cents <= 0:
+            return _error_response(400, "Invalid payment data")
+            
+        # Create payment record
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'payment',
+            {amount_cents},
+            'USD',
+            'user_payment',
+            '{{"user_id": "{user_id}", "service_id": "{service_id}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        payment_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def track_delivery(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Track service delivery completion."""
+    try:
+        payment_id = body.get("payment_id")
+        user_id = body.get("user_id")
+        service_id = body.get("service_id")
+        
+        if not payment_id or not user_id or not service_id:
+            return _error_response(400, "Invalid delivery data")
+            
+        # Mark delivery complete
+        sql = f"""
+        UPDATE revenue_events
+        SET metadata = metadata || '{{"delivered_at": "{datetime.now(timezone.utc).isoformat()}"}}'::jsonb
+        WHERE id = '{payment_id}'
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        if not result.get("rows"):
+            return _error_response(404, "Payment not found")
+            
+        return _make_response(200, {
+            "status": "delivered",
+            "payment_id": payment_id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Delivery tracking failed: {str(e)}")
+
+
+async def get_user_revenue_stats(user_id: str) -> Dict[str, Any]:
+    """Get revenue stats for a specific user."""
+    try:
+        if not user_id:
+            return _error_response(400, "User ID required")
+            
+        # Lifetime stats
+        sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'payment' THEN amount_cents ELSE 0 END) as total_spent_cents,
+            COUNT(*) FILTER (WHERE event_type = 'payment') as total_payments,
+            MIN(recorded_at) FILTER (WHERE event_type = 'payment') as first_payment_at,
+            MAX(recorded_at) FILTER (WHERE event_type = 'payment') as last_payment_at
+        FROM revenue_events
+        WHERE metadata->>'user_id' = '{user_id}'
+        """
+        
+        result = await query_db(sql)
+        stats = result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "total_spent_cents": stats.get("total_spent_cents") or 0,
+            "total_payments": stats.get("total_payments") or 0,
+            "first_payment_at": stats.get("first_payment_at"),
+            "last_payment_at": stats.get("last_payment_at")
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to get user stats: {str(e)}")
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -220,17 +325,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return await process_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/delivery
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "delivery" and method == "POST":
+        return await track_delivery(json.loads(body or "{}"))
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
+        return await handle_revenue_summary()
     
     # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
+        return await handle_revenue_transactions(query_params)
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+        return await handle_revenue_charts(query_params)
+    
+    # GET /revenue/users/{user_id}
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "users" and method == "GET":
+        return await get_user_revenue_stats(parts[2])
     
     return _error_response(404, "Not found")
 
