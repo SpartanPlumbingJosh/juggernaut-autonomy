@@ -33,6 +33,11 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def handle_payment_webhook(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    from core.payment_handler import handle_payment_webhook as process_payment
+    return await process_payment(data)
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +236,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return await handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 

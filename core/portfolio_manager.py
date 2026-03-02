@@ -14,6 +14,7 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    auto_deliver: bool = True,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
@@ -74,7 +75,8 @@ def generate_revenue_ideas(
                     reported_revenue, reported_timeline,
                     capabilities_required,
                     tags,
-                    constraints
+                    constraints,
+                    auto_deliver
                 ) VALUES (
                     gen_random_uuid(),
                     '{title_esc}',
@@ -94,7 +96,8 @@ def generate_revenue_ideas(
                     {f"'{reported_timeline_esc}'" if reported_timeline_esc else "NULL"},
                     '{capabilities_required_json}'::jsonb,
                     '{tags_json}'::jsonb,
-                    '{constraints_json}'::jsonb
+                    '{constraints_json}'::jsonb,
+                    {auto_deliver}
                 )
                 """
             )
