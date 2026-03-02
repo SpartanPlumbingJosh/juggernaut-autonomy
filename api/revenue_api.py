@@ -1,10 +1,14 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/customers - Create new billing customer
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/usage - Record usage for metered billing
+- GET /revenue/customer-portal - Get customer portal URL
 """
 
 import json
@@ -12,6 +16,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.billing_service import BillingService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -209,6 +214,54 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+async def handle_create_customer(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new billing customer."""
+    billing = BillingService()
+    result = await billing.create_customer(
+        email=body.get("email"),
+        name=body.get("name"),
+        metadata=body.get("metadata", {})
+    )
+    if not result.get("success"):
+        return _error_response(400, result.get("error", "Failed to create customer"))
+    return _make_response(200, {"customer": result["customer"]})
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    billing = BillingService()
+    result = await billing.create_subscription(
+        customer_id=body.get("customer_id"),
+        price_id=body.get("price_id"),
+        quantity=body.get("quantity", 1)
+    )
+    if not result.get("success"):
+        return _error_response(400, result.get("error", "Failed to create subscription"))
+    return _make_response(200, {"subscription": result["subscription"]})
+
+async def handle_record_usage(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record usage for metered billing."""
+    billing = BillingService()
+    result = await billing.record_usage(
+        subscription_item_id=body.get("subscription_item_id"),
+        quantity=body.get("quantity"),
+        timestamp=body.get("timestamp")
+    )
+    if not result.get("success"):
+        return _error_response(400, result.get("error", "Failed to record usage"))
+    return _make_response(200, {"usage_record": result["usage_record"]})
+
+async def handle_customer_portal(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get customer portal URL."""
+    billing = BillingService()
+    customer_id = query_params.get("customer_id")
+    if not customer_id:
+        return _error_response(400, "Missing customer_id")
+    
+    result = await billing.get_customer_portal_url(customer_id)
+    if not result.get("success"):
+        return _error_response(400, result.get("error", "Failed to get portal URL"))
+    return _make_response(200, {"url": result["url"]})
+
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
@@ -231,6 +284,28 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/customers
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customers" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_create_customer(json.loads(body))
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_create_subscription(json.loads(body))
+    
+    # POST /revenue/usage
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "usage" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        return handle_record_usage(json.loads(body))
+    
+    # GET /revenue/customer-portal
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customer-portal" and method == "GET":
+        return handle_customer_portal(query_params)
     
     return _error_response(404, "Not found")
 
