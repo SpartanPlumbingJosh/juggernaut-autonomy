@@ -34,9 +34,21 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals and SaaS metrics."""
     try:
         now = datetime.now(timezone.utc)
+        
+        # Get SaaS metrics
+        saas_metrics = await query_db("""
+            SELECT
+                COUNT(DISTINCT customer_id) as active_customers,
+                SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) as active_subscriptions,
+                AVG(CASE WHEN status = 'active' THEN monthly_recurring_revenue ELSE 0 END) as arr_per_customer,
+                SUM(CASE WHEN status = 'active' THEN monthly_recurring_revenue ELSE 0 END) as total_arr
+            FROM subscriptions
+            WHERE status = 'active'
+        """)
+        saas_data = saas_metrics.get("rows", [{}])[0]
         
         # Calculate period boundaries
         month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
@@ -89,6 +101,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "transaction_count": mtd.get("transaction_count") or 0,
                 "first_revenue_at": mtd.get("first_revenue_at"),
                 "last_revenue_at": mtd.get("last_revenue_at")
+            },
+            "saas_metrics": {
+                "active_customers": saas_data.get("active_customers") or 0,
+                "active_subscriptions": saas_data.get("active_subscriptions") or 0,
+                "arr_per_customer": saas_data.get("arr_per_customer") or 0,
+                "total_arr": saas_data.get("total_arr") or 0
             },
             "qtd": {
                 "revenue_cents": qtd.get("total_revenue_cents") or 0,
