@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_monitor import RevenueMonitor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,25 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_monitoring() -> Dict[str, Any]:
+    """Get revenue monitoring dashboard data."""
+    try:
+        monitor = RevenueMonitor(query_db, lambda *args, **kwargs: None)
+        
+        progress = monitor.get_current_progress()
+        alerts = monitor.generate_alerts()
+        cohorts = monitor.get_cohort_analysis()
+        churn = monitor.get_churn_forecast()
+        
+        return _make_response(200, {
+            "progress": progress,
+            "alerts": alerts,
+            "cohorts": cohorts,
+            "churn": churn
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch monitoring data: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -228,6 +248,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
         return handle_revenue_transactions(query_params)
     
+    # GET /revenue/monitoring
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "monitoring" and method == "GET":
+        return handle_revenue_monitoring()
+        
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
