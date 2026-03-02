@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue & Payments API - Expose revenue tracking and payment processing capabilities.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payments/create - Create payment intent
+- POST /payments/webhook - Handle payment webhooks
+- GET /payments/history - Get payment history
 """
 
 import json
@@ -12,6 +15,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from payment.processor import PaymentProcessor, PaymentType
+import uuid
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,7 +216,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue and payment API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,6 +236,45 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payments/create
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            processor = PaymentProcessor(query_db, lambda *args, **kwargs: None)
+            result = processor.create_payment_intent(
+                amount_cents=int(body_data.get("amount_cents", 0)),
+                currency=str(body_data.get("currency", "usd")),
+                payment_type=PaymentType(body_data.get("payment_type", "one_time")),
+                customer_id=str(body_data.get("customer_id", "")),
+                metadata=body_data.get("metadata", {})
+            )
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, str(e))
+    
+    # POST /payments/webhook
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "webhook" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            processor = PaymentProcessor(query_db, lambda *args, **kwargs: None)
+            result = processor.handle_webhook(
+                event_type=str(body_data.get("type", "")),
+                event_data=body_data.get("data", {})
+            )
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, str(e))
+    
+    # GET /payments/history
+    if len(parts) == 2 and parts[0] == "payments" and parts[1] == "history" and method == "GET":
+        try:
+            customer_id = query_params.get("customer_id", [""])[0]
+            processor = PaymentProcessor(query_db, lambda *args, **kwargs: None)
+            history = processor.get_payment_history(customer_id)
+            return _make_response(200, {"payments": history})
+        except Exception as e:
+            return _error_response(500, str(e))
     
     return _error_response(404, "Not found")
 
