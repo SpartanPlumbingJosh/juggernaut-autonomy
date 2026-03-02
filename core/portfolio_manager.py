@@ -276,6 +276,66 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def automate_service_delivery(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Automate service delivery for active subscriptions."""
+    try:
+        # Get active subscriptions
+        res = execute_sql("""
+            SELECT id, customer_email, plan_id, status
+            FROM subscriptions
+            WHERE status = 'active'
+            ORDER BY created_at DESC
+            LIMIT 100
+        """)
+        subscriptions = res.get("rows", []) or []
+        
+        # Check service status for each subscription
+        for sub in subscriptions:
+            sub_id = sub.get("id")
+            service_res = execute_sql(f"""
+                SELECT status
+                FROM services
+                WHERE subscription_id = '{sub_id}'
+                LIMIT 1
+            """)
+            service_status = (service_res.get("rows", [{}])[0] or {}).get("status")
+            
+            if not service_status or service_status == "pending":
+                # Provision service
+                execute_sql(f"""
+                    INSERT INTO services (
+                        id, subscription_id, status,
+                        created_at, updated_at
+                    ) VALUES (
+                        gen_random_uuid(),
+                        '{sub_id}',
+                        'active',
+                        NOW(),
+                        NOW()
+                    )
+                """)
+                log_action(
+                    "service.provisioned",
+                    f"Provisioned service for subscription {sub_id}",
+                    level="info",
+                    output_data={"subscription_id": sub_id}
+                )
+        
+        return {"success": True, "processed": len(subscriptions)}
+        
+    except Exception as e:
+        log_action(
+            "service.delivery_failed",
+            f"Failed to automate service delivery: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
