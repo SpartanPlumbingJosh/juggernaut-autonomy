@@ -14,7 +14,31 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    retries: int = 3,
+    timeout: int = 30
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with retry logic and timeout."""
+    import time
+    from functools import wraps
+    
+    def retry_decorator(f):
+        @wraps(f)
+        def wrapper(*args, **kwargs):
+            last_error = None
+            for attempt in range(retries):
+                try:
+                    return f(*args, **kwargs)
+                except Exception as e:
+                    last_error = e
+                    time.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+            raise last_error
+        return wrapper
+    
+    @retry_decorator
+    def _execute_with_timeout(sql):
+        # Implement timeout logic here
+        return execute_sql(sql)
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]

@@ -8,10 +8,23 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
-
+from prometheus_client import Counter, Histogram, start_http_server
 from core.database import query_db
+
+# Initialize metrics
+REVENUE_REQUESTS = Counter('revenue_requests_total', 'Total revenue API requests', ['endpoint', 'status'])
+REVENUE_LATENCY = Histogram('revenue_request_latency_seconds', 'Revenue API latency', ['endpoint'])
+ERROR_COUNTER = Counter('revenue_errors_total', 'Total revenue API errors', ['endpoint', 'error_type'])
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Start metrics server
+start_http_server(8000)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -35,7 +48,9 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
+    start_time = datetime.now()
     try:
+        REVENUE_REQUESTS.labels(endpoint='summary', status='started').inc()
         now = datetime.now(timezone.utc)
         
         # Calculate period boundaries
@@ -81,6 +96,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        REVENUE_REQUESTS.labels(endpoint='summary', status='success').inc()
+        REVENUE_LATENCY.labels(endpoint='summary').observe((datetime.now() - start_time).total_seconds())
         return _make_response(200, {
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
@@ -111,6 +128,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         })
         
     except Exception as e:
+        ERROR_COUNTER.labels(endpoint='summary', error_type=str(type(e).__name__)).inc()
+        logger.error(f"Failed to fetch revenue summary: {str(e)}", exc_info=True)
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
@@ -235,4 +254,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
-__all__ = ["route_request"]
+async def record_transaction(event_type: str, amount_cents: int, source: str, metadata: Dict[str, Any]) -> bool:
+    """Automatically record a revenue transaction."""
+    try:
+        metadata_json = json.dumps(metadata)
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, source, metadata, recorded_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{event_type}',
+                {amount_cents},
+                'USD',
+                '{source}',
+                '{metadata_json}'::jsonb,
+                NOW()
+            )
+        """)
+        return True
+    except Exception as e:
+        logger.error(f"Failed to record transaction: {str(e)}", exc_info=True)
+        return False
+
+__all__ = ["route_request", "record_transaction"]
