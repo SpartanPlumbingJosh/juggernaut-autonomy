@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_handler import PaymentHandler
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -216,6 +217,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Payment endpoints
+    if len(parts) == 2 and parts[0] == "payment" and method == "POST":
+        handler = PaymentHandler()
+        if parts[1] == "stripe-webhook":
+            return await handler.handle_stripe_webhook(
+                body.encode() if body else b"",
+                headers.get("Stripe-Signature", "")
+            )
+        elif parts[1] == "create-intent":
+            data = json.loads(body) if body else {}
+            return await handler.create_payment_intent(
+                data.get("amount", 0),
+                data.get("currency", "usd"),
+                data.get("metadata", {})
+            )
+        elif parts[1] == "create-paypal-order":
+            data = json.loads(body) if body else {}
+            return await handler.create_paypal_order(
+                str(data.get("amount", "0")),
+                data.get("currency", "USD"),
+                data.get("metadata", {})
+            )
     
     # Parse path
     parts = [p for p in path.split("/") if p]
