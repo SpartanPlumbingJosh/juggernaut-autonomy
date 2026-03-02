@@ -32,6 +32,21 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+def _check_auth_headers(params: Dict[str, Any]) -> bool:
+    """Validate API Key authentication."""
+    auth_header = params.get('authorization')
+    if not auth_header:
+        return False
+        
+    # TODO: Implement proper token validation
+    # Just mock implementation for now
+    return auth_header in ["valid_token_1", "valid_token_2"]
+
+def _validate_product_event(body: Dict[str, Any]) -> bool:
+    """Validate product event structure."""
+    required_fields = ["product_id", "user_id", "sku", "amount", "currency"]
+    return all(field in body for field in required_fields)
+
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -216,6 +231,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    authenticated = _check_auth_headers(query_params)
+    if not authenticated:
+        return _error_response(401, "Unauthorized")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
