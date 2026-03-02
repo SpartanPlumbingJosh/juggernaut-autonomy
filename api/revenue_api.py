@@ -1,6 +1,9 @@
 """
 Revenue API - Expose revenue tracking data to Spartan HQ.
 
+Includes automated content generation earnings tracking.
+"""
+
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
@@ -115,7 +118,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """
+    Get transaction history with pagination.
+    
+    Supports filtering by automated content sources via:
+    - source=content/*
+    """
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -160,6 +168,47 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
+
+
+async def handle_content_stats(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get content automation performance stats."""
+    try:
+        days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        sql = f"""
+        SELECT 
+            DATE_TRUNC('day', recorded_at) as day,
+            COUNT(*) as content_count,
+            SUM(amount_cents) as revenue_cents
+        FROM revenue_events
+        WHERE source LIKE 'content/%'
+          AND recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY DATE_TRUNC('day', recorded_at)
+        ORDER BY day DESC
+        """
+        
+        result = await query_db(sql)
+        daily_stats = result.get("rows", [])
+        
+        lifetime_sql = """
+        SELECT 
+            COUNT(*) as total_content,
+            SUM(amount_cents) as lifetime_revenue_cents
+        FROM revenue_events
+        WHERE source LIKE 'content/%'
+        """
+        
+        lifetime_result = await query_db(lifetime_sql)
+        lifetime_stats = lifetime_result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "daily": daily_stats,
+            "lifetime": lifetime_stats,
+            "reporting_period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch content stats: {str(e)}")
 
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +280,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/content-stats 
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "content-stats" and method == "GET":
+        return await handle_content_stats(query_params)
     
     return _error_response(404, "Not found")
 
