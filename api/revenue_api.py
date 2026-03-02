@@ -1,17 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Payment processing and automated revenue tracking.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook/:source - Payment processor webhooks (Stripe/PayPal)
+- POST /revenue/subscribe - Self-service customer onboarding
 """
 
 import json
+import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db  
+from core.delivery import deliver_product
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,7 +236,79 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/webhook/:source
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        source = parts[2].lower()
+        if source not in ("stripe", "paypal"):
+            return _error_response(400, "Invalid webhook source")
+        try:
+            body_json = json.loads(body or "{}")
+            return await route_payment_webhook(source, body_json)
+        except Exception as e:
+            return _error_response(400, f"Invalid webhook payload: {str(e)}")
+
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        return await handle_customer_subscription(body)
+
     return _error_response(404, "Not found")
+
+
+async def handle_customer_subscription(body: Optional[str]) -> Dict[str, Any]:
+    """Handle self-service customer onboarding."""
+    try:
+        data = json.loads(body or "{}")
+        if not all(k in data for k in ["customer_email", "product_id", "payment_method"]):
+            return _error_response(400, "Missing required fields")
+
+        # Generate customer ID if new
+        customer_id = data.get("customer_id") or str(uuid.uuid4())
+        
+        # Process payment (in practice would call payment processor API)
+        payment_result = process_payment(
+            customer_id, 
+            data["product_id"],
+            data["payment_method"],
+            data.get("payment_token")
+        )
+        
+        if not payment_result.get("success"):
+            return _error_response(400, "Payment failed: " + payment_result.get("message", ""))
+            
+        # Record customer product access
+        await query_db(
+            f"""
+            INSERT INTO customer_products (
+                id, customer_id, product_id, 
+                subscribed_at, expires_at, status
+            ) VALUES (
+                gen_random_uuid(), '{customer_id}', '{data["product_id"]}',
+                NOW(), NOW() + INTERVAL '1 year', 'active'
+            )
+            """
+        )
+        
+        # Immediate product delivery
+        deliver_product(data["product_id"], customer_id)
+        
+        return _make_response(200, {
+            "success": True,
+            "customer_id": customer_id,
+            "message": "Subscription activated"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
+
+
+def process_payment(customer_id: str, product_id: str, method: str, token: str) -> Dict[str, Any]:
+    """Process payment for subscription (stub implementation)."""
+    # In practice would call stripe.PaymentIntent.create() or PayPal API
+    return {
+        "success": True,
+        "amount": 999,  # in cents
+        "currency": "usd"
+    }
 
 
 __all__ = ["route_request"]
