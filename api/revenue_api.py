@@ -1,17 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/subscriptions - Create subscription
+- GET /billing/usage - Get usage metrics
+- POST /billing/payments - Process payment
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+from core.billing import PaymentProcessor, SubscriptionManager, UsageTracker
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +214,47 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict) -> Dict:
+    """Handle subscription creation."""
+    try:
+        manager = SubscriptionManager()
+        result = await manager.create_subscription(
+            customer_id=body.get("customer_id"),
+            plan_id=body.get("plan_id"),
+            payment_method_id=body.get("payment_method_id")
+        )
+        return _make_response(200 if result.get("success") else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_get_usage(query_params: Dict) -> Dict:
+    """Get usage metrics."""
+    try:
+        tracker = UsageTracker()
+        result = await tracker.get_usage(
+            customer_id=query_params.get("customer_id"),
+            metric=query_params.get("metric"),
+            start=query_params.get("start"),
+            end=query_params.get("end")
+        )
+        return _make_response(200 if result.get("success") else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to get usage: {str(e)}")
+
+async def handle_process_payment(body: Dict) -> Dict:
+    """Process payment."""
+    try:
+        processor = PaymentProcessor()
+        result = await processor.create_payment_intent(
+            amount=body.get("amount"),
+            currency=body.get("currency"),
+            customer_id=body.get("customer_id"),
+            metadata=body.get("metadata")
+        )
+        return _make_response(200 if result.get("success") else 400, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +276,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /billing/subscriptions
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+    
+    # GET /billing/usage
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "usage" and method == "GET":
+        return handle_get_usage(query_params)
+    
+    # POST /billing/payments
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "payments" and method == "POST":
+        return handle_process_payment(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
