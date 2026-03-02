@@ -14,8 +14,10 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    mrr_target: float = 10000.0,
 ) -> Dict[str, Any]:
     context = context or {}
+    context["mrr_target"] = mrr_target
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
 
