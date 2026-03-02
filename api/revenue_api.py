@@ -36,6 +36,11 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
+        # Check circuit breaker status
+        from core.revenue_service import RevenueService
+        revenue_service = RevenueService(query_db)
+        if revenue_service.status == RevenueService.ServiceStatus.ERROR:
+            return _error_response(503, "Service temporarily unavailable")
         now = datetime.now(timezone.utc)
         
         # Calculate period boundaries

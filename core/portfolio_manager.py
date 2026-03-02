@@ -1,20 +1,28 @@
 from __future__ import annotations
 
 import json
+import asyncio
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.revenue_service import RevenueService, RevenueServiceConfig
 
 
-def generate_revenue_ideas(
+async def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with integrated revenue service"""
+    # Initialize revenue service
+    revenue_service = RevenueService(execute_sql)
+    
+    # Start monitoring in background
+    asyncio.create_task(revenue_service.monitor_service())
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
