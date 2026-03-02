@@ -7,17 +7,26 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
+from core.service_delivery import ServiceDelivery
+from core.dynamic_pricing import DynamicPricing
 
 
-def generate_revenue_ideas(
+async def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    stripe_key: Optional[str] = None,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Initialize payment processor if stripe key provided
+    payment_processor = None
+    if stripe_key:
+        payment_processor = PaymentProcessor(stripe_key)
 
     created = 0
     failures: List[Dict[str, Any]] = []
