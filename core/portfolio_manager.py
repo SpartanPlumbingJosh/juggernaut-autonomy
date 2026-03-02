@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+import decimal
+from hummingbot.connector.exchange_base import ExchangeBase
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processors import PaymentProcessor
 
 
 def generate_revenue_ideas(
