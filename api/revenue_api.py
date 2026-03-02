@@ -220,6 +220,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # Handle Stripe webhook
+    if len(parts) == 2 and parts[0] == "webhooks" and parts[1] == "stripe" and method == "POST":
+        from services.service_manager import ServiceManager
+        manager = ServiceManager()
+        success = await manager.process_webhook(
+            body or "",
+            query_params.get("stripe-signature", [""])[0]
+        )
+        return _make_response(200 if success else 400, {"processed": success})
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
