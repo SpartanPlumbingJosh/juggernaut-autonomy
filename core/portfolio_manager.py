@@ -115,6 +115,34 @@ def generate_revenue_ideas(
     return {"success": True, "created": created, "attempted": len(ideas)}
 
 
+def track_service_metrics(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    service_id: str,
+    metrics: Dict[str, Any]
+) -> None:
+    """Track service performance metrics."""
+    try:
+        execute_sql(
+            f"""
+            INSERT INTO service_metrics (
+                service_id, revenue_cents, active_users,
+                churn_rate, recorded_at
+            ) VALUES (
+                '{service_id}',
+                {metrics.get('revenue_cents', 0)},
+                {metrics.get('active_users', 0)},
+                {metrics.get('churn_rate', 0)},
+                NOW()
+            )
+            """
+        )
+    except Exception as e:
+        log_action(
+            "service.metrics_failed",
+            f"Failed to record service metrics: {str(e)}",
+            level="error"
+        )
+
 def score_pending_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
