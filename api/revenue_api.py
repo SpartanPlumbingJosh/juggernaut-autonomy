@@ -34,7 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals including subscription metrics."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -67,14 +67,23 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         ytd_result = await query_db(sql.replace(month_start.isoformat(), year_start.isoformat()))
         ytd = ytd_result.get("rows", [{}])[0]
         
-        # All-time totals
+        # All-time totals including subscriptions
         all_time_sql = """
+        WITH subscription_revenue AS (
+            SELECT 
+                SUM(amount_paid_cents) as total_revenue_cents,
+                COUNT(*) as transaction_count
+            FROM invoices
+            WHERE status = 'paid'
+        )
         SELECT 
             SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
             SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as net_profit_cents,
-            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
+            COALESCE((SELECT total_revenue_cents FROM subscription_revenue), 0) as subscription_revenue_cents,
+            COALESCE((SELECT transaction_count FROM subscription_revenue), 0) as subscription_transaction_count
         FROM revenue_events
         """
         
@@ -106,7 +115,9 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "revenue_cents": all_time.get("total_revenue_cents") or 0,
                 "cost_cents": all_time.get("total_cost_cents") or 0,
                 "profit_cents": all_time.get("net_profit_cents") or 0,
-                "transaction_count": all_time.get("transaction_count") or 0
+                "transaction_count": all_time.get("transaction_count") or 0,
+                "subscription_revenue_cents": all_time.get("subscription_revenue_cents") or 0,
+                "subscription_transaction_count": all_time.get("subscription_transaction_count") or 0
             }
         })
         
