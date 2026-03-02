@@ -21,8 +21,8 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         "headers": {
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Payment-Token"
         },
         "body": json.dumps(body)
     }
@@ -31,6 +31,48 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
+
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook events."""
+    try:
+        event_type = body.get("type")
+        amount_cents = int(body.get("amount") or 0) * 100  # Convert dollars to cents
+        metadata = body.get("metadata") or {}
+
+        if event_type in ("payment.succeeded", "invoice.paid"):
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(), 'revenue', {amount_cents},
+                    '{metadata.get("currency", "USD")}',
+                    '{metadata.get("source", "stripe")}',
+                    '{json.dumps(metadata)}'::jsonb,
+                    NOW(), NOW()
+                )
+            """)
+            return _make_response(200, {"processed": True})
+        
+        elif event_type in ("payment.failed", "invoice.payment_failed"):
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, event_type, amount_cents, currency, source,
+                    metadata, recorded_at, created_at
+                ) VALUES (
+                    gen_random_uuid(), 'cost', {amount_cents},
+                    '{metadata.get("currency", "USD")}',
+                    '{metadata.get("source", "stripe")}',
+                    '{json.dumps(metadata)}'::jsonb,
+                    NOW(), NOW()
+                )
+            """)
+            return _make_response(200, {"processed": True})
+
+        return _make_response(200, {"processed": False, "reason": "unhandled_event_type"})
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -231,6 +273,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return await handle_payment_webhook(body)
     
     return _error_response(404, "Not found")
 

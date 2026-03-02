@@ -276,6 +276,75 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def deliver_product_for_experiment(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    experiment_id: str
+) -> Dict[str, Any]:
+    """Automatically deliver product/service for successful experiments."""
+    try:
+        # Get experiment details
+        res = execute_sql(f"""
+            SELECT e.id, e.name, e.metadata, ri.title, ri.description, ri.tags 
+            FROM experiments e
+            JOIN revenue_ideas ri ON ri.id = e.idea_id
+            WHERE e.id = '{experiment_id}'
+        """)
+        exp = res.get("rows", [{}])[0]
+        
+        # Get customer details
+        customers_res = execute_sql(f"""
+            SELECT c.id, c.email, c.metadata 
+            FROM customers c
+            JOIN experiment_customers ec ON ec.customer_id = c.id
+            WHERE ec.experiment_id = '{experiment_id}'
+        """)
+        customers = customers_res.get("rows", [])
+        
+        # Generate delivery content
+        delivery_content = {
+            "experiment_name": exp.get("name"),
+            "idea_title": exp.get("title"),
+            "description": exp.get("description"),
+            "onboarding_steps": [
+                "Account activation",
+                "Product walkthrough",
+                "First value delivery",
+                "Success check-in"
+            ],
+            "tags": exp.get("tags", [])
+        }
+        
+        # Create delivery records
+        for customer in customers:
+            execute_sql(f"""
+                INSERT INTO product_deliveries (
+                    id, experiment_id, customer_id, content,
+                    delivery_status, created_at
+                ) VALUES (
+                    gen_random_uuid(), 
+                    '{experiment_id}',
+                    '{customer.get("id")}',
+                    '{json.dumps(delivery_content)}'::jsonb,
+                    'pending',
+                    NOW()
+                )
+            """)
+        
+        log_action(
+            "product.delivery_initiated",
+            f"Initiated delivery for experiment {exp.get('name')}",
+            level="info",
+            output_data={
+                "experiment_id": experiment_id,
+                "customers_count": len(customers)
+            }
+        )
+        return {"success": True, "customers": len(customers)}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
@@ -342,8 +411,28 @@ def review_experiments_stub(
                         error_data={"experiment_id": exp_id, "error": str(e)}
                     )
         
-        if status == "completed" and on_experiment_complete:
+        if status == "completed":
             completed_count += 1
+                
+            # Automatically deliver product for successful experiments
+            if on_experiment_complete:
+                roi = ((revenue - cost) / cost * 100) if cost > 0 else 0
+                if roi > 0:  # Only deliver if profitable
+                    delivery_res = deliver_product_for_experiment(
+                        execute_sql=execute_sql,
+                        log_action=log_action,
+                        experiment_id=exp_id
+                    )
+                    if not delivery_res.get("success"):
+                        log_action(
+                            "product.delivery_failed",
+                            f"Failed to initiate delivery for experiment {exp.get('name')}",
+                            level="error",
+                            error_data={
+                                "experiment_id": exp_id,
+                                "error": delivery_res.get("error", "")
+                            }
+                        )
             
             revenue = float(exp.get("revenue_generated") or 0)
             cost = float(exp.get("actual_cost") or exp.get("budget_spent") or 0)
