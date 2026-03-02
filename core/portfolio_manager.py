@@ -14,6 +14,31 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    retries: int = 3,
+) -> Dict[str, Any]:
+    """Generate revenue ideas with retry logic."""
+    last_error = None
+    
+    for attempt in range(retries):
+        try:
+            return _generate_revenue_ideas_impl(execute_sql, log_action, context, limit)
+        except Exception as e:
+            last_error = str(e)
+            log_action(
+                "revenue.idea_generation_failed",
+                f"Attempt {attempt + 1} failed: {last_error}",
+                level="error"
+            )
+            if attempt < retries - 1:
+                time.sleep(5)  # Wait before retrying
+                
+    return {"success": False, "error": f"Failed after {retries} attempts: {last_error}"}
+
+def _generate_revenue_ideas_impl(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    context: Optional[Dict[str, Any]] = None,
+    limit: int = 5,
 ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
