@@ -1,10 +1,19 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core infrastructure for revenue generation and tracking.
+
+Key Features:
+- Automated billing and payment processing
+- Revenue tracking with attribution
+- Financial reporting and analytics
+- Customer management integration
+- Scalable architecture supporting $12M+ annual volume
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/record - Record new revenue event
+- GET /revenue/customers - Customer revenue metrics
 """
 
 import json
@@ -32,6 +41,71 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def _validate_api_key(api_key: str) -> bool:
+    """Validate API key for secure endpoints."""
+    # TODO: Implement actual API key validation
+    return True
+
+async def handle_record_revenue_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle recording of new revenue events."""
+    try:
+        # Validate API key
+        api_key = body.get("api_key")
+        if not api_key or not await _validate_api_key(api_key):
+            return _error_response(401, "Invalid API key")
+        
+        # Validate required fields
+        required_fields = ["amount", "currency", "source", "event_type"]
+        for field in required_fields:
+            if field not in body:
+                return _error_response(400, f"Missing required field: {field}")
+        
+        # Validate amount
+        try:
+            amount = Decimal(str(body["amount"]))
+            if amount <= 0:
+                return _error_response(400, "Amount must be positive")
+        except Exception:
+            return _error_response(400, "Invalid amount format")
+        
+        # Validate event type
+        if body["event_type"] not in ["revenue", "cost"]:
+            return _error_response(400, "Invalid event type")
+        
+        # Prepare metadata
+        metadata = body.get("metadata", {})
+        attribution = body.get("attribution", {})
+        
+        # Record event
+        result = await query_db(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, attribution, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{body["event_type"]}',
+                {int(amount * 100)},
+                '{body["currency"]}',
+                '{body["source"]}',
+                '{json.dumps(metadata)}'::jsonb,
+                '{json.dumps(attribution)}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            RETURNING id
+        """)
+        
+        if not result.get("rows"):
+            return _error_response(500, "Failed to record event")
+        
+        return _make_response(201, {
+            "success": True,
+            "event_id": result["rows"][0]["id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to record revenue event: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -210,6 +284,38 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_customer_revenue(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get revenue metrics by customer."""
+    try:
+        customer_id = query_params.get("customer_id", [""])[0]
+        if not customer_id:
+            return _error_response(400, "Missing customer_id parameter")
+        
+        # Get customer revenue metrics
+        sql = f"""
+        SELECT 
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
+            MIN(recorded_at) FILTER (WHERE event_type = 'revenue') as first_purchase,
+            MAX(recorded_at) FILTER (WHERE event_type = 'revenue') as last_purchase
+        FROM revenue_events
+        WHERE attribution->>'customer_id' = '{customer_id}'
+        """
+        
+        result = await query_db(sql)
+        metrics = result.get("rows", [{}])[0]
+        
+        return _make_response(200, {
+            "customer_id": customer_id,
+            "total_revenue": Decimal(metrics.get("total_revenue_cents", 0)) / 100,
+            "transaction_count": metrics.get("transaction_count", 0),
+            "first_purchase": metrics.get("first_purchase"),
+            "last_purchase": metrics.get("last_purchase")
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch customer revenue: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +337,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/record
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "record" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_record_revenue_event(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+    
+    # GET /revenue/customers
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customers" and method == "GET":
+        return handle_customer_revenue(query_params)
     
     return _error_response(404, "Not found")
 

@@ -1,13 +1,71 @@
 from __future__ import annotations
 
 import json
+import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from decimal import Decimal
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
+# Revenue tracking constants
+MIN_TRANSACTION_AMOUNT = Decimal('0.01')  # Minimum transaction amount
+MAX_TRANSACTION_AMOUNT = Decimal('1000000.00')  # Maximum transaction amount per payment
+CURRENCY_PRECISION = 2  # Decimal places for currency amounts
+DEFAULT_CURRENCY = 'USD'
+
+
+def _validate_transaction_amount(amount: Decimal) -> Tuple[bool, str]:
+    """Validate transaction amount meets system requirements."""
+    if amount < MIN_TRANSACTION_AMOUNT:
+        return False, f"Amount must be at least {MIN_TRANSACTION_AMOUNT}"
+    if amount > MAX_TRANSACTION_AMOUNT:
+        return False, f"Amount cannot exceed {MAX_TRANSACTION_AMOUNT}"
+    return True, ""
+
+def _record_revenue_event(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    event_type: str,
+    amount: Decimal,
+    currency: str,
+    source: str,
+    metadata: Dict[str, Any],
+    attribution: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Record a revenue or cost event with strict validation."""
+    try:
+        # Validate amount
+        is_valid, validation_msg = _validate_transaction_amount(amount)
+        if not is_valid:
+            return {"success": False, "error": validation_msg}
+
+        # Prepare metadata
+        metadata_json = json.dumps(metadata or {}).replace("'", "''")
+        attribution_json = json.dumps(attribution or {}).replace("'", "''")
+        
+        # Convert amount to cents for precise storage
+        amount_cents = int(amount * Decimal('100'))
+        
+        # Generate unique event ID
+        event_id = str(uuid.uuid4())
+        
+        # Record event
+        execute_sql(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency,
+                source, metadata, attribution, recorded_at, created_at
+            ) VALUES (
+                '{event_id}', '{event_type}', {amount_cents}, '{currency}',
+                '{source}', '{metadata_json}'::jsonb, '{attribution_json}'::jsonb,
+                NOW(), NOW()
+            )
+        """)
+        
+        return {"success": True, "event_id": event_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
@@ -275,6 +333,35 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def _calculate_revenue_metrics(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    period_start: datetime,
+    period_end: datetime
+) -> Dict[str, Any]:
+    """Calculate key revenue metrics for a given period."""
+    try:
+        sql = f"""
+        SELECT
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue_cents,
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as total_cost_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count,
+            COUNT(DISTINCT source) FILTER (WHERE event_type = 'revenue') as unique_sources
+        FROM revenue_events
+        WHERE recorded_at BETWEEN '{period_start.isoformat()}' AND '{period_end.isoformat()}'
+        """
+        result = execute_sql(sql)
+        row = result.get("rows", [{}])[0]
+        
+        return {
+            "total_revenue": Decimal(row.get("total_revenue_cents", 0)) / 100,
+            "total_cost": Decimal(row.get("total_cost_cents", 0)) / 100,
+            "transaction_count": row.get("transaction_count", 0),
+            "unique_sources": row.get("unique_sources", 0),
+            "net_profit": (Decimal(row.get("total_revenue_cents", 0)) - Decimal(row.get("total_cost_cents", 0))) / 100
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
