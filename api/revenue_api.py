@@ -8,10 +8,16 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from decimal import Decimal
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
+
+logger = logging.getLogger(__name__)
+payment_processor = PaymentProcessor()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:

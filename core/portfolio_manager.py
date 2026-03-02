@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from decimal import Decimal
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
+
+logger = logging.getLogger(__name__)
+payment_processor = PaymentProcessor()
 
 
 def generate_revenue_ideas(
@@ -285,6 +291,26 @@ def review_experiments_stub(
         from core.learning_loop import on_experiment_complete
     except ImportError:
         on_experiment_complete = None
+        
+    # Track revenue from completed experiments
+    try:
+        revenue_sql = """
+        SELECT SUM(amount_cents) as total_revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '1 day'
+        AND event_type = 'revenue'
+        """
+        revenue_result = await query_db(revenue_sql)
+        daily_revenue = (revenue_result.get("rows", [{}])[0] or {}).get("total_revenue_cents", 0) or 0
+        
+        log_action(
+            "revenue.daily_tracking",
+            f"Tracked daily revenue: {daily_revenue} cents",
+            level="info",
+            output_data={"daily_revenue_cents": daily_revenue}
+        )
+    except Exception as e:
+        logger.error(f"Failed to track daily revenue: {str(e)}")
     
     try:
         res = execute_sql(
