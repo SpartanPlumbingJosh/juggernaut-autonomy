@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from revenue.stripe_integration import StripePaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +211,37 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+def fulfill_purchase(session_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle product fulfillment after successful payment"""
+    try:
+        # Record revenue event
+        execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, experiment_id, event_type, amount_cents,
+                currency, source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                {f"'{session_data['metadata'].get('experiment_id')}'" if session_data['metadata'].get('experiment_id') else "NULL"},
+                'revenue',
+                {int(session_data['amount'] * 100)},
+                'usd',
+                'stripe',
+                '{json.dumps(session_data['metadata'])}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        
+        # TODO: Add specific fulfillment logic based on product type
+        # This could be sending an email, generating a download link,
+        # or triggering a service via webhook
+        
+        return {'success': True}
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -232,6 +264,29 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/stripe/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "stripe" and parts[2] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing webhook payload")
+        
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        if not sig_header:
+            return _error_response(400, "Missing Stripe signature header")
+            
+        processor = StripePaymentProcessor()
+        result = processor.handle_webhook_event(body, sig_header)
+        
+        if not result.get('success'):
+            return _error_response(400, result.get('error', 'Webhook processing failed'))
+            
+        # Handle fulfillment
+        if result['event'] == 'payment_success':
+            fulfillment = fulfill_purchase(result)
+            if not fulfillment.get('success'):
+                return _error_response(500, fulfillment.get('error', 'Fulfillment failed'))
+        
+        return _make_response(200, {'success': True})
+
     return _error_response(404, "Not found")
 
 
