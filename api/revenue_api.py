@@ -1,13 +1,18 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Autonomous Revenue Infrastructure 
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history  
 - GET /revenue/charts - Revenue over time data
+- POST /billing/create - Create new billing customer
+- POST /billing/charge - Process payment
+- POST /customers/onboard - Complete customer onboarding
 """
 
 import json
+from billing.payment_processor import PaymentProcessor
+from customer.customer_manager import CustomerManager
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -160,6 +165,33 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
+
+
+async def handle_billing_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Setup new billing customer."""
+    try:
+        processor = PaymentProcessor(api_key="sk_test_12345")
+        customer = processor.create_customer(
+            email=body["email"],
+            name=body["name"]
+        )
+        return _make_response(201, {"customer_id": customer.id})
+    except Exception as e:
+        return _error_response(500, f"Failed to create billing: {str(e)}")
+
+
+async def handle_customer_onboard(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Complete customer onboarding."""
+    try:
+        manager = CustomerManager(db_conn=None)  # Replace with actual DB connection
+        result = manager.onboard_customer(
+            email=body["email"],
+            plan=body["plan"],
+            metadata=body.get("metadata", {})
+        )
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
 
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
