@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from api.subscription_api import provision_resources
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -187,6 +188,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    customer_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -244,6 +246,10 @@ def start_experiments_from_top_ideas(
             continue
 
         link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
+        
+        # Provision resources if customer ID is provided
+        if customer_id:
+            provision_resources(customer_id)
 
         try:
             execute_sql(
