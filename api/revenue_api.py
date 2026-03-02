@@ -162,6 +162,43 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment and record revenue event."""
+    try:
+        amount_cents = int(float(body.get("amount", 0)) * 100)
+        currency = body.get("currency", "USD")
+        source = body.get("source", "direct_payment")
+        metadata = json.dumps(body.get("metadata", {}))
+        
+        # Record revenue event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            source, metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'revenue',
+            {amount_cents},
+            '{currency}',
+            '{source}',
+            '{metadata}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        
+        await query_db(sql)
+        
+        return _make_response(200, {
+            "success": True,
+            "amount_cents": amount_cents,
+            "currency": currency
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +268,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return await process_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
     
     return _error_response(404, "Not found")
 
