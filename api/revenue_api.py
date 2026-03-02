@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing functionality.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/billing/invoices - Generate invoices
+- POST /revenue/billing/webhook - Payment webhook handler
 """
 
 import json
@@ -12,6 +14,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_service import PaymentService
+from core.usage_metering import UsageMeter
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -211,7 +215,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue API requests including billing functionality."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,6 +235,17 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/billing/invoices
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "billing" and parts[2] == "invoices" and method == "POST":
+        return await handle_generate_invoices()
+    
+    # POST /revenue/billing/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "billing" and parts[2] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Request body required")
+        sig_header = query_params.get('stripe-signature', [''])[0]
+        return await PaymentService().handle_webhook(body.encode(), sig_header)
     
     return _error_response(404, "Not found")
 
