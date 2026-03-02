@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.billing_engine import BillingEngine
 
 
 def generate_revenue_ideas(
@@ -281,6 +282,14 @@ def review_experiments_stub(
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
     """Review running experiments and trigger learning loop for completed ones."""
+    # Initialize billing engine
+    billing_engine = BillingEngine(execute_sql, log_action)
+    
+    # Monitor billing system
+    billing_stats = billing_engine.monitor_system()
+    
+    # Generate invoices
+    invoices = billing_engine.generate_invoices()
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
