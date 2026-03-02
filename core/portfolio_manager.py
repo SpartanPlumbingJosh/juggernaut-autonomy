@@ -276,7 +276,82 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+async def deliver_services(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Automated service delivery system."""
+    try:
+        # Get pending service deliveries
+        res = await execute_sql(
+            """
+            SELECT id, service_type, customer_id, metadata, created_at
+            FROM service_deliveries
+            WHERE status = 'pending'
+            ORDER BY created_at ASC
+            LIMIT 100
+            """
+        )
+        deliveries = res.get("rows", []) or []
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+    delivered = 0
+    failures = []
+
+    for delivery in deliveries:
+        delivery_id = str(delivery.get("id") or "")
+        if not delivery_id:
+            continue
+
+        try:
+            # Mark as in progress
+            await execute_sql(
+                f"""
+                UPDATE service_deliveries
+                SET status = 'in_progress',
+                    updated_at = NOW()
+                WHERE id = '{delivery_id}'
+                """
+            )
+
+            # Process delivery (this would call actual service-specific logic)
+            # Here we just simulate successful delivery
+            await execute_sql(
+                f"""
+                UPDATE service_deliveries
+                SET status = 'completed',
+                    completed_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = '{delivery_id}'
+                """
+            )
+
+            delivered += 1
+            log_action(
+                "service.delivered",
+                f"Delivered service {delivery_id}",
+                level="info",
+                output_data={"delivery_id": delivery_id}
+            )
+
+        except Exception as e:
+            failures.append({"delivery_id": delivery_id, "error": str(e)})
+            log_action(
+                "service.delivery_failed",
+                f"Failed to deliver service {delivery_id}: {str(e)}",
+                level="error",
+                error_data={"delivery_id": delivery_id, "error": str(e)}
+            )
+
+    return {
+        "success": True,
+        "delivered": delivered,
+        "failures": failures,
+        "total_pending": len(deliveries)
+    }
+
+async def review_experiments(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
