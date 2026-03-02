@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import random
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import hashlib
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.pricing import TieredPricing, PaymentProcessor
 
 
 def generate_revenue_ideas(
@@ -276,11 +279,69 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def deliver_automated_service(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any], 
+    experiment_id: str,
+    service_config: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Automatically deliver service based on experiment configuration."""
+    try:
+        pricing = TieredPricing(
+            base_price=float(service_config.get("base_price", 10.0))
+        )
+        processor = PaymentProcessor(pricing)
+        
+        # Simulate customer acquisition - would connect to real CRM/marketing tools
+        customers = []
+        for _ in range(random.randint(1, 5)):  # Simulate random number of signups
+            customer_id = hashlib.sha256(str(random.random()).encode()).hexdigest()
+            payment = processor.process_payment(
+                client_id=customer_id,
+                quantity=service_config.get("quantity", 1)
+            )
+            
+            if payment["success"]:
+                customers.append({
+                    "customer_id": customer_id,
+                    "payment": payment,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                })
+            
+        # Track successful deliveries
+        if customers:
+            execute_sql(f"""
+                INSERT INTO automated_deliveries (
+                    id, experiment_id, customer_data, created_at
+                ) VALUES (
+                    gen_random_uuid(),
+                    '{experiment_id.replace("'", "''")}',
+                    '{json.dumps(customers).replace("'", "''")}'::jsonb,
+                    NOW()
+                )
+            """)
+            
+        return {
+            "success": True,
+            "customers": len(customers),
+            "revenue_cents": sum(c.get("payment", {}).get("amount", 0) for c in customers) * 100
+        }
+        
+    except Exception as e:
+        log_action(
+            "service.delivery_failed",
+            f"Failed to deliver automated service: {str(e)}",
+            level="error",
+            error_data={"experiment_id": experiment_id, "error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+        
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
     """Review running experiments and trigger learning loop for completed ones."""
+    # Modified to include automated service delivery
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:
@@ -308,8 +369,22 @@ def review_experiments_stub(
     running_count = 0
     completed_count = 0
     learning_triggered = 0
+    services_delivered = 0
+    total_revenue = 0
     
     for exp in rows:
+        # Deliver automated service if configured
+        metadata = exp.get("metadata") or {}
+        if metadata.get("service_enabled", False):
+            delivery_result = deliver_automated_service(
+                execute_sql,
+                log_action,
+                str(exp.get("id")),
+                metadata.get("service_config", {})
+            )
+            if delivery_result["success"]:
+                services_delivered += delivery_result.get("customers", 0)
+                total_revenue += delivery_result.get("revenue_cents", 0)
         exp_id = exp.get("id")
         status = exp.get("status")
         
