@@ -1,17 +1,23 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing functionality.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscribe - Create subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from fastapi import Request
 
 from core.database import query_db
+from api.payment_processor import create_checkout_session, handle_webhook_event
+from api.auth import get_current_user, create_access_token
+from api.onboarding import start_onboarding
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +216,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, request: Optional[Request] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +237,33 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscribe
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscribe" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            user_id = data.get("user_id")
+            price_id = data.get("price_id")
+            if not user_id or not price_id:
+                return _error_response(400, "Missing required fields")
+            return await create_checkout_session(user_id, price_id)
+        except Exception as e:
+            return _error_response(500, str(e))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not request:
+            return _error_response(400, "Missing request")
+        try:
+            payload = await request.body()
+            sig_header = request.headers.get("stripe-signature")
+            if not sig_header:
+                return _error_response(400, "Missing signature header")
+            return await handle_webhook_event(payload, sig_header)
+        except Exception as e:
+            return _error_response(500, str(e))
     
     return _error_response(404, "Not found")
 
