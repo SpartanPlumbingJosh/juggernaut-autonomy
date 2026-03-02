@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +211,35 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle self-service checkout flow."""
+    try:
+        payment = PaymentProcessor()
+        
+        # Create customer
+        customer = await payment.create_customer(
+            email=body.get("email"),
+            payment_method=body.get("payment_method")
+        )
+        if not customer:
+            return _error_response(400, "Failed to create customer")
+
+        # Create subscription
+        subscription = await payment.create_subscription(
+            customer_id=customer.id,
+            price_id=body.get("price_id")
+        )
+        if not subscription:
+            return _error_response(400, "Failed to create subscription")
+
+        return _make_response(200, {
+            "customer_id": customer.id,
+            "subscription_id": subscription.id,
+            "client_secret": subscription.latest_invoice.payment_intent.client_secret
+        })
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -232,6 +262,24 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        try:
+            parsed_body = json.loads(body) if body else {}
+            return await handle_checkout(parsed_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+
+    # POST /revenue/webhook - Stripe webhook endpoint
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            sig_header = query_params.get("stripe-signature", "")
+            payment = PaymentProcessor()
+            success = await payment.webhook_handler(body or "", sig_header)
+            return _make_response(200 if success else 400, {"success": success})
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
+
     return _error_response(404, "Not found")
 
 
