@@ -5,13 +5,18 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/health - System health check
 """
+
+import time
+import threading
+from collections import deque
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +215,64 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+# System monitoring
+class RevenueMonitor:
+    def __init__(self):
+        self.request_history = deque(maxlen=1000)
+        self.last_check = time.time()
+        self.error_count = 0
+        self.start_time = time.time()
+        
+        # Start background monitoring
+        self.monitor_thread = threading.Thread(target=self._monitor_system, daemon=True)
+        self.monitor_thread.start()
+        
+    def _monitor_system(self):
+        """Background thread to monitor system health"""
+        while True:
+            try:
+                # Check database connection
+                execute_db("SELECT 1")
+                
+                # Check request rates
+                now = time.time()
+                recent_requests = [r for r in self.request_history if r > now - 60]
+                if len(recent_requests) > 100:
+                    self.log_warning(f"High request rate detected: {len(recent_requests)} requests/min")
+                
+                time.sleep(60)
+            except Exception as e:
+                self.error_count += 1
+                self.log_error(f"Monitoring error: {str(e)}")
+                time.sleep(30)
+                
+    def log_request(self):
+        """Track API requests"""
+        self.request_history.append(time.time())
+        
+    def log_error(self, message: str):
+        """Log system errors"""
+        self.error_count += 1
+        # TODO: Integrate with logging system
+        
+    def log_warning(self, message: str):
+        """Log system warnings"""
+        # TODO: Integrate with logging system
+        
+    def get_health_status(self) -> Dict[str, Any]:
+        """Get system health metrics"""
+        uptime = time.time() - self.start_time
+        return {
+            "status": "healthy" if self.error_count == 0 else "degraded",
+            "uptime_seconds": uptime,
+            "request_rate": len(self.request_history),
+            "error_count": self.error_count,
+            "last_check": self.last_check
+        }
+
+# Initialize monitor
+monitor = RevenueMonitor()
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +294,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/health
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "health" and method == "GET":
+        return _make_response(200, monitor.get_health_status())
     
     return _error_response(404, "Not found")
 

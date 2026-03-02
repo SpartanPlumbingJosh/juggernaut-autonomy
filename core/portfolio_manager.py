@@ -9,6 +9,57 @@ from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
 
+class IdeaGeneratorService:
+    """Automated service for generating and managing revenue ideas"""
+    
+    def __init__(self):
+        self.last_run = None
+        self.running = False
+        self.thread = threading.Thread(target=self._run_service, daemon=True)
+        self.thread.start()
+        
+    def _run_service(self):
+        """Background service to continuously generate ideas"""
+        while True:
+            try:
+                if not self.running:
+                    time.sleep(60)
+                    continue
+                    
+                # Generate ideas every 6 hours
+                if self.last_run is None or time.time() - self.last_run > 6 * 3600:
+                    self._generate_batch()
+                    self.last_run = time.time()
+                    
+                time.sleep(60)
+            except Exception as e:
+                print(f"Error in idea generation service: {str(e)}")
+                time.sleep(300)
+                
+    def _generate_batch(self):
+        """Generate a batch of ideas"""
+        # TODO: Implement batch generation logic
+        pass
+        
+    def start(self):
+        """Start the service"""
+        self.running = True
+        
+    def stop(self):
+        """Stop the service"""
+        self.running = False
+        
+    def status(self):
+        """Get service status"""
+        return {
+            "running": self.running,
+            "last_run": self.last_run,
+            "uptime": time.time() - self.start_time
+        }
+
+# Initialize the service
+idea_service = IdeaGeneratorService()
+
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
