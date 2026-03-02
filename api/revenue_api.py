@@ -11,10 +11,13 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.auth import authenticate_user
+from datetime import datetime
+from typing import Tuple
 
 
-def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
+def _make_response(status_code: int, body: Dict[str, Any], headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Create standardized API response."""
     return {
         "statusCode": status_code,
@@ -22,7 +25,8 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            **(headers or {})
         },
         "body": json.dumps(body)
     }
@@ -210,12 +214,56 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def process_transaction(transaction_data: Dict[str, Any]) -> Tuple[bool, str]:
+    """Process a revenue transaction and store it in the database."""
+    required_fields = ["amount_cents", "currency", "source", "event_type"]
+    if not all(field in transaction_data for field in required_fields):
+        return False, "Missing required fields"
+    
+    try:
+        # Validate transaction data
+        amount = int(transaction_data["amount_cents"])
+        if amount <= 0:
+            return False, "Invalid amount"
+            
+        # Insert transaction
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, experiment_id, event_type, amount_cents, currency,
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                {f"'{transaction_data.get('experiment_id')}'" if transaction_data.get('experiment_id') else "NULL"},
+                '{transaction_data["event_type"]}',
+                {amount},
+                '{transaction_data["currency"]}',
+                '{transaction_data["source"]}',
+                {f"'{json.dumps(transaction_data.get('metadata', {}))}'" if transaction_data.get('metadata') else "NULL"},
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        return True, "Transaction processed successfully"
+    except Exception as e:
+        return False, f"Transaction processing failed: {str(e)}"
+
+async def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, auth_token: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+
+    # Authenticate user for non-public endpoints
+    if path not in ["/revenue/summary", "/revenue/charts"]:
+        if not auth_token:
+            return _error_response(401, "Authentication required")
+            
+        auth_result = await authenticate_user(auth_token)
+        if not auth_result.get("authenticated"):
+            return _error_response(401, "Invalid authentication token")
     
     # Parse path
     parts = [p for p in path.split("/") if p]
@@ -232,6 +280,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing transaction data")
+            
+        try:
+            transaction_data = json.loads(body)
+            success, message = await process_transaction(transaction_data)
+            if not success:
+                return _error_response(400, message)
+            return _make_response(201, {"message": message})
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON data")
+
     return _error_response(404, "Not found")
 
 
