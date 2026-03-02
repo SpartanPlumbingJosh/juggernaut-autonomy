@@ -1,13 +1,17 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and processing to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/process-payment - Process payment transaction
 """
 
 import json
+from typing import Dict
+
+from payment.processor import PaymentProcessor
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -210,6 +214,30 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment through Stripe and log transaction."""
+    try:
+        required_fields = ["amount_cents", "currency", "source"]
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required payment fields")
+
+        processor = PaymentProcessor(api_key="sk_test_123...")  # Should be from config
+        result = await processor.process_payment(
+            amount_cents=int(body["amount_cents"]),
+            currency=str(body["currency"]),
+            source=str(body["source"]),
+            metadata=body.get("metadata"),
+            experiment_id=body.get("experiment_id")
+        )
+
+        if result.get("success"):
+            return _make_response(200, result)
+        return _error_response(402, result.get("error", "Payment failed"))
+
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -232,6 +260,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/process-payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "process-payment" and method == "POST":
+        try:
+            parsed_body = json.loads(body) if body else {}
+            return await handle_process_payment(parsed_body)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON body")
+
     return _error_response(404, "Not found")
 
 
