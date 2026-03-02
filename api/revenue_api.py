@@ -162,6 +162,45 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from api.services.payment_processor import PaymentProcessor
+
+async def handle_payment_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle incoming payment webhooks."""
+    try:
+        sig_header = headers.get('stripe-signature', '')
+        result = await PaymentProcessor.handle_webhook(body, sig_header)
+        if result['success']:
+            return _make_response(200, {'status': 'processed'})
+        return _error_response(400, result['error'])
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        customer_res = await PaymentProcessor.create_customer(
+            body['email'],
+            body.get('name', '')
+        )
+        if not customer_res['success']:
+            return _error_response(400, customer_res['error'])
+            
+        sub_res = await PaymentProcessor.create_subscription(
+            customer_res['customer_id'],
+            body['price_id'],
+            body.get('metadata', {})
+        )
+        
+        if sub_res['success']:
+            return _make_response(200, {
+                'subscription_id': sub_res['subscription_id'],
+                'status': sub_res['status'],
+                'payment_intent': sub_res['payment_intent']
+            })
+        return _error_response(400, sub_res['error'])
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,8 +249,9 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -219,6 +259,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # Handle payment webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook":
+        if method == "POST" and body:
+            return handle_payment_webhook(body, headers)
+        return _error_response(405, "Method not allowed")
+    
+    # Handle subscription creation
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "subscribe":
+        if method == "POST" and body:
+            try:
+                body_data = json.loads(body)
+                return handle_create_subscription(body_data)
+            except json.JSONDecodeError:
+                return _error_response(400, "Invalid JSON body")
+        return _error_response(405, "Method not allowed")
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
