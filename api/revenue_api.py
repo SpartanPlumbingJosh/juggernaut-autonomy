@@ -5,13 +5,19 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Process payment
+- POST /revenue/subscription - Create subscription
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_gateway import PaymentGateway
+from api.delivery_service import DeliveryService, DeliveryStatus
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +168,79 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: str, headers: Dict[str, str]) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        sig_header = headers.get('stripe-signature', '')
+        success, event = PaymentGateway.handle_webhook(body, sig_header)
+        
+        if success and event:
+            # Process successful payment
+            if event.get('object') == 'payment_intent' and event.get('status') == 'succeeded':
+                # Handle successful payment
+                order_data = event.get('metadata', {})
+                delivery_service = DeliveryService()
+                delivery_status = delivery_service.process_order(order_data)
+                
+                return _make_response(200, {
+                    'status': 'success',
+                    'delivery_status': delivery_status
+                })
+                
+        return _error_response(400, "Invalid webhook event")
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a payment intent."""
+    try:
+        required_fields = ['amount', 'currency', 'customer_id', 'email']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+            
+        client_secret = PaymentGateway.create_payment_intent(
+            amount=body['amount'],
+            currency=body['currency'],
+            customer_id=body['customer_id'],
+            metadata={
+                'email': body['email'],
+                'product_id': body.get('product_id', ''),
+                'order_id': body.get('order_id', '')
+            }
+        )
+        
+        if not client_secret:
+            return _error_response(500, "Failed to create payment intent")
+            
+        return _make_response(200, {
+            'client_secret': client_secret,
+            'status': 'requires_payment_method'
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a subscription."""
+    try:
+        required_fields = ['customer_id', 'price_id']
+        if not all(field in body for field in required_fields):
+            return _error_response(400, "Missing required fields")
+            
+        subscription_id = PaymentGateway.create_subscription(
+            customer_id=body['customer_id'],
+            price_id=body['price_id']
+        )
+        
+        if not subscription_id:
+            return _error_response(500, "Failed to create subscription")
+            
+        return _make_response(200, {
+            'subscription_id': subscription_id,
+            'status': 'active'
+        })
+    except Exception as e:
+        return _error_response(500, f"Subscription creation failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +310,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+        
+    # POST /revenue/subscription
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscription" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(body or "", headers or {})
     
     return _error_response(404, "Not found")
 
