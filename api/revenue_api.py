@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/onboard - Customer onboarding
+- POST /revenue/deliver - Service delivery
+- POST /revenue/bill - Generate invoice
 """
 
 import json
@@ -162,6 +165,107 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_customer_onboarding(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new customer onboarding."""
+    try:
+        customer_id = body.get("customer_id")
+        plan = body.get("plan")
+        
+        if not customer_id or not plan:
+            return _error_response(400, "Missing customer_id or plan")
+            
+        # Record onboarding event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'onboarding',
+            0,
+            'USD',
+            'system',
+            '{{"customer_id": "{customer_id}", "plan": "{plan}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {"status": "onboarded", "customer_id": customer_id})
+        
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
+
+
+async def handle_service_delivery(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle service delivery and track revenue."""
+    try:
+        customer_id = body.get("customer_id")
+        service_id = body.get("service_id")
+        amount_cents = body.get("amount_cents")
+        
+        if not customer_id or not service_id or not amount_cents:
+            return _error_response(400, "Missing required fields")
+            
+        # Record delivery event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'delivery',
+            {amount_cents},
+            'USD',
+            'system',
+            '{{"customer_id": "{customer_id}", "service_id": "{service_id}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {"status": "delivered", "customer_id": customer_id})
+        
+    except Exception as e:
+        return _error_response(500, f"Delivery failed: {str(e)}")
+
+
+async def handle_billing(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle billing and payment processing."""
+    try:
+        customer_id = body.get("customer_id")
+        invoice_id = body.get("invoice_id")
+        amount_cents = body.get("amount_cents")
+        
+        if not customer_id or not invoice_id or not amount_cents:
+            return _error_response(400, "Missing required fields")
+            
+        # Record billing event
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'billing',
+            {amount_cents},
+            'USD',
+            'system',
+            '{{"customer_id": "{customer_id}", "invoice_id": "{invoice_id}"}}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, {"status": "billed", "customer_id": customer_id})
+        
+    except Exception as e:
+        return _error_response(500, f"Billing failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +335,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        return handle_customer_onboarding(json.loads(body or "{}"))
+    
+    # POST /revenue/deliver
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "deliver" and method == "POST":
+        return handle_service_delivery(json.loads(body or "{}"))
+    
+    # POST /revenue/bill
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "bill" and method == "POST":
+        return handle_billing(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
