@@ -1,7 +1,10 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Core payment processing and revenue tracking system.
 
 Endpoints:
+- POST /revenue/payments - Process payments
+- POST /revenue/subscriptions - Manage subscriptions
+- GET /revenue/customers - Customer management
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
@@ -31,6 +34,87 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
+
+
+async def handle_payment(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment transaction."""
+    try:
+        # Validate payment data
+        required_fields = ["amount_cents", "currency", "payment_method", "customer_id"]
+        for field in required_fields:
+            if not payment_data.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Record payment
+        sql = f"""
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, source,
+            metadata, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            'payment',
+            {int(payment_data["amount_cents"])},
+            '{payment_data["currency"]}',
+            'payment_processor',
+            '{json.dumps(payment_data)}'::jsonb,
+            NOW(),
+            NOW()
+        )
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        payment_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+
+
+async def handle_subscription(subscription_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Manage subscription lifecycle."""
+    try:
+        # Validate subscription data
+        required_fields = ["customer_id", "plan_id", "payment_method_id"]
+        for field in required_fields:
+            if not subscription_data.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        # Create/update subscription
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, status,
+            payment_method_id, created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{subscription_data["customer_id"]}',
+            '{subscription_data["plan_id"]}',
+            'active',
+            '{subscription_data["payment_method_id"]}',
+            NOW(),
+            NOW()
+        )
+        ON CONFLICT (customer_id, plan_id) DO UPDATE SET
+            status = 'active',
+            payment_method_id = EXCLUDED.payment_method_id,
+            updated_at = NOW()
+        RETURNING id
+        """
+        
+        result = await query_db(sql)
+        subscription_id = result.get("rows", [{}])[0].get("id")
+        
+        return _make_response(200, {
+            "subscription_id": subscription_id,
+            "status": "success"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Subscription management failed: {str(e)}")
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -219,6 +303,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            payment_data = json.loads(body or "{}")
+            return handle_payment(payment_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            subscription_data = json.loads(body or "{}")
+            return handle_subscription(subscription_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
