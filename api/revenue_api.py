@@ -8,6 +8,7 @@ Endpoints:
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +36,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
+    logger = logging.getLogger('revenue_api')
     try:
         now = datetime.now(timezone.utc)
         
@@ -111,6 +113,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         })
         
     except Exception as e:
+        logger.error(f"Failed to fetch revenue summary: {str(e)}", exc_info=True)
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
