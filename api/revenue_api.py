@@ -1,15 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and subscription management.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- GET /revenue/subscriptions/{id} - Get subscription status
+- DELETE /revenue/subscriptions/{id} - Cancel subscription
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from core.subscription_manager import SubscriptionManager
+from core.payment_processor import PaymentProcessor
+import json
 
 from core.database import query_db
 
@@ -231,6 +237,57 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # Subscription endpoints
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            payment_method = body_data.get("payment_method", "stripe")
+            processor = PaymentProcessor(
+                stripe_api_key="your_stripe_key",
+                paypal_client_id="your_paypal_id",
+                paypal_secret="your_paypal_secret"
+            )
+            manager = SubscriptionManager(processor)
+            return await manager.create_subscription(
+                customer_data=body_data.get("customer"),
+                plan_id=body_data.get("plan_id"),
+                payment_method=payment_method
+            )
+        except Exception as e:
+            return _error_response(500, f"Failed to create subscription: {str(e)}")
+    
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        try:
+            payment_method = query_params.get("payment_method", ["stripe"])[0]
+            processor = PaymentProcessor(
+                stripe_api_key="your_stripe_key",
+                paypal_client_id="your_paypal_id",
+                paypal_secret="your_paypal_secret"
+            )
+            manager = SubscriptionManager(processor)
+            return await manager.get_subscription_status(
+                subscription_id=parts[2],
+                payment_method=payment_method
+            )
+        except Exception as e:
+            return _error_response(500, f"Failed to get subscription status: {str(e)}")
+    
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "DELETE":
+        try:
+            payment_method = query_params.get("payment_method", ["stripe"])[0]
+            processor = PaymentProcessor(
+                stripe_api_key="your_stripe_key",
+                paypal_client_id="your_paypal_id",
+                paypal_secret="your_paypal_secret"
+            )
+            manager = SubscriptionManager(processor)
+            return await manager.cancel_subscription(
+                subscription_id=parts[2],
+                payment_method=payment_method
+            )
+        except Exception as e:
+            return _error_response(500, f"Failed to cancel subscription: {str(e)}")
     
     return _error_response(404, "Not found")
 
