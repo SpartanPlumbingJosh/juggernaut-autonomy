@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Autonomous revenue system with payments tracking.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/checkout - Create payment checkout session
+- POST /revenue/webhook - Process payment webhooks
 """
 
 import json
@@ -210,6 +212,8 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+from services.payment_processor import PaymentProcessor
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +235,35 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            processor = PaymentProcessor()
+            result = processor.create_checkout_session(
+                price_id=data["price_id"],
+                customer_email=data["customer_email"],
+                success_url=data["success_url"],
+                cancel_url=data["cancel_url"],
+                metadata=data.get("metadata", {})
+            )
+            return _make_response(200 if result["success"] else 400, result)
+        except Exception as e:
+            return _error_response(400, str(e))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        processor = PaymentProcessor()
+        sig_header = query_params.get("stripe-signature", [""])[0]
+        status, result = processor.handle_webhook(
+            payload=body.encode() if body else b"",
+            sig_header=sig_header,
+            webhook_secret=os.getenv("STRIPE_WEBHOOK_SECRET")
+        )
+        return _make_response(status, result)
     
     return _error_response(404, "Not found")
 
