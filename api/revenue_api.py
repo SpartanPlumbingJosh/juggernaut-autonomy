@@ -232,7 +232,88 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # POST /revenue/webhooks/payment
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhooks" and parts[2] == "payment" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
+    
     return _error_response(404, "Not found")
+
+
+async def handle_payment_webhook(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook from Stripe/PayPal."""
+    try:
+        # Validate payload
+        if not payload.get("event_id"):
+            return _error_response(400, "Missing event_id")
+        
+        # Check for duplicate event
+        dup_check = await query_db(
+            f"SELECT id FROM revenue_events WHERE metadata->>'event_id' = '{payload['event_id']}'"
+        )
+        if dup_check.get("rows"):
+            return _make_response(200, {"status": "duplicate"})
+
+        # Prepare event data
+        amount = float(payload.get("amount", 0))
+        fee = float(payload.get("fee", 0))
+        product_id = payload.get("product_id", "")
+        customer = payload.get("customer", {})
+
+        # Record revenue event
+        await query_db(f"""
+            INSERT INTO revenue_events (
+                id, 
+                event_type, 
+                amount_cents, 
+                currency, 
+                source,
+                recorded_at,
+                metadata
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {int(amount * 100)},
+                '{payload.get('currency', 'USD')}',
+                'digital_product',
+                '{datetime.now(timezone.utc).isoformat()}',
+                jsonb_build_object(
+                    'event_id', '{payload['event_id']}',
+                    'product_id', '{product_id}',
+                    'customer', '{json.dumps(customer)}',
+                    'payment_processor', '{payload.get('processor', 'unknown')}'
+                )
+            )
+        """)
+
+        # Record fee as cost
+        if fee > 0:
+            await query_db(f"""
+                INSERT INTO revenue_events (
+                    id, 
+                    event_type, 
+                    amount_cents, 
+                    currency, 
+                    source,
+                    recorded_at,
+                    metadata
+                ) VALUES (
+                    gen_random_uuid(),
+                    'cost',
+                    {int(fee * 100)},
+                    '{payload.get('currency', 'USD')}',
+                    'payment_processing',
+                    '{datetime.now(timezone.utc).isoformat()}',
+                    jsonb_build_object(
+                        'event_id', '{payload['event_id']}',
+                        'related_revenue_event', (SELECT id FROM revenue_events WHERE metadata->>'event_id' = '{payload['event_id']}' LIMIT 1)
+                    )
+                )
+            """)
+
+        return _make_response(200, {"status": "processed"})
+    
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
 
 
 __all__ = ["route_request"]
