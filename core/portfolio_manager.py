@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.autonomous_revenue_engine import AutonomousRevenueEngine
 
 
 def generate_revenue_ideas(
@@ -275,6 +276,29 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def handle_revenue_transactions(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    transactions: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Process revenue transactions through the autonomous engine."""
+    engine = AutonomousRevenueEngine(execute_sql, log_action)
+    results = []
+    
+    for transaction in transactions:
+        result = await engine.execute_transaction(transaction)
+        results.append(result)
+        
+    # Check engine health after processing
+    health = await engine.check_engine_health()
+    
+    return {
+        "success": True,
+        "processed": len(results),
+        "results": results,
+        "engine_health": health
+    }
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
