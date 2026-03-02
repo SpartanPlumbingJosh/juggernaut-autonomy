@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /payment/create - Create a payment intent
+- POST /payment/subscribe - Create a subscription
+- POST /payment/webhook - Handle payment webhooks
 """
 
 import json
@@ -12,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_manager import PaymentManager, PaymentType
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +214,71 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def handle_payment_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment intent creation."""
+    try:
+        pm = PaymentManager()
+        amount = int(float(body.get("amount", 0)) * 100)  # Convert to cents
+        currency = body.get("currency", "usd")
+        customer_id = body.get("customer_id")
+        payment_type = PaymentType(body.get("payment_type", "one_time"))
+        metadata = body.get("metadata", {})
+        
+        result = pm.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            customer_id=customer_id,
+            payment_type=payment_type,
+            metadata=metadata
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment creation failed"))
+            
+        return _make_response(200, {
+            "client_secret": result["client_secret"]
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_payment_subscribe(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation."""
+    try:
+        pm = PaymentManager()
+        customer_id = body.get("customer_id")
+        price_id = body.get("price_id")
+        metadata = body.get("metadata", {})
+        
+        result = pm.create_subscription(
+            customer_id=customer_id,
+            price_id=price_id,
+            metadata=metadata
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Subscription creation failed"))
+            
+        return _make_response(200, {
+            "subscription_id": result["subscription_id"]
+        })
+    except Exception as e:
+        return _error_response(500, f"Subscription processing error: {str(e)}")
+
+async def handle_payment_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhooks."""
+    try:
+        pm = PaymentManager()
+        sig_header = headers.get("stripe-signature", "")
+        result = pm.handle_webhook_event(body, sig_header)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+            
+        return _make_response(200, {"status": "processed"})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing error: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +299,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/create
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "create" and method == "POST":
+        return handle_payment_create(json.loads(body or "{}"))
+    
+    # POST /payment/subscribe
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "subscribe" and method == "POST":
+        return handle_payment_subscribe(json.loads(body or "{}"))
+    
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(body or "", headers or {})
     
     return _error_response(404, "Not found")
 
