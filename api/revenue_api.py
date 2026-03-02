@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/api/subscribe - Create API service subscription
+- GET /revenue/api/usage - Get API usage metrics
 """
 
 import json
@@ -162,6 +164,43 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_api_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle new API subscription request"""
+    from .services.automated_api import create_subscription
+    
+    try:
+        email = body.get("email")
+        tier = body.get("tier")
+        if not email or not tier:
+            return _error_response(400, "Email and tier are required")
+        
+        result = await create_subscription(email, tier)
+        return _make_response(200, result)
+    
+    except HTTPException as e:
+        return _error_response(e.status_code, str(e.detail))
+    except Exception as e:
+        return _error_response(500, f"Subscription failed: {str(e)}")
+
+
+async def handle_api_usage(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get API usage metrics"""
+    from .services.automated_api import get_api_usage
+    
+    try:
+        customer_id = query_params.get("customer_id")
+        if not customer_id:
+            return _error_response(400, "customer_id is required")
+        
+        usage = await get_api_usage(str(customer_id))
+        return _make_response(200, usage)
+    
+    except HTTPException as e:
+        return _error_response(e.status_code, str(e.detail))
+    except Exception as e:
+        return _error_response(500, f"Failed to get usage data: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +270,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/api/subscribe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "api" and parts[2] == "subscribe" and method == "POST":
+        return handle_api_subscription(json.loads(body or "{}"))
+    
+    # GET /revenue/api/usage
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "api" and parts[2] == "usage" and method == "GET":
+        return handle_api_usage(query_params)
     
     return _error_response(404, "Not found")
 
