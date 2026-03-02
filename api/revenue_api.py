@@ -162,6 +162,36 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_customer_onboarding(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle customer self-onboarding."""
+    try:
+        email = body.get("email")
+        name = body.get("name")
+        payment_method = body.get("payment_method")
+        
+        if not email or not name or not payment_method:
+            return _error_response(400, "Missing required fields")
+        
+        pg = PaymentGateway()
+        customer = pg.create_customer(email, name)
+        
+        # Create initial subscription
+        payment_intent = pg.create_payment_intent(
+            amount=9900,  # $99.00
+            currency="usd",
+            customer_id=customer.id
+        )
+        
+        return _make_response(200, {
+            "customer_id": customer.id,
+            "payment_intent": {
+                "client_secret": payment_intent.client_secret,
+                "status": payment_intent.status
+            }
+        })
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +261,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        return handle_customer_onboarding(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 

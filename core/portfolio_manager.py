@@ -1,12 +1,86 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
+from core.payment_gateway import PaymentGateway
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+def process_recurring_payments(execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Automated billing system for recurring payments."""
+    try:
+        # Get active subscriptions due for payment
+        res = execute_sql("""
+            SELECT id, customer_id, plan_id, amount_cents, currency
+            FROM subscriptions
+            WHERE status = 'active'
+              AND next_payment_due <= NOW()
+            LIMIT 100
+        """)
+        subscriptions = res.get("rows", []) or []
+        
+        pg = PaymentGateway()
+        processed = 0
+        failures = []
+        
+        for sub in subscriptions:
+            try:
+                # Create payment intent
+                payment = pg.create_payment_intent(
+                    amount=sub["amount_cents"],
+                    currency=sub["currency"],
+                    customer_id=sub["customer_id"]
+                )
+                
+                if payment.status == "succeeded":
+                    # Record successful payment
+                    execute_sql(f"""
+                        INSERT INTO revenue_events (
+                            id, customer_id, subscription_id,
+                            event_type, amount_cents, currency,
+                            source, metadata, recorded_at
+                        ) VALUES (
+                            gen_random_uuid(),
+                            '{sub["customer_id"]}',
+                            '{sub["id"]}',
+                            'revenue',
+                            {sub["amount_cents"]},
+                            '{sub["currency"]}',
+                            'subscription',
+                            '{{"payment_intent_id": "{payment.id}"}}',
+                            NOW()
+                        )
+                    """)
+                    
+                    # Update subscription next payment date
+                    execute_sql(f"""
+                        UPDATE subscriptions
+                        SET last_payment_at = NOW(),
+                            next_payment_due = NOW() + INTERVAL '1 month',
+                            updated_at = NOW()
+                        WHERE id = '{sub["id"]}'
+                    """)
+                    
+                    processed += 1
+            except Exception as e:
+                failures.append({
+                    "subscription_id": sub["id"],
+                    "error": str(e)[:200]
+                })
+        
+        return {
+            "success": True,
+            "processed": processed,
+            "failures": failures
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 
 def generate_revenue_ideas(
