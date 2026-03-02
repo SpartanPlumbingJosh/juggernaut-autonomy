@@ -231,6 +231,77 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        return handle_payment_request(body)
+
+    # POST /revenue/customer
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customer" and method == "POST":
+        return handle_customer_request(body)
+
+
+async def handle_payment_request(payload: Optional[str]) -> Dict[str, Any]:
+    """Process payment request"""
+    if not payload:
+        return _error_response(400, "Missing payment data")
+        
+    try:
+        data = json.loads(payload)
+        processor = StripePaymentProcessor(
+            api_key=config.STRIPE_SECRET_KEY,
+            db_executor=query_db
+        )
+        
+        result = await processor.process_payment(
+            amount=data['amount'],
+            currency=data['currency'],
+            source=data['payment_method'],
+            customer_id=data.get('customer_id'),
+            metadata=data.get('metadata', {})
+        )
+        
+        return _make_response(200, result)
+        
+    except json.JSONDecodeError:
+        return _error_response(400, "Invalid JSON payload")
+    except KeyError as e:
+        return _error_response(400, f"Missing required field: {str(e)}")
+    except stripe.error.StripeError as e:
+        return _error_response(402, f"Payment failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+
+async def handle_customer_request(payload: Optional[str]) -> Dict[str, Any]:
+    """Handle customer creation/management"""
+    if not payload:
+        return _error_response(400, "Missing customer data")
+        
+    try:
+        data = json.loads(payload)
+        processor = StripePaymentProcessor(
+            api_key=config.STRIPE_SECRET_KEY,
+            db_executor=query_db
+        )
+        
+        result = await processor.create_customer(
+            email=data['email'], 
+            payment_method=data['payment_method'],
+            name=data.get('name')
+        )
+        
+        return _make_response(200, result)
+        
+    except json.JSONDecodeError:
+        return _error_response(400, "Invalid JSON payload")
+    except KeyError as e:
+        return _error_response(400, f"Missing required field: {str(e)}")
+    except stripe.error.StripeError as e:
+        return _error_response(402, f"Customer creation failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Customer processing error: {str(e)}")
+
     
     return _error_response(404, "Not found")
 
