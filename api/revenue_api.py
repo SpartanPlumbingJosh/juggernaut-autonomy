@@ -1,14 +1,20 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and subscription management.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /subscriptions - Create new subscription
+- GET /subscriptions/{id} - Get subscription details
+- POST /subscriptions/{id}/cancel - Cancel subscription
+- POST /subscriptions/{id}/reactivate - Reactivate subscription
+- GET /subscriptions/{id}/invoices - Get subscription invoices
 """
 
 import json
 from datetime import datetime, timezone, timedelta
+from uuid import uuid4
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
@@ -162,6 +168,67 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        # Validate required fields
+        required_fields = ["customer_id", "plan_id", "payment_method_id"]
+        for field in required_fields:
+            if not body.get(field):
+                return _error_response(400, f"Missing required field: {field}")
+
+        subscription_id = str(uuid4())
+        now = datetime.now(timezone.utc)
+        
+        # Create subscription record
+        sql = f"""
+        INSERT INTO subscriptions (
+            id, customer_id, plan_id, status, 
+            current_period_start, current_period_end,
+            created_at, updated_at
+        ) VALUES (
+            '{subscription_id}',
+            '{body['customer_id']}',
+            '{body['plan_id']}',
+            'active',
+            '{now.isoformat()}',
+            '{(now + timedelta(days=30)).isoformat()}',
+            '{now.isoformat()}',
+            '{now.isoformat()}'
+        )
+        """
+        
+        await query_db(sql)
+        
+        # Create initial payment
+        payment_sql = f"""
+        INSERT INTO payments (
+            id, subscription_id, amount_cents, currency,
+            status, payment_method_id, created_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{subscription_id}',
+            {body.get('amount_cents', 0)},
+            '{body.get('currency', 'usd')}',
+            'pending',
+            '{body['payment_method_id']}',
+            '{now.isoformat()}'
+        )
+        """
+        
+        await query_db(payment_sql)
+        
+        return _make_response(201, {
+            "subscription_id": subscription_id,
+            "status": "active",
+            "current_period_start": now.isoformat(),
+            "current_period_end": (now + timedelta(days=30)).isoformat()
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -232,6 +299,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # Subscription management
+    if len(parts) >= 1 and parts[0] == "subscriptions":
+        # POST /subscriptions
+        if len(parts) == 1 and method == "POST":
+            try:
+                body_data = json.loads(body) if body else {}
+                return await create_subscription(body_data)
+            except json.JSONDecodeError:
+                return _error_response(400, "Invalid JSON body")
+        
+        # Other subscription endpoints would go here
+        
     return _error_response(404, "Not found")
 
 

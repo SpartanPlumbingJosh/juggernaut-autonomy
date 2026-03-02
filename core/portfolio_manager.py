@@ -1,12 +1,74 @@
 from __future__ import annotations
 
 import json
+import stripe
+from typing import Literal
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+
+def initialize_payment_processor(api_key: str) -> None:
+    """Initialize the Stripe payment processor."""
+    stripe.api_key = api_key
+
+
+def process_payment(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    amount: int,
+    currency: str,
+    payment_method_id: str,
+    description: str,
+    metadata: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Process a payment through Stripe."""
+    try:
+        # Create Stripe payment intent
+        intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            payment_method=payment_method_id,
+            confirm=True,
+            description=description,
+            metadata=metadata or {}
+        )
+        
+        # Record payment in database
+        sql = f"""
+        INSERT INTO payments (
+            id, amount_cents, currency, status,
+            payment_method_id, stripe_payment_id,
+            created_at
+        ) VALUES (
+            gen_random_uuid(),
+            {amount},
+            '{currency}',
+            '{intent.status}',
+            '{payment_method_id}',
+            '{intent.id}',
+            NOW()
+        )
+        """
+        await query_db(sql)
+        
+        return {
+            "success": True,
+            "payment_id": intent.id,
+            "status": intent.status,
+            "amount_received": intent.amount_received
+        }
+    except stripe.error.StripeError as e:
+        log_action(
+            "payment.failed",
+            f"Payment failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
 
 
 def generate_revenue_ideas(
