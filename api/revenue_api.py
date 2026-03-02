@@ -8,10 +8,31 @@ Endpoints:
 """
 
 import json
+import stripe
+import jwt
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from fastapi import HTTPException, Depends
+from fastapi.security import OAuth2PasswordBearer
 
 from core.database import query_db
+from core.config import settings
+
+# Initialize Stripe
+stripe.api_key = settings.STRIPE_SECRET_KEY
+
+# Authentication setup
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    try:
+        payload = jwt.decode(token, settings.JWT_SECRET, algorithms=["HS256"])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(status_code=401, detail="Invalid authentication credentials")
+        return user_id
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid authentication credentials")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +54,24 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+from fastapi import Request
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from fastapi_cache import FastAPICache
+from fastapi_cache.backends.redis import RedisBackend
+from fastapi_cache.decorator import cache
+
+# Rate limiting
+limiter = Limiter(key_func=get_remote_address)
+
+# Initialize cache
+FastAPICache.init(RedisBackend(settings.REDIS_URL))
+
+@cache(expire=60)  # Cache for 1 minute
+@limiter.limit("100/minute")
+async def handle_revenue_summary(request: Request) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -209,6 +247,36 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def create_payment_intent(amount: int, currency: str = "usd", user_id: str = Depends(get_current_user)) -> Dict[str, Any]:
+    """Create a Stripe payment intent."""
+    try:
+        intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=currency,
+            metadata={"user_id": user_id}
+        )
+        return _make_response(200, {"client_secret": intent.client_secret})
+    except stripe.error.StripeError as e:
+        return _error_response(400, str(e))
+
+async def handle_payment_webhook(body: bytes, sig_header: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            body, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+        
+        if event['type'] == 'payment_intent.succeeded':
+            payment_intent = event['data']['object']
+            # Process successful payment
+            await process_successful_payment(payment_intent)
+            
+        return _make_response(200, {"status": "success"})
+    except ValueError as e:
+        return _error_response(400, "Invalid payload")
+    except stripe.error.SignatureVerificationError as e:
+        return _error_response(400, "Invalid signature")
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
