@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Union
+import hashlib
+import secrets
 
 from core.idea_generator import IdeaGenerator
+from core.user_manager import UserManager
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
