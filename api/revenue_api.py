@@ -115,7 +115,25 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination and validation."""
+    
+    def validate_transaction(tx: Dict[str, Any]) -> bool:
+        """Validate transaction structure and values."""
+        required_fields = ["id", "event_type", "amount_cents", "currency", "recorded_at"]
+        for field in required_fields:
+            if field not in tx:
+                return False
+                
+        if tx["event_type"] not in ["revenue", "cost"]:
+            return False
+            
+        if not isinstance(tx["amount_cents"], int) or tx["amount_cents"] < 0:
+            return False
+            
+        if not isinstance(tx["currency"], str) or len(tx["currency"]) != 3:
+            return False
+            
+        return True
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
@@ -151,11 +169,23 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         count_result = await query_db(count_sql)
         total = count_result.get("rows", [{}])[0].get("total", 0)
         
+        # Validate transactions
+        valid_transactions = [tx for tx in transactions if validate_transaction(tx)]
+        invalid_count = len(transactions) - len(valid_transactions)
+        
+        if invalid_count > 0:
+            log_action(
+                "revenue.invalid_transactions",
+                f"Found {invalid_count} invalid transactions",
+                level="warning"
+            )
+            
         return _make_response(200, {
-            "transactions": transactions,
+            "transactions": valid_transactions,
             "total": total,
             "limit": limit,
-            "offset": offset
+            "offset": offset,
+            "invalid_count": invalid_count
         })
         
     except Exception as e:

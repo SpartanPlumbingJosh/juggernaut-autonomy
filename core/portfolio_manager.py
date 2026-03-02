@@ -1,12 +1,32 @@
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+# Payment gateway configuration
+PAYMENT_GATEWAYS = {
+    "stripe": {
+        "api_key": os.getenv("STRIPE_API_KEY"),
+        "webhook_secret": os.getenv("STRIPE_WEBHOOK_SECRET"),
+        "currency": "usd"
+    },
+    "paypal": {
+        "client_id": os.getenv("PAYPAL_CLIENT_ID"),
+        "client_secret": os.getenv("PAYPAL_CLIENT_SECRET"),
+        "currency": "usd"
+    }
+}
+
+# Autonomous execution settings
+AUTONOMOUS_MODE = os.getenv("AUTONOMOUS_MODE", "true").lower() == "true"
+MIN_BALANCE = float(os.getenv("MIN_BALANCE", 1000.0))  # Minimum balance to maintain
+MAX_SPEND_PER_EXPERIMENT = float(os.getenv("MAX_SPEND_PER_EXPERIMENT", 500.0))
 
 
 def generate_revenue_ideas(
@@ -187,7 +207,38 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    autonomous: bool = AUTONOMOUS_MODE,
 ) -> Dict[str, Any]:
+    """Start new experiments from top ideas, with autonomous execution support."""
+    
+    if autonomous:
+        # Check available balance before proceeding
+        try:
+            balance_res = execute_sql("""
+                SELECT SUM(amount_cents) as balance_cents 
+                FROM revenue_events 
+                WHERE event_type = 'revenue'
+            """)
+            balance = (balance_res.get("rows", [{}])[0].get("balance_cents", 0) or 0) / 100.0
+            
+            if balance < MIN_BALANCE:
+                log_action(
+                    "portfolio.balance_check",
+                    f"Insufficient balance for autonomous execution: {balance} < {MIN_BALANCE}",
+                    level="warning"
+                )
+                return {"success": False, "error": "Insufficient balance"}
+                
+            # Adjust budget based on balance
+            budget = min(budget, MAX_SPEND_PER_EXPERIMENT, balance - MIN_BALANCE)
+            
+        except Exception as e:
+            log_action(
+                "portfolio.balance_check_failed",
+                f"Failed to check balance: {str(e)}",
+                level="error"
+            )
+            return {"success": False, "error": "Balance check failed"}
     try:
         res = execute_sql(
             f"""
