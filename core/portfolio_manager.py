@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -8,16 +9,104 @@ from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
+logger = logging.getLogger(__name__)
+
+class RevenueSystem:
+    """Self-healing autonomous revenue generation system."""
+    
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]):
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        self.target_revenue = 100000  # $1K in cents
+        self.deadline = datetime.now(timezone.utc) + timedelta(days=30)
+        
+    def check_system_health(self) -> Dict[str, Any]:
+        """Check overall system health and revenue progress."""
+        try:
+            # Get current revenue stats
+            res = self.execute_sql("""
+                SELECT 
+                    SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as total_revenue,
+                    COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+                FROM revenue_events
+                WHERE recorded_at >= NOW() - INTERVAL '30 days'
+            """)
+            stats = res.get("rows", [{}])[0]
+            
+            # Calculate progress
+            revenue = float(stats.get("total_revenue") or 0)
+            progress = min(100, revenue / self.target_revenue * 100)
+            days_remaining = (self.deadline - datetime.now(timezone.utc)).days
+            
+            return {
+                "status": "healthy" if progress >= 100 else "active",
+                "revenue_cents": revenue,
+                "target_cents": self.target_revenue,
+                "progress_pct": progress,
+                "days_remaining": days_remaining,
+                "transaction_count": stats.get("transaction_count", 0)
+            }
+        except Exception as e:
+            logger.error(f"Failed to check system health: {str(e)}")
+            return {"status": "error", "error": str(e)}
+        
+    def trigger_revenue_cycle(self) -> Dict[str, Any]:
+        """Run full autonomous revenue generation cycle."""
+        try:
+            # Generate new ideas
+            gen_result = generate_revenue_ideas(self.execute_sql, self.log_action)
+            
+            # Score ideas
+            score_result = score_pending_ideas(self.execute_sql, self.log_action)
+            
+            # Start experiments
+            exp_result = start_experiments_from_top_ideas(
+                self.execute_sql,
+                self.log_action,
+                max_new=3,
+                min_score=70.0,
+                budget=50.0
+            )
+            
+            # Review experiments
+            review_result = review_experiments_stub(self.execute_sql, self.log_action)
+            
+            return {
+                "success": True,
+                "generated": gen_result.get("created", 0),
+                "scored": score_result.get("scored", 0),
+                "experiments": exp_result.get("new_experiments", 0),
+                "reviewed": review_result.get("running", 0)
+            }
+        except Exception as e:
+            logger.error(f"Failed to run revenue cycle: {str(e)}")
+            return {"success": False, "error": str(e)}
+
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    focus_areas: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
+    """Generate revenue-focused ideas with optional focus areas."""
     context = context or {}
     gen = IdeaGenerator()
+    
+    # Add focus areas to context if provided
+    if focus_areas:
+        context["focus_areas"] = focus_areas
+        
+    # Generate ideas with revenue focus
+    context["revenue_priority"] = True
     ideas = gen.generate_ideas(context)[: int(limit)]
+    
+    # Enhance ideas with revenue potential estimates
+    for idea in ideas:
+        if "estimates" not in idea:
+            idea["estimates"] = {}
+        idea["estimates"]["revenue_potential"] = gen.estimate_revenue_potential(idea)
 
     created = 0
     failures: List[Dict[str, Any]] = []

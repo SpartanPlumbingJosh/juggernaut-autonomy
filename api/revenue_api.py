@@ -34,6 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
+    """Get revenue summary including autonomous system status."""
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -81,6 +82,11 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        # Get autonomous system status
+        from core.portfolio_manager import RevenueSystem
+        system = RevenueSystem(query_db, lambda *args, **kwargs: None)
+        system_status = system.check_system_health()
+        
         return _make_response(200, {
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
@@ -90,6 +96,7 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "first_revenue_at": mtd.get("first_revenue_at"),
                 "last_revenue_at": mtd.get("last_revenue_at")
             },
+            "autonomous_system": system_status,
             "qtd": {
                 "revenue_cents": qtd.get("total_revenue_cents") or 0,
                 "cost_cents": qtd.get("total_cost_cents") or 0,
