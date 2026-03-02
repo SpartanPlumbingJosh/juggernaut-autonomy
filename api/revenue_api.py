@@ -3,8 +3,9 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/attribution - Marketing attribution data
 """
 
 import json
@@ -231,8 +232,58 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # GET /revenue/attribution
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "attribution" and method == "GET":
+        return handle_revenue_attribution()
     
     return _error_response(404, "Not found")
 
+
+async def handle_revenue_attribution() -> Dict[str, Any]:
+    """Get marketing attribution breakdown."""
+    try:
+        # Attribution by channel
+        sql = """
+        SELECT 
+            (attribution->>'source') as source,
+            (attribution->>'campaign') as campaign,
+            SUM(amount_cents) as revenue_cents,
+            COUNT(*) as conversions,
+            SUM(amount_cents) / NULLIF(COUNT(*), 0) as avg_order_value_cents
+        FROM revenue_events
+        WHERE attribution IS NOT NULL
+        GROUP BY source, campaign
+        ORDER BY revenue_cents DESC
+        """
+        result = await query_db(sql)
+        channels = result.get("rows", [])
+
+        # Marketing ROI
+        roi_sql = """
+        SELECT 
+            (attribution->>'source') as source,
+            SUM(amount_cents) as revenue_cents,
+            SUM(CASE WHEN event_type = 'cost' AND (metadata->>'channel') = (attribution->>'source') 
+                THEN amount_cents ELSE 0 END) as spend_cents,
+            CASE WHEN SUM(CASE WHEN event_type = 'cost' AND (metadata->>'channel') = (attribution->>'source') 
+                THEN amount_cents ELSE 0 END) > 0 
+                THEN SUM(amount_cents) / NULLIF(SUM(CASE WHEN event_type = 'cost' AND (metadata->>'channel') = (attribution->>'source') 
+                THEN amount_cents ELSE 0 END), 0) 
+                ELSE 0 END as roi
+        FROM revenue_events
+        WHERE attribution IS NOT NULL
+        GROUP BY source
+        ORDER BY roi DESC
+        """
+        roi_result = await query_db(roi_sql)
+        roi_data = roi_result.get("rows", [])
+
+        return _make_response(200, {
+            "by_channel": channels,
+            "roi": roi_data
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch attribution data: {str(e)}")
 
 __all__ = ["route_request"]
