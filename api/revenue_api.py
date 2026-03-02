@@ -11,7 +11,11 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from stripe_integration import StripePaymentProcessor
+import os
+
+payment_processor = StripePaymentProcessor()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +36,75 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_create_payment_intent(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new payment intent."""
+    try:
+        amount = int(query_params.get("amount", ["0"])[0])
+        currency = str(query_params.get("currency", ["usd"])[0])
+        experiment_id = query_params.get("experiment_id", [""])[0]
+        
+        if amount <= 0:
+            return _error_response(400, "Amount must be positive")
+            
+        metadata = {}
+        if experiment_id:
+            metadata["experiment_id"] = experiment_id
+            
+        intent = await payment_processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            metadata=metadata
+        )
+        
+        if not intent.get("success"):
+            return _error_response(500, intent.get("error", "Payment creation failed"))
+            
+        return _make_response(200, {
+            "client_secret": intent["client_secret"],
+            "payment_intent_id": intent["payment_intent_id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment intent: {str(e)}")
+
+async def handle_confirm_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Confirm and record a successful payment."""
+    try:
+        payment_intent_id = str(body.get("payment_intent_id", ""))
+        if not payment_intent_id:
+            return _error_response(400, "Missing payment_intent_id")
+            
+        payment_data = await payment_processor.record_payment_event(payment_intent_id)
+        if not payment_data:
+            return _error_response(400, "Invalid payment data")
+            
+        # Store in revenue_events
+        metadata = payment_data.get("metadata", {})
+        experiment_id = metadata.get("experiment_id")
+        
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, experiment_id, event_type, amount_cents,
+                currency, source, metadata, recorded_at
+            ) VALUES (
+                gen_random_uuid(),
+                {f"'{experiment_id}'" if experiment_id else "NULL"},
+                'revenue',
+                {payment_data['amount_cents']},
+                '{payment_data['currency']}',
+                'stripe::{payment_data['payment_method']}',
+                '{json.dumps(payment_data['metadata'])}'::jsonb,
+                '{payment_data['timestamp']}'
+            )
+            """
+        )
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to confirm payment: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +304,15 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /payment/intent (create new payment)
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "intent" and method == "POST":
+        return await handle_create_payment_intent(query_params)
+
+    # POST /payment/confirm (confirm completed payment)
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "confirm" and method == "POST":
+        body_data = json.loads(body or "{}")
+        return await handle_confirm_payment(body_data)
     
     return _error_response(404, "Not found")
 
