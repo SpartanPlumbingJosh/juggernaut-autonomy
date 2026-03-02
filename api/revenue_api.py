@@ -3,9 +3,13 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/goal-status - Progress toward $14M annual revenue goal
 """
+
+ANNUAL_REVENUE_GOAL_CENTS = 1400000000  # $14M
+MILESTONES = [0.25, 0.5, 0.75, 0.9, 1.0]  # Progress milestones to trigger alerts
 
 import json
 from datetime import datetime, timezone, timedelta
@@ -32,6 +36,49 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+def _check_milestones(progress: float) -> List[Dict[str, Any]]:
+    """Check if any milestones have been reached since last check."""
+    alerts = []
+    for milestone in MILESTONES:
+        if progress >= milestone:
+            alerts.append({
+                "milestone": f"{milestone*100:.0f}%",
+                "revenue_target_cents": int(ANNUAL_REVENUE_GOAL_CENTS * milestone),
+                "description": f"Reached {milestone*100:.0f}% of annual revenue goal"
+            })
+    return alerts
+
+async def check_revenue_goal_status() -> Dict[str, Any]:
+    """Get current progress toward annual revenue goal."""
+    try:
+        # Calculate revenue this fiscal year
+        fiscal_year_start = datetime.now().replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        result = await query_db(f"""
+            SELECT SUM(amount_cents) as ytd_revenue_cents
+            FROM revenue_events 
+            WHERE event_type = 'revenue'
+            AND recorded_at >= '{fiscal_year_start.isoformat()}'
+        """)
+        
+        ytd_revenue = int(result.get("rows", [{}])[0].get("ytd_revenue_cents") or 0)
+        progress = min(ytd_revenue / ANNUAL_REVENUE_GOAL_CENTS, 1.0)
+        
+        return {
+            "revenue_goal_cents": ANNUAL_REVENUE_GOAL_CENTS,
+            "ytd_revenue_cents": ytd_revenue,
+            "remaining_cents": max(0, ANNUAL_REVENUE_GOAL_CENTS - ytd_revenue),
+            "progress": progress,
+            "milestones": _check_milestones(progress),
+            "alert": f"{progress*100:.1f}% of revenue goal reached" if progress > 0.5 else None,
+            "is_on_track": progress >= (datetime.now().month / 12),  # Should be at least X% at month X
+            "daily_target_cents": int(ANNUAL_REVENUE_GOAL_CENTS / 365),  # Rough daily target
+            "projected_annual_cents": int(ytd_revenue / datetime.now().month * 12) if datetime.now().month > 0 else 0
+        }
+        
+    except Exception as e:
+        return {"error": str(e)}
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +278,13 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/goal-status
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "goal-status" and method == "GET":
+        goal_status = await check_revenue_goal_status()
+        if "error" in goal_status:
+            return _error_response(500, goal_status["error"])
+        return _make_response(200, goal_status)
     
     return _error_response(404, "Not found")
 
