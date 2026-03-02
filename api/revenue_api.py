@@ -5,6 +5,9 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment/webhook - Payment gateway webhook handler
+- POST /revenue/payment/subscribe - Create new subscription
+- POST /revenue/payment/invoice - Create new invoice
 """
 
 import json
@@ -162,6 +165,60 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: str, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment gateway webhook events."""
+    from core.payment_service import PaymentService
+    from core.config import settings
+    
+    payment_service = PaymentService(settings.STRIPE_SECRET_KEY)
+    payment_service.webhook_secret = settings.STRIPE_WEBHOOK_SECRET
+    
+    sig_header = headers.get('stripe-signature', '')
+    return payment_service.handle_webhook(body, sig_header)
+
+async def handle_subscription_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    from core.payment_service import PaymentService
+    from core.config import settings
+    
+    payment_service = PaymentService(settings.STRIPE_SECRET_KEY)
+    
+    customer = payment_service.create_customer(
+        email=body['email'],
+        name=body['name'],
+        metadata=body.get('metadata', {})
+    )
+    
+    subscription = payment_service.create_subscription(
+        customer_id=customer['id'],
+        price_id=body['price_id'],
+        trial_days=body.get('trial_days', 0)
+    )
+    
+    return _make_response(200, {
+        'customer_id': customer['id'],
+        'subscription_id': subscription['id'],
+        'client_secret': subscription['latest_invoice']['payment_intent']['client_secret']
+    })
+
+async def handle_invoice_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new invoice."""
+    from core.payment_service import PaymentService
+    from core.config import settings
+    
+    payment_service = PaymentService(settings.STRIPE_SECRET_KEY)
+    
+    invoice = payment_service.create_invoice(
+        customer_id=body['customer_id'],
+        items=body['items']
+    )
+    
+    return _make_response(200, {
+        'invoice_id': invoice['id'],
+        'invoice_url': invoice['hosted_invoice_url'],
+        'status': invoice['status']
+    })
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,7 +267,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +288,20 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment/webhook
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "webhook" and method == "POST":
+        return handle_payment_webhook(body or "", headers or {})
+    
+    # POST /revenue/payment/subscribe
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "subscribe" and method == "POST":
+        body_data = json.loads(body or "{}")
+        return handle_subscription_create(body_data)
+    
+    # POST /revenue/payment/invoice
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payment" and parts[2] == "invoice" and method == "POST":
+        body_data = json.loads(body or "{}")
+        return handle_invoice_create(body_data)
     
     return _error_response(404, "Not found")
 
