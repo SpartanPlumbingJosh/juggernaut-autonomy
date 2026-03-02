@@ -235,4 +235,135 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
+async def handle_record_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record a payment transaction."""
+    try:
+        amount_cents = int(body.get("amount_cents", 0))
+        if amount_cents <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        currency = str(body.get("currency", "USD"))
+        source = str(body.get("source", "api"))
+        metadata = body.get("metadata", {})
+        
+        success, payment_id = await process_payment(
+            amount_cents=amount_cents,
+            currency=currency,
+            metadata=metadata,
+            customer_id=body.get("customer_id")
+        )
+        
+        if not success:
+            return _error_response(500, f"Failed to record payment: {payment_id}")
+            
+        return _make_response(200, {
+            "payment_id": payment_id,
+            "amount_cents": amount_cents,
+            "currency": currency,
+            "status": "recorded"
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment recording failed: {str(e)}")
+
+async def handle_get_invoices(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get invoice history with pagination."""
+    try:
+        limit = int(query_params.get("limit", 50))
+        offset = int(query_params.get("offset", 0))
+        customer_id = query_params.get("customer_id")
+        
+        where = f"WHERE customer_id = '{customer_id}'" if customer_id else ""
+        
+        sql = f"""
+        SELECT id, customer_id, items_json, total_cents, status,
+               created_at, paid_at, metadata
+        FROM invoices
+        {where}
+        ORDER BY created_at DESC
+        LIMIT {limit}
+        OFFSET {offset}
+        """
+        
+        result = await query_db(sql)
+        invoices = result.get("rows", [])
+        
+        # Get total count
+        count_sql = f"SELECT COUNT(*) as total FROM invoices {where}"
+        count_result = await query_db(count_sql)
+        total = count_result.get("rows", [{}])[0].get("total", 0)
+        
+        return _make_response(200, {
+            "invoices": invoices,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch invoices: {str(e)}")
+
+async def handle_create_invoice(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new invoice."""
+    try:
+        customer_id = body.get("customer_id")
+        if not customer_id:
+            return _error_response(400, "Missing customer_id")
+            
+        items = body.get("items", [])
+        if not items or not isinstance(items, list):
+            return _error_response(400, "Invalid items")
+            
+        payment_method = body.get("payment_method")
+        
+        success, invoice_data = await generate_invoice(
+            customer_id=customer_id,
+            items=items,
+            payment_method=PaymentMethod(payment_method) if payment_method else None
+        )
+        
+        if not success:
+            return _error_response(500, "Failed to create invoice")
+            
+        return _make_response(201, invoice_data)
+        
+    except Exception as e:
+        return _error_response(500, f"Invoice creation failed: {str(e)}")
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    """Route revenue API requests."""
+    
+    # Handle CORS preflight
+    if method == "OPTIONS":
+        return _make_response(200, {})
+    
+    # Parse path
+    parts = [p for p in path.split("/") if p]
+    
+    # GET /revenue/summary
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
+        return handle_revenue_summary()
+    
+    # GET /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
+        return handle_revenue_transactions(query_params)
+    
+    # GET /revenue/charts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
+        return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_record_payment(json.loads(body) if body else {})
+        
+    # GET /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "GET":
+        return handle_get_invoices(query_params)
+        
+    # POST /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "POST":
+        return handle_create_invoice(json.loads(body) if body else {})
+    
+    return _error_response(404, "Not found")
+
 __all__ = ["route_request"]
