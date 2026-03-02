@@ -232,6 +232,21 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # Handle billing webhooks
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        processor = query_params.get("processor", [""])[0]
+        if not processor:
+            return _error_response(400, "Missing processor parameter")
+        
+        signature = request.headers.get("Stripe-Signature") or request.headers.get("Paddle-Signature")
+        if not signature:
+            return _error_response(401, "Missing signature")
+            
+        success = billing_service.handle_webhook(processor, request.json, signature)
+        if success:
+            return _make_response(200, {"status": "processed"})
+        return _error_response(500, "Failed to process webhook")
+
     return _error_response(404, "Not found")
 
 
