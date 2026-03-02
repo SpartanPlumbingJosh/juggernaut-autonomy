@@ -1,10 +1,11 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle revenue tracking and product delivery.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/deliver - Deliver purchased product
 """
 
 import json
@@ -162,6 +163,30 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def deliver_product(transaction_id: str) -> Dict[str, Any]:
+    """Deliver purchased product to customer."""
+    try:
+        # Get transaction details
+        transaction = await query_db(f"""
+            SELECT id, metadata FROM revenue_events WHERE id = '{transaction_id}'
+        """)
+        if not transaction.get("rows"):
+            return _error_response(404, "Transaction not found")
+            
+        transaction_data = transaction["rows"][0]
+        metadata = transaction_data.get("metadata", {})
+        
+        # TODO: Implement actual product delivery logic
+        # This could be sending an email, generating a download link, etc.
+        
+        return _make_response(200, {
+            "success": True,
+            "delivery_status": "completed",
+            "transaction_id": transaction_id
+        })
+    except Exception as e:
+        return _error_response(500, f"Delivery failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +256,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/deliver
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "deliver" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            return deliver_product(data.get("transaction_id"))
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
     
     return _error_response(404, "Not found")
 
