@@ -276,11 +276,51 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
+def initialize_revenue_system(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
-    """Review running experiments and trigger learning loop for completed ones."""
+    """Initialize revenue system by ensuring critical tables exist and basic records are set."""
+    try:
+        # Ensure revenue_events table exists
+        execute_sql("""
+        CREATE TABLE IF NOT EXISTS revenue_events (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            event_type TEXT NOT NULL CHECK (event_type IN ('revenue', 'cost')),
+            amount_cents BIGINT NOT NULL,
+            currency TEXT NOT NULL DEFAULT 'USD',
+            source TEXT,
+            experiment_id UUID,
+            metadata JSONB,
+            recorded_at TIMESTAMPTZ NOT NULL,
+            created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+        """)
+
+        # Insert initial system heartbeat record
+        execute_sql("""
+        INSERT INTO revenue_events (
+            event_type, amount_cents, currency, source, metadata, recorded_at
+        ) VALUES (
+            'revenue', 0, 'USD', 'system', 
+            '{"message": "Initializing revenue system"}'::jsonb, 
+            NOW()
+        )
+        """)
+
+        return {"success": True, "message": "Revenue system initialized"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def review_experiments_stub(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    monitoring_interval: int = 3600
+) -> Dict[str, Any]:
+    """Review running experiments and trigger learning loop for completed ones.
+    Args:
+        monitoring_interval: Number of seconds between system checks (default: hourly)
+    """
     try:
         from core.learning_loop import on_experiment_complete
     except ImportError:

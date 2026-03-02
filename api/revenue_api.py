@@ -33,8 +33,21 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def validate_system_health() -> bool:
+    """Validate the revenue system is operational."""
+    try:
+        test_query = "SELECT 1 FROM revenue_events LIMIT 1"
+        await query_db(test_query)
+        return True
+    except Exception:
+        return False
+
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals.
+    Includes system health check before returning data.
+    """
+    if not await validate_system_health():
+        return _error_response(503, "Revenue system not ready")
     try:
         now = datetime.now(timezone.utc)
         
