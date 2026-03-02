@@ -1,12 +1,76 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+
+logger = logging.getLogger(__name__)
+
+class OnboardingManager:
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]]):
+        self.execute_sql = execute_sql
+        
+    def create_user_account(self, email: str, name: str) -> Dict[str, Any]:
+        """Create new user account with default settings"""
+        try:
+            # Create user record
+            self.execute_sql(
+                f"""
+                INSERT INTO users (id, email, name, created_at, updated_at)
+                VALUES (gen_random_uuid(), '{email}', '{name}', NOW(), NOW())
+                RETURNING id
+                """
+            )
+            user_id = res.get("rows", [{}])[0].get("id")
+            
+            if not user_id:
+                raise ValueError("Failed to create user account")
+                
+            # Initialize default portfolio
+            self.execute_sql(
+                f"""
+                INSERT INTO portfolios (user_id, created_at, updated_at)
+                VALUES ('{user_id}', NOW(), NOW())
+                """
+            )
+            
+            logger.info(f"Created new user account: {user_id}")
+            return {"success": True, "user_id": user_id}
+            
+        except Exception as e:
+            logger.error(f"Failed to create user account: {str(e)}")
+            return {"success": False, "error": str(e)}
+            
+    def initialize_default_experiments(self, user_id: str) -> Dict[str, Any]:
+        """Set up default experiments for new user"""
+        try:
+            # Generate initial ideas
+            ideas = IdeaGenerator().generate_ideas({})
+            
+            # Score and select top ideas
+            scorer = IdeaScorer()
+            scored_ideas = [scorer.score_idea(idea) for idea in ideas]
+            top_ideas = sorted(scored_ideas, key=lambda x: x.get("score", 0), reverse=True)[:3]
+            
+            # Create experiments
+            for idea in top_ideas:
+                create_experiment_from_idea(
+                    execute_sql=self.execute_sql,
+                    idea=idea,
+                    budget=100.0
+                )
+                
+            logger.info(f"Initialized default experiments for user: {user_id}")
+            return {"success": True}
+            
+        except Exception as e:
+            logger.error(f"Failed to initialize experiments: {str(e)}")
+            return {"success": False, "error": str(e)}
 
 
 def generate_revenue_ideas(
