@@ -1,5 +1,5 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and subscription management.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.billing import create_customer, create_subscription, handle_webhook
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,28 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            payload = json.loads(body) if body else {}
+            return await create_subscription(
+                payload.get("customer_id"),
+                payload.get("price_id")
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            payload = json.loads(body) if body else {}
+            result = await handle_webhook(payload)
+            if not result["success"]:
+                return _error_response(400, result["error"])
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(400, f"Webhook processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
