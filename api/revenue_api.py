@@ -10,6 +10,7 @@ Endpoints:
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from .payment_processor import PaymentProcessor
 
 from core.database import query_db
 
@@ -33,7 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -210,7 +211,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, execute_sql: Optional[callable] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -222,7 +223,30 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
+        return handle_revenue_summary(query_params)
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        if not execute_sql:
+            return _error_response(500, "Database connection required")
+        processor = PaymentProcessor(execute_sql)
+        return processor.create_payment_intent(
+            float(body.get("amount", 0)),
+            body.get("currency", "USD"),
+            body.get("payment_method", "stripe"),
+            body.get("metadata", {})
+        )
+        
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        if not execute_sql:
+            return _error_response(500, "Database connection required")
+        processor = PaymentProcessor(execute_sql)
+        return processor.handle_webhook(
+            body.get("payload", {}),
+            body.get("signature", ""),
+            body.get("source", "stripe")
+        )
     
     # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
