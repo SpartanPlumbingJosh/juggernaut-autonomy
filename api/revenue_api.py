@@ -1,8 +1,10 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payments and revenue tracking.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- POST /pay/create - Create payment checkout
+- POST /pay/webhook - Payment webhook handler
+- GET /revenue/summary - MTD/QTD/YTD totals 
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
 """
@@ -32,6 +34,51 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+from payment.processor import PaymentProcessor
+
+payment_processor = PaymentProcessor()
+
+async def handle_payment_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create payment checkout session"""
+    try:
+        product_id = body.get('product_id')
+        amount = int(body.get('amount', 0))
+        
+        if not product_id or amount <= 0:
+            return _error_response(400, "Invalid product or amount")
+            
+        result = await payment_processor.create_checkout_session(
+            product_id=product_id,
+            price=amount,
+            metadata=body.get('metadata', {})
+        )
+        
+        if result.get('error'):
+            return _error_response(500, result['error'])
+            
+        return _make_response(200, {
+            'session_id': result['session_id'],
+            'checkout_url': result['url']
+        })
+    except Exception as e:
+        return _error_response(500, f"Payment failed: {str(e)}")
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process payment webhook"""
+    try:
+        event = body.get('event')
+        if not event:
+            return _error_response(400, "Missing event data")
+            
+        result = await payment_processor.record_transaction(event)
+        
+        if result.get('error'):
+            return _error_response(500, result['error'])
+            
+        return _make_response(200, {'success': True})
+    except Exception as e:
+        return _error_response(500, f"Webhook failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -220,6 +267,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # POST /pay/create
+    if len(parts) == 2 and parts[0] == "pay" and parts[1] == "create" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+        except Exception:
+            return _error_response(400, "Invalid JSON")
+        return await handle_payment_create(body_data)
+        
+    # POST /pay/webhook
+    if len(parts) == 2 and parts[0] == "pay" and parts[1] == "webhook" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+        except Exception:
+            return _error_response(400, "Invalid JSON")
+        return await handle_payment_webhook(body_data)
+            
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
