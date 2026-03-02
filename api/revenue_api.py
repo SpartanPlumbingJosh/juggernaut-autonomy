@@ -1,10 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue Infrastructure Platform - Core systems for autonomous revenue generation.
+
+Features:
+- Subscription management
+- Billing automation  
+- Payment processing
+- Revenue analytics
+- High-volume transaction processing (16M+ ARR scale)
 
 Endpoints:
+- POST /subscriptions - Create new subscription
+- POST /billing - Process payment
+- GET /billing/retry - Retry failed payments
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /metrics/daily - Revenue metrics by day
 """
 
 import json
@@ -162,6 +173,46 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_daily_metrics() -> Dict[str, Any]:
+    """Get daily revenue metrics and KPIs"""
+    try:
+        # Track key metrics optimized for 16M ARR scale
+        sql = """
+        WITH daily AS (
+            SELECT 
+                DATE(recorded_at) as date,
+                SUM(CASE WHEN event_type = 'subscription' THEN amount_cents ELSE 0 END) as subscription_revenue,
+                SUM(CASE WHEN event_type = 'one_time' THEN amount_cents ELSE 0 END) as one_time_revenue,
+                COUNT(DISTINCT CASE WHEN event_type = 'subscription' THEN customer_id END) as subscribers,
+                COUNT(DISTINCT customer_id) as paying_customers
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '30 days'
+            GROUP BY DATE(recorded_at)
+        )
+        SELECT
+            date,
+            subscription_revenue,
+            one_time_revenue,
+            (subscription_revenue + one_time_revenue) as total_revenue,
+            subscribers,
+            paying_customers,
+            CASE 
+                WHEN LEAD(subscribers) OVER (ORDER BY date) IS NOT NULL 
+                THEN LEAD(subscribers) OVER (ORDER BY date) - subscribers 
+                ELSE 0 
+            END as net_new_subscribers
+        FROM daily
+        ORDER BY date DESC
+        """
+        
+        result = await query_db(sql)
+        metrics = result.get("rows", [])
+        
+        return _make_response(200, {"metrics": metrics})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch daily metrics: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +282,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /metrics/daily
+    if len(parts) == 2 and parts[0] == "metrics" and parts[1] == "daily" and method == "GET":
+        return handle_daily_metrics()
+    
+    # POST /subscriptions
+    if len(parts) == 1 and parts[0] == "subscriptions" and method == "POST":
+        return handle_create_subscription(body)
+    
+    # POST /billing
+    if len(parts) == 1 and parts[0] == "billing" and method == "POST":
+        return handle_process_payment(body)
     
     return _error_response(404, "Not found")
 
