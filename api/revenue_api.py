@@ -34,7 +34,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals and automation metrics."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -81,6 +81,17 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        # Get automation metrics
+        automation_sql = """
+        SELECT 
+            COUNT(*) FILTER (WHERE source = 'automation') as automation_count,
+            SUM(amount_cents) FILTER (WHERE source = 'automation') as automation_revenue_cents
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '1 day'
+        """
+        automation_result = await query_db(automation_sql)
+        automation = automation_result.get("rows", [{}])[0]
+
         return _make_response(200, {
             "mtd": {
                 "revenue_cents": mtd.get("total_revenue_cents") or 0,
@@ -88,7 +99,11 @@ async def handle_revenue_summary() -> Dict[str, Any]:
                 "profit_cents": mtd.get("net_profit_cents") or 0,
                 "transaction_count": mtd.get("transaction_count") or 0,
                 "first_revenue_at": mtd.get("first_revenue_at"),
-                "last_revenue_at": mtd.get("last_revenue_at")
+                "last_revenue_at": mtd.get("last_revenue_at"),
+                "automation": {
+                    "count": automation.get("automation_count") or 0,
+                    "revenue_cents": automation.get("automation_revenue_cents") or 0
+                }
             },
             "qtd": {
                 "revenue_cents": qtd.get("total_revenue_cents") or 0,
