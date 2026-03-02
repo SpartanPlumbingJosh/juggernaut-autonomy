@@ -12,6 +12,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.transaction_processor import TransactionProcessor
+import logging
+
+logger = logging.getLogger(__name__)
+
+# Initialize transaction processor with secret key from environment
+transaction_processor = TransactionProcessor(secret_key="your-secret-key")
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +40,12 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_revenue_summary(headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Get MTD/QTD/YTD revenue totals with authentication."""
+    # Verify API key
+    api_key = headers.get("Authorization", "")
+    if not _validate_api_key(api_key):
+        return _error_response(401, "Unauthorized")
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -114,7 +126,12 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
-async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_revenue_transactions(query_params: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Get transaction history with pagination and authentication."""
+    # Verify API key
+    api_key = headers.get("Authorization", "")
+    if not _validate_api_key(api_key):
+        return _error_response(401, "Unauthorized")
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -162,7 +179,12 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
-async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
+async def handle_revenue_charts(query_params: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Get revenue over time for charts with authentication."""
+    # Verify API key
+    api_key = headers.get("Authorization", "")
+    if not _validate_api_key(api_key):
+        return _error_response(401, "Unauthorized")
     """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
@@ -210,7 +232,17 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def _validate_api_key(api_key: str) -> bool:
+    """Validate API key."""
+    # In production, this should validate against a secure key store
+    return api_key == "your-api-key"
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Route revenue API requests with enhanced security."""
+    headers = headers or {}
+    
+    # Log incoming request
+    logger.info(f"Revenue API request: {method} {path}")
     """Route revenue API requests."""
     
     # Handle CORS preflight

@@ -15,6 +15,10 @@ def generate_revenue_ideas(
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with monitoring."""
+    # Log start of operation
+    log_action("revenue.idea_generation.start", "Starting revenue idea generation", 
+               level="info", output_data={"limit": limit})
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
