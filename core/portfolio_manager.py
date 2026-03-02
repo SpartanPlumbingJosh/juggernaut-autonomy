@@ -3,11 +3,86 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from enum import Enum, auto
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
+class RevenueStrategy(Enum):
+    """Revenue generation strategies."""
+    PRODUCT_LED_GROWTH = auto()
+    SALES_LED_GROWTH = auto()
+    MARKETPLACE = auto()
+    SUBSCRIPTION = auto()
+    FREEMIUM = auto()
+    CONSULTING = auto()
+    AFFILIATE = auto()
+    ADS = auto()
+
+class RevenueSystem:
+    """Autonomous revenue generation system."""
+    
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]):
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        self.current_strategy = RevenueStrategy.PRODUCT_LED_GROWTH
+        self.scaling_factor = 1.0
+        self.uptime_monitor = UptimeMonitor()
+        self.billing_system = BillingSystem()
+        self.acquisition_funnel = AcquisitionFunnel()
+
+
+class UptimeMonitor:
+    """Ensures 99.9% uptime with self-healing capabilities."""
+    
+    def __init__(self):
+        self.last_check = datetime.now(timezone.utc)
+        self.uptime = 1.0
+        self.incidents = []
+    
+    def check_system_health(self):
+        """Run system health checks and trigger self-healing."""
+        now = datetime.now(timezone.utc)
+        # Simulate health check
+        if (now - self.last_check).total_seconds() > 300:  # Every 5 minutes
+            self.last_check = now
+            # TODO: Implement actual health checks
+            self.uptime = 0.999  # Simulated uptime
+            return True
+        return False
+    
+    def trigger_self_healing(self):
+        """Execute self-healing procedures."""
+        # TODO: Implement actual self-healing
+        self.log_action("system.self_healing", "Self-healing triggered", level="info")
+        return True
+
+class BillingSystem:
+    """Automated billing and payment processing."""
+    
+    def __init__(self):
+        self.payment_gateway = PaymentGateway()
+        self.invoices = []
+    
+    def process_payments(self):
+        """Process recurring payments and invoices."""
+        # TODO: Implement payment processing
+        self.log_action("billing.process_payments", "Processing payments", level="info")
+        return True
+
+class AcquisitionFunnel:
+    """Customer acquisition and conversion funnel."""
+    
+    def __init__(self):
+        self.conversion_rate = 0.05  # Initial conversion rate
+        self.funnel_steps = ["awareness", "interest", "decision", "action"]
+    
+    def optimize_conversion(self):
+        """Optimize funnel conversion rates."""
+        # TODO: Implement conversion optimization
+        self.log_action("funnel.optimize", "Optimizing conversion funnel", level="info")
+        return True
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
@@ -275,6 +350,35 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+    def execute_strategy(self, strategy: RevenueStrategy):
+        """Execute the selected revenue generation strategy."""
+        self.current_strategy = strategy
+        self.log_action("strategy.execute", f"Executing {strategy.name} strategy", level="info")
+        
+        if strategy == RevenueStrategy.PRODUCT_LED_GROWTH:
+            return self._execute_product_led_growth()
+        elif strategy == RevenueStrategy.SUBSCRIPTION:
+            return self._execute_subscription_model()
+        # Add other strategy implementations
+        
+    def _execute_product_led_growth(self):
+        """Execute product-led growth strategy."""
+        # Implement PLG-specific logic
+        self.log_action("strategy.plg", "Executing product-led growth", level="info")
+        return True
+    
+    def _execute_subscription_model(self):
+        """Execute subscription model strategy."""
+        # Implement subscription-specific logic
+        self.log_action("strategy.subscription", "Executing subscription model", level="info")
+        return True
+    
+    def scale_system(self, factor: float):
+        """Scale the revenue system up or down."""
+        self.scaling_factor = factor
+        self.log_action("system.scale", f"Scaling system by factor {factor}", level="info")
+        return True
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],

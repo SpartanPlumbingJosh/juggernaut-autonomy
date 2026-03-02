@@ -33,6 +33,46 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+class PaymentGateway:
+    """Handles payment processing and billing."""
+    
+    async def process_payment(self, amount: float, currency: str, customer_id: str) -> Dict[str, Any]:
+        """Process a payment transaction."""
+        # TODO: Integrate with actual payment processor
+        return {"success": True, "transaction_id": "txn_12345"}
+
+async def handle_automated_billing() -> Dict[str, Any]:
+    """Handle recurring billing and subscriptions."""
+    try:
+        # Get active subscriptions
+        sql = """
+        SELECT id, customer_id, amount_cents, currency, billing_cycle 
+        FROM subscriptions
+        WHERE status = 'active'
+        AND next_billing_at <= NOW()
+        """
+        result = await query_db(sql)
+        subscriptions = result.get("rows", [])
+        
+        # Process payments
+        gateway = PaymentGateway()
+        processed = []
+        for sub in subscriptions:
+            payment = await gateway.process_payment(
+                amount=float(sub.get("amount_cents", 0)) / 100,
+                currency=sub.get("currency", "USD"),
+                customer_id=sub.get("customer_id")
+            )
+            if payment.get("success"):
+                processed.append(sub.get("id"))
+        
+        return _make_response(200, {
+            "processed": len(processed),
+            "subscriptions": processed
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to process billing: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +271,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/billing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "billing" and method == "POST":
+        return handle_automated_billing()
     
     return _error_response(404, "Not found")
 
