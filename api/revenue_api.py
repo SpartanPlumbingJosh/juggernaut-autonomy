@@ -1,15 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing data.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- GET /revenue/subscriptions/{id} - Get subscription details
+- POST /revenue/usage - Record usage for metered billing
+- GET /revenue/invoices/{id} - Get invoice details
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from core.payment_processor import PaymentProcessor
+from core.metering_service import MeteringService
 
 from core.database import query_db
 
@@ -162,6 +168,39 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription."""
+    try:
+        processor = PaymentProcessor()
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        payment_method = body.get("payment_method", "stripe")
+        
+        if not customer_id or not plan_id:
+            return _error_response(400, "Missing required fields")
+            
+        subscription = await processor.create_subscription(customer_id, plan_id, payment_method)
+        return _make_response(200, subscription)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_record_usage(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record usage for metered billing."""
+    try:
+        metering = MeteringService()
+        customer_id = body.get("customer_id")
+        subscription_id = body.get("subscription_id")
+        metric_name = body.get("metric_name")
+        quantity = body.get("quantity")
+        
+        if not all([customer_id, subscription_id, metric_name, quantity]):
+            return _error_response(400, "Missing required fields")
+            
+        result = await metering.record_usage(customer_id, subscription_id, metric_name, quantity)
+        return _make_response(200 if result["success"] else 500, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to record usage: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +270,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+        
+    # POST /revenue/usage
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "usage" and method == "POST":
+        return handle_record_usage(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
