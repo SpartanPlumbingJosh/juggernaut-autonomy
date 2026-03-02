@@ -162,6 +162,75 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_product_delivery(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle digital product delivery after successful payment."""
+    try:
+        # Validate payment
+        payment_id = payment_data.get("payment_id")
+        if not payment_id:
+            return _error_response(400, "Missing payment ID")
+            
+        # Get payment details
+        payment_sql = f"""
+        SELECT id, amount_cents, status, metadata 
+        FROM payments 
+        WHERE id = '{payment_id}'
+        """
+        payment_result = await query_db(payment_sql)
+        payment = payment_result.get("rows", [{}])[0]
+        
+        if not payment or payment.get("status") != "completed":
+            return _error_response(400, "Invalid or incomplete payment")
+            
+        # Prepare product delivery
+        product_template = """
+        # Digital Product Delivery
+        
+        Thank you for your purchase! Here's your digital product:
+        
+        ## Product Details
+        - Name: {product_name}
+        - Version: {product_version}
+        - Download Link: {download_url}
+        - License Key: {license_key}
+        
+        ## Instructions
+        1. Download the product from the link above
+        2. Use the license key during installation
+        3. Refer to documentation for setup instructions
+        
+        ## Support
+        If you need assistance, contact us at support@example.com
+        """
+        
+        # Generate product details
+        product_data = {
+            "product_name": "Revenue Optimization Toolkit",
+            "product_version": "1.0",
+            "download_url": "https://download.example.com/product.zip",
+            "license_key": f"LIC-{payment_id[:8].upper()}"
+        }
+        
+        # Send delivery email
+        try:
+            await send_email(
+                to=payment_data.get("customer_email"),
+                subject="Your Digital Product is Ready",
+                body=product_template.format(**product_data)
+            )
+        except Exception as e:
+            return _error_response(500, f"Failed to send delivery email: {str(e)}")
+            
+        return _make_response(200, {
+            "success": True,
+            "message": "Product delivered successfully",
+            "product": product_data
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Product delivery failed: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -210,6 +279,17 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_webhook(payment_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook notifications."""
+    try:
+        event_type = payment_data.get("event_type")
+        if event_type == "payment.completed":
+            return await handle_product_delivery(payment_data)
+        return _make_response(200, {"success": True, "message": "Webhook received"})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +311,16 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /webhook/payment
+    if len(parts) == 2 and parts[0] == "webhook" and parts[1] == "payment" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing webhook body")
+        try:
+            payment_data = json.loads(body)
+            return handle_payment_webhook(payment_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid webhook data: {str(e)}")
     
     return _error_response(404, "Not found")
 
