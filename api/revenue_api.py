@@ -1,17 +1,22 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle all revenue operations including payments and subscriptions.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments - Create payment intent
+- POST /revenue/subscriptions - Create subscription
+- POST /revenue/webhooks - Handle payment webhooks
 """
 
 import json
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import payment_processor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +236,48 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            success, result = await payment_processor.create_payment_intent(
+                amount=float(payload.get("amount", 0)),
+                currency=payload.get("currency", "usd"),
+                payment_method=payload.get("payment_method", "stripe"),
+                metadata=payload.get("metadata", {})
+            )
+            if success:
+                return _make_response(200, result)
+            return _error_response(400, result.get("error", "Payment failed"))
+        except Exception as e:
+            return _error_response(500, f"Payment processing error: {str(e)}")
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            success, result = await payment_processor.create_subscription(
+                customer_id=payload["customer_id"],
+                plan_id=payload["plan_id"],
+                payment_method=payload.get("payment_method", "stripe")
+            )
+            if success:
+                return _make_response(200, result)
+            return _error_response(400, result.get("error", "Subscription failed"))
+        except Exception as e:
+            return _error_response(500, f"Subscription processing error: {str(e)}")
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        try:
+            signature = query_params.get("signature", [None])[0]
+            success = await payment_processor.handle_webhook(json.loads(body or "{}"), signature)
+            if success:
+                return _make_response(200, {"status": "success"})
+            return _error_response(400, "Webhook processing failed")
+        except Exception as e:
+            return _error_response(500, f"Webhook error: {str(e)}")
     
     return _error_response(404, "Not found")
 
