@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Material List — Job #81023579</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0c0f14;--surface:#141820;--surface2:#1a1f2a;--border:#252b38;--gold:#d4a542;--gold-dim:#a07a2e;--green:#34d399;--red:#f87171;--orange:#fb923c;--text:#e8eaed;--text2:#9ca3af;--text3:#6b7280}
+body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;padding-bottom:80px}
+.header{background:linear-gradient(135deg,#141820 0%,#1a1f2a 100%);border-bottom:1px solid var(--border);padding:16px;position:sticky;top:0;z-index:50}
+.header-top{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.spartan-icon{width:32px;height:32px;background:var(--gold);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0}
+.header-title{font-size:15px;font-weight:700;color:var(--gold);letter-spacing:.5px;text-transform:uppercase}
+.header-sub{font-size:12px;color:var(--text2)}
+.job-info{display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:12px}
+.job-info dt{color:var(--text3);font-weight:500}
+.job-info dd{color:var(--text);font-weight:600}
+.budget-bar{margin:16px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.budget-label{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.budget-title{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px}
+.budget-pct{font-size:20px;font-weight:800}
+.budget-pct.ok{color:var(--green)}.budget-pct.warn{color:var(--orange)}.budget-pct.over{color:var(--red)}
+.track{height:8px;background:var(--surface2);border-radius:99px;position:relative;overflow:visible}
+.fill{height:100%;border-radius:99px;transition:width .6s ease}
+.fill.ok{background:linear-gradient(90deg,#059669,var(--green))}.fill.warn{background:linear-gradient(90deg,#d97706,var(--orange))}
+.target-line{position:absolute;top:-4px;height:16px;width:2px;background:var(--red);border-radius:1px}
+.budget-detail{display:flex;justify-content:space-between;margin-top:6px;font-size:11px;color:var(--text3)}
+.section{margin:12px 16px}
+.section-head{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:8px}
+.section-icon{font-size:16px}
+.section-label{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--text)}
+.section-count{font-size:11px;color:var(--text3);margin-left:auto;background:var(--surface2);padding:2px 8px;border-radius:99px}
+.item{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:8px}
+.item-row1{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+.item-name{font-size:13px;font-weight:600;line-height:1.3;flex:1}
+.item-cost{font-size:13px;font-weight:700;color:var(--gold);white-space:nowrap}
+.item-row2{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;align-items:center}
+.tag{font-size:10px;padding:2px 7px;border-radius:4px;font-weight:600}
+.tag-lee{background:#1a2e1a;color:#4ade80;border:1px solid #2d4a2d}
+.tag-nolee{background:#2e1a1a;color:#fca5a5;border:1px solid #4a2d2d}
+.tag-qty{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.tag-num{background:#1a1e2e;color:#93c5fd;border:1px solid #2d3a5a}
+.item-note{font-size:11px;color:var(--text3);margin-top:6px;font-style:italic;line-height:1.4}
+.summary{margin:16px;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:10px}
+.summary-title{font-size:12px;font-weight:600;color:var(--text2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:10px}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.summary-item{text-align:center;padding:8px;background:var(--surface2);border-radius:6px}
+.summary-val{font-size:18px;font-weight:800;color:var(--text)}
+.summary-lbl{font-size:10px;color:var(--text3);text-transform:uppercase;margin-top:2px}
+.gen-badge{margin:8px 16px;padding:8px 12px;background:var(--surface2);border-radius:6px;display:flex;align-items:center;gap:8px;font-size:11px;color:var(--text3)}
+.gen-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);flex-shrink:0}
+@media(min-width:600px){body{max-width:520px;margin:0 auto}.job-info{grid-template-columns:1fr 1fr 1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+<div class="header-top"><div class="spartan-icon">⚡</div><div><div class="header-title">Material List</div><div class="header-sub">Job #81023579 — Garry Prudem</div></div></div>
+<dl class="job-info"><dt>Estimate</dt><dd>5★ Tankless WH + ReCirc + Softener</dd><dt>Sold</dt><dd>$15,873.75</dd><dt>Business Unit</dt><dd>Drain - Sales</dd><dt>Sold On</dt><dd>Feb 27, 2026</dd><dt>Address</dt><dd>8 Buckeye Ct, Germantown</dd><dt>Status</dt><dd style="color:var(--gold)">Generated — Awaiting Review</dd></dl>
+</div>
+<div class="budget-bar"><div class="budget-label"><span class="budget-title">Material Budget</span><span class="budget-pct ok">17.9%</span></div><div class="track"><div class="fill ok" style="width:17.9%"></div><div class="target-line" style="left:18%"></div></div><div class="budget-detail"><span>$2,847.50 of $15,873.75</span><span style="color:var(--red)">18% target → $2,857.28</span></div></div>
+<div class="gen-badge"><span class="gen-dot"></span>AI-generated from sold estimate + Lee Supply catalog (986 items)</div>
+<div class="section">
+<div class="section-head"><span class="section-icon">🔧</span><span class="section-label">Parts</span><span class="section-count">21 items</span></div>
+<div class="item"><div class="item-row1"><div class="item-name">Bradford White RTG-R-199N1 Tankless Gas Water Heater</div><div class="item-cost">$1,314.12</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#583032</span><span class="tag tag-qty">×1</span></div><div class="item-note">199,000 BTU, 96% efficiency — 15yr heat exchanger warranty</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Sterling 2P150MPROSWS1 — 1.5 Cube Water Softener</div><div class="item-cost">$846.56</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#590221</span><span class="tag tag-qty">×1</span></div><div class="item-note">Whole house 1.5 cu.ft softener with upflow regeneration</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">3/4" CSST Gas Flex Line (25ft)</div><div class="item-cost">$85.00</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Flexible gas line from meter to WH — up to 25ft</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Tankless WH Vent Kit (stainless, through-wall)</div><div class="item-cost">$95.00</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Concentric vent through exterior wall</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Viega 78177 — 3/4×3/4 ProPress Coupling</div><div class="item-cost">$69.66</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#223547</span><span class="tag tag-qty">×6</span></div><div class="item-note">3/4" couplings for water line connections</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">BMI 46305 — 3/4 ProPress 90 Elbow Carbon Gas</div><div class="item-cost">$67.00</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#637627</span><span class="tag tag-qty">×4</span></div><div class="item-note">3/4" gas line elbows (carbon steel)</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Sterling 5/8 OD × 100ft PE Tube (drain)</div><div class="item-cost">$64.23</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#548428</span><span class="tag tag-qty">×1</span></div><div class="item-note">Softener drain discharge line</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Viega 79315 — 3/4×3/4 ProPress Ball Valve</div><div class="item-cost">$35.64</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#191846</span><span class="tag tag-qty">×4</span></div><div class="item-note">Isolation valves at WH inlet/outlet + softener</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Zilmet ZEP5 — 2.1 Gal Expansion Tank 3/4in</div><div class="item-cost">$33.77</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#594607</span><span class="tag tag-qty">×1</span></div><div class="item-note">Thermal expansion tank for water heater</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Sterling CBJ1005 — 10×4.5 Carbon Filter (5 micron)</div><div class="item-cost">$30.45</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#311587</span><span class="tag tag-qty">×1</span></div><div class="item-note">Downflow carbon chlorine reduction filter</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Camco 10427 T&P Valve 3/4in w/ Discharge Tube</div><div class="item-cost">$28.38</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#686407</span><span class="tag tag-qty">×1</span></div><div class="item-note">T&P valve with runoff tube</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">BMI 46405 — 3/4 ProPress Tee Carbon Gas</div><div class="item-cost">$26.54</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#637639</span><span class="tag tag-qty">×1</span></div><div class="item-note">Gas line tee fitting</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Viega 77022 — 3/4×3/4 ProPress 90 Elbow</div><div class="item-cost">$25.60</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#191917</span><span class="tag tag-qty">×4</span></div><div class="item-note">3/4" elbows for water line routing</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">3/4" Gas Flex Connector (WH connection)</div><div class="item-cost">$25.00</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Final connection from gas pipe to WH</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Holdrite QS-U-C Expansion Tank Bracket</div><div class="item-cost">$23.91</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#512803</span><span class="tag tag-qty">×1</span></div><div class="item-note">Universal expansion tank mounting bracket</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Viega 77387 — 3/4×3/4×3/4 ProPress Tee</div><div class="item-cost">$21.16</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#192000</span><span class="tag tag-qty">×2</span></div><div class="item-note">Tees for water line branching</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Camco VP25-PP 25" Water Heater Pan</div><div class="item-cost">$20.26</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#559458</span><span class="tag tag-qty">×1</span></div><div class="item-note">Drain pan under tankless unit</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Cash Acme 18821-0150 — 3/4in T&P Relief Valve</div><div class="item-cost">$20.09</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#13761</span><span class="tag tag-qty">×1</span></div><div class="item-note">Temperature and pressure relief valve</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">BMI 46505 — 3/4 ProPress Cap Carbon Gas</div><div class="item-cost">$17.58</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#637662</span><span class="tag tag-qty">×1</span></div><div class="item-note">Gas line end cap for sediment trap</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">BMI 13505 — 3/4 CGA Gas Valve</div><div class="item-cost">$11.92</div></div><div class="item-row2"><span class="tag tag-lee">✓ LEE</span><span class="tag tag-num">#635878</span><span class="tag tag-qty">×1</span></div><div class="item-note">Gas valve for new dedicated gas line</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Recirculation Pump (dedicated or integrated)</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Included with Bradford White tankless unit</div></div>
+</div>
+<div class="section">
+<div class="section-head"><span class="section-icon">🛠️</span><span class="section-label">Tools</span><span class="section-count">5 items — On Truck</span></div>
+<div class="item"><div class="item-row1"><div class="item-name">ProPress Tool + 3/4" and 1/2" Jaws</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-qty">Crew truck</span></div></div>
+<div class="item"><div class="item-row1"><div class="item-name">MegaPress Tool + 3/4" Jaws (for gas)</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-qty">Carbon steel gas connections</span></div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Pipe Cutter (copper)</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-qty">On truck</span></div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Level / Torpedo Level</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-qty">For mounting tankless unit</span></div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Drill + Masonry Bits (for wall vent)</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-qty">Core drill or hole saw for vent penetration</span></div></div>
+</div>
+<div class="section">
+<div class="section-head"><span class="section-icon">📦</span><span class="section-label">Consumables</span><span class="section-count">6 items</span></div>
+<div class="item"><div class="item-row1"><div class="item-name">Pipe Dope (gas rated)</div><div class="item-cost">$8.00</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Thread compound for gas connections</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Silicone Caulk (exterior rated)</div><div class="item-cost">$6.00</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Seal around vent penetration</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Teflon Tape (yellow gas + white water)</div><div class="item-cost">$3.00</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×2</span></div><div class="item-note">Thread sealant</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Copper Pipe 3/4" Type L (10ft sticks)</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×2</span></div><div class="item-note">For hot and cold water line runs</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Pipe Hangers / Straps (3/4")</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×8</span></div><div class="item-note">Support for water and gas lines</div></div>
+<div class="item"><div class="item-row1"><div class="item-name">Drop Cloths / Floor Protection</div><div class="item-cost" style="color:var(--text3)">—</div></div><div class="item-row2"><span class="tag tag-nolee">✗ NOT IN LEE</span><span class="tag tag-qty">×1</span></div><div class="item-note">Work area protection</div></div>
+</div>
+<div class="summary"><div class="summary-title">Summary</div><div class="summary-grid"><div class="summary-item"><div class="summary-val">32</div><div class="summary-lbl">Total Items</div></div><div class="summary-item"><div class="summary-val" style="color:var(--green)">16</div><div class="summary-lbl">Lee Supply Match</div></div><div class="summary-item"><div class="summary-val">$2,847.50</div><div class="summary-lbl">Est. Material Cost</div></div><div class="summary-item"><div class="summary-val" style="color:var(--green)">17.9%</div><div class="summary-lbl">Of Job Revenue</div></div></div></div>
+<div style="height:60px"></div>
+</body>
+</html>
