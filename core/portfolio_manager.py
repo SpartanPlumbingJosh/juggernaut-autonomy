@@ -276,6 +276,69 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def handle_customer_onboarding(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    customer_data: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Automated customer onboarding flow."""
+    try:
+        # Create customer record
+        execute_sql(f"""
+            INSERT INTO customers (
+                id, name, email, company, 
+                created_at, updated_at, status
+            ) VALUES (
+                gen_random_uuid(),
+                '{customer_data.get("name", "").replace("'", "''")}',
+                '{customer_data.get("email", "").replace("'", "''")}',
+                '{customer_data.get("company", "").replace("'", "''")}',
+                NOW(),
+                NOW(),
+                'active'
+            )
+            RETURNING id
+        """)
+        
+        # Trigger welcome email sequence
+        execute_sql(f"""
+            INSERT INTO email_queue (
+                id, recipient_email, template_name,
+                context, status, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{customer_data.get("email", "").replace("'", "''")}',
+                'welcome_series_1',
+                '{{"name": "{customer_data.get("name", "").replace("'", "''")}"}}'::jsonb,
+                'pending',
+                NOW()
+            )
+        """)
+        
+        # Recommend initial plan based on customer profile
+        plan_recommendation = execute_sql(f"""
+            SELECT id, name FROM plans 
+            WHERE recommended_for LIKE '%{customer_data.get("company_size", "small").replace("'", "''")}%'
+            ORDER BY price_cents ASC
+            LIMIT 1
+        """).get("rows", [{}])[0]
+        
+        return {
+            "success": True,
+            "message": "Onboarding completed",
+            "recommended_plan": plan_recommendation
+        }
+        
+    except Exception as e:
+        log_action(
+            "onboarding.failed",
+            f"Customer onboarding failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
