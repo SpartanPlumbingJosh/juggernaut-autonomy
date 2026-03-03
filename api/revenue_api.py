@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and handle payments.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook - Payment webhook handler
+- POST /revenue/checkout - Create checkout session
 """
 
 import json
@@ -162,6 +164,40 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: bytes, headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook events"""
+    try:
+        sig_header = headers.get("stripe-signature", "")
+        return await PaymentProcessor.handle_webhook(body, sig_header)
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
+async def handle_checkout_session(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Create checkout session"""
+    try:
+        product_id = query_params.get("product_id", "")
+        email = query_params.get("email", "")
+        
+        if not product_id or not email:
+            return _error_response(400, "Missing required parameters")
+            
+        # Create customer record
+        await CustomerOnboarding.create_customer(email, "")
+        
+        # Initiate purchase
+        result = await CustomerOnboarding.initiate_purchase(email, product_id)
+        
+        if "error" in result:
+            return _error_response(500, result["error"])
+            
+        return _make_response(200, {
+            "checkout_url": result["checkout_url"],
+            "session_id": result["session_id"]
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create checkout session: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +267,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_payment_webhook(body or b"", headers)
+        
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_checkout_session(query_params)
     
     return _error_response(404, "Not found")
 
