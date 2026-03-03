@@ -5,13 +5,17 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payment - Create new payment
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import json
 
 from core.database import query_db
+from payment_gateway import StripePaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,7 +214,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+async def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +235,34 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            processor = StripePaymentProcessor()
+            result = await processor.create_payment_intent(
+                amount=data.get("amount"),
+                currency=data.get("currency", "usd"),
+                metadata=data.get("metadata", {})
+            )
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Payment processing failed: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        if not body or not headers:
+            return _error_response(400, "Missing webhook data")
+        try:
+            sig_header = headers.get("stripe-signature", "")
+            processor = StripePaymentProcessor()
+            result = await processor.handle_webhook(body.encode(), sig_header)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Webhook processing failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
