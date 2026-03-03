@@ -404,3 +404,40 @@ __all__ = [
     "FAILURE_THRESHOLD_MINUTES",
     "MAX_CONSECUTIVE_FAILURES"
 ]
+from typing import Dict, Any
+from core.logger import get_logger
+import json
+
+logger = get_logger(__name__)
+
+class FailoverManager:
+    """Handles failover scenarios and cached responses"""
+    
+    def __init__(self):
+        self.active = False
+        self.cache = {}
+        
+    def is_active(self) -> bool:
+        """Check if failover mode is active"""
+        return self.active
+        
+    def activate(self) -> None:
+        """Activate failover mode"""
+        self.active = True
+        logger.warning("Failover mode activated")
+        
+    def deactivate(self) -> None:
+        """Deactivate failover mode"""
+        self.active = False
+        logger.info("Failover mode deactivated")
+        
+    def get_cached_response(self, endpoint: str) -> Dict[str, Any]:
+        """Get cached response for endpoint"""
+        return self.cache.get(endpoint, {
+            "statusCode": 503,
+            "body": json.dumps({"error": "Service unavailable - failover mode active"})
+        })
+        
+    def update_cache(self, endpoint: str, response: Dict[str, Any]) -> None:
+        """Update cache with latest successful response"""
+        self.cache[endpoint] = response

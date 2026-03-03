@@ -3,6 +3,11 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from core.payment_processors import PaymentProcessor
+from core.logger import get_logger
+
+logger = get_logger(__name__)
+payment_processor = PaymentProcessor()
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
