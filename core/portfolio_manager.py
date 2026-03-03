@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Callable, Dict, List, Optional
+from core.transaction_processor import TransactionProcessor
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -275,6 +276,68 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+def monitor_transactions(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    threshold_cents: int = 1000000,
+    lookback_days: int = 7
+) -> Dict[str, Any]:
+    """Monitor recent transactions for anomalies."""
+    try:
+        processor = TransactionProcessor()
+        
+        # Get recent transactions
+        sql = f"""
+        SELECT *
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{lookback_days} days'
+        ORDER BY recorded_at DESC
+        LIMIT 1000
+        """
+        result = execute_sql(sql)
+        transactions = result.get("rows", [])
+        
+        # Process and validate
+        validation_result = processor.batch_process(transactions)
+        
+        # Check for large transactions
+        large_transactions = [
+            t for t in validation_result["processed"]
+            if abs(t["amount_cents"]) >= threshold_cents
+        ]
+        
+        # Log monitoring results
+        log_action(
+            "transaction.monitoring",
+            f"Transaction monitoring completed: {len(large_transactions)} large transactions",
+            level="info",
+            output_data={
+                "total_transactions": len(transactions),
+                "valid": validation_result["valid"],
+                "invalid": validation_result["invalid"],
+                "large_transactions": len(large_transactions),
+                "lookback_days": lookback_days,
+                "threshold_cents": threshold_cents
+            }
+        )
+        
+        return {
+            "success": True,
+            "total_transactions": len(transactions),
+            "valid": validation_result["valid"],
+            "invalid": validation_result["invalid"],
+            "large_transactions": large_transactions
+        }
+        
+    except Exception as e:
+        log_action(
+            "transaction.monitoring_failed",
+            f"Transaction monitoring failed: {str(e)}",
+            level="error",
+            error_data={"error": str(e)}
+        )
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
