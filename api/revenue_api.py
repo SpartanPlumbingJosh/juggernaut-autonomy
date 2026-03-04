@@ -12,6 +12,66 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from fastapi import FastAPI, Request, HTTPException
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+import redis
+import time
+
+# Initialize rate limiter
+limiter = Limiter(key_func=get_remote_address)
+redis_client = redis.Redis(host='redis', port=6379, db=0)
+
+app = FastAPI()
+
+# CORS configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Rate limit configuration
+RATE_LIMITS = {
+    "free": {"requests": 100, "period": 60},  # 100 requests per minute
+    "pro": {"requests": 1000, "period": 60},  # 1000 requests per minute
+    "enterprise": {"requests": 10000, "period": 60}  # 10,000 requests per minute
+}
+
+# Service level guarantees
+SERVICE_LEVELS = {
+    "free": {"uptime": 0.95, "max_latency": 1000},  # 95% uptime, 1s max latency
+    "pro": {"uptime": 0.99, "max_latency": 500},    # 99% uptime, 500ms max latency
+    "enterprise": {"uptime": 0.999, "max_latency": 200}  # 99.9% uptime, 200ms max latency
+}
+
+def track_usage(api_key: str, endpoint: str):
+    """Track API usage for billing and analytics."""
+    timestamp = int(time.time())
+    usage_key = f"usage:{api_key}:{timestamp // 60}"
+    redis_client.hincrby(usage_key, endpoint, 1)
+    redis_client.expire(usage_key, 120)  # Keep usage data for 2 minutes
+
+def check_rate_limit(api_key: str):
+    """Check if request is within rate limits."""
+    plan = redis_client.get(f"api_key:{api_key}") or "free"
+    current_minute = int(time.time() // 60)
+    usage_key = f"usage:{api_key}:{current_minute}"
+    current_usage = sum(int(v) for v in redis_client.hgetall(usage_key).values())
+    
+    if current_usage >= RATE_LIMITS[plan]["requests"]:
+        raise RateLimitExceeded
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"error": "Rate limit exceeded"}
+    )
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +93,14 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+@app.get("/revenue/summary")
+@limiter.limit("100/minute")
+async def handle_revenue_summary(request: Request) -> Dict[str, Any]:
+    """Get MTD/QTD/YTD revenue totals."""
+    # Check API key and rate limits
+    api_key = request.headers.get("X-API-KEY", "free")
+    check_rate_limit(api_key)
+    track_usage(api_key, "revenue_summary")
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -114,7 +181,14 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
-async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+@app.get("/revenue/transactions")
+@limiter.limit("100/minute")
+async def handle_revenue_transactions(request: Request, query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get transaction history with pagination."""
+    # Check API key and rate limits
+    api_key = request.headers.get("X-API-KEY", "free")
+    check_rate_limit(api_key)
+    track_usage(api_key, "revenue_transactions")
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -162,7 +236,14 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
-async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
+@app.get("/revenue/charts")
+@limiter.limit("100/minute")
+async def handle_revenue_charts(request: Request, query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get revenue over time for charts."""
+    # Check API key and rate limits
+    api_key = request.headers.get("X-API-KEY", "free")
+    check_rate_limit(api_key)
+    track_usage(api_key, "revenue_charts")
     """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
