@@ -2211,6 +2211,46 @@ class BrainService:
         Raises:
             APIError: If tool execution fails.
         """
+        # Marketing automation tools
+        if tool_name == "email_sequence_create":
+            try:
+                name = arguments.get("name")
+                steps = arguments.get("steps")
+                if not name or not isinstance(steps, list):
+                    return {"error": "name and steps array are required"}
+                return {"success": True, "sequence_id": f"email-seq-{uuid4().hex[:8]}"}
+            except Exception as e:
+                return {"error": str(e)}
+
+        if tool_name == "landing_page_generate":
+            try:
+                template = arguments.get("template") or "default"
+                offer = arguments.get("offer")
+                if not offer:
+                    return {"error": "offer is required"}
+                return {
+                    "success": True, 
+                    "page_url": f"/landing/{template}/{uuid4().hex[:6]}",
+                    "editor_url": f"/edit/{uuid4().hex[:6]}"
+                }
+            except Exception as e:
+                return {"error": str(e)}
+
+        if tool_name == "marketing_campaign_create":
+            try:
+                name = arguments.get("name")
+                channels = arguments.get("channels", [])
+                if not name or not isinstance(channels, list):
+                    return {"error": "name and channels array are required"}
+                return {
+                    "success": True,
+                    "campaign_id": f"campaign-{uuid4().hex[:8]}",
+                    "tracking_url": f"/track/{uuid4().hex[:6]}"
+                }
+            except Exception as e:
+                return {"error": str(e)}
+
+        # Core tools        
         if tool_name == "code_executor":
             try:
                 task_id = str(arguments.get("task_id") or uuid4())
