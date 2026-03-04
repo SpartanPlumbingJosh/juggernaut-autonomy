@@ -1,1 +1,35 @@
-FILE_TOO_LARGE_FOR_INLINE
+# Spartan Material List V4 Template
+
+**Full HTML file is in Juggernaut storage:**
+```
+storage_download → key: templates/spartan-materials-v4.html
+```
+
+## What's in V4
+- Black industrial theme (#070707 base)
+- Spartan Plumbing logo (full-color, transparent bg, embedded base64)
+- Fonts: Bebas Neue (headers), Outfit (body), Fira Code (numbers)
+- Pink pulsing/glowing checkboxes with sign-off tracking (who confirmed + timestamp)
+- Pink pulsing truck # input (goes green when filled)
+- Bobbing "TAP EACH ITEM TO CONFIRM" ticker (auto-hides when all checked)
+- Items grouped by category: Water Heaters, Valves, PEX, CPVC, Fixtures, General
+- Expandable item details (tap name for full desc, unit cost, notes)
+- Image slot per item (46x46, populated by n8n workflow)
+- AI search box above material list (searches Lee Supply catalog)
+- Budget gauge with 18% target, pre-tax pricing note
+- Dual mode: Review & Send / Finished Materials (post-install reconciliation)
+- Demo CPVC catalog with 20+ fittings, pipe, cement, primer
+- Send to Lee Supply payload includes all sign-off data
+
+## To Continue Development
+1. `storage_download` the template from Juggernaut storage
+2. Make changes locally
+3. `storage_upload` back when done
+4. When ready for production, deploy via jsDelivr CDN
+
+## Not Yet Wired
+- Lee Supply catalog search (currently demo data, needs spartan_ops.lee_supply_catalog query)
+- Product images (n8n workflow populates img URLs)
+- Send to Lee Supply webhook/email integration
+- Slack user identity from OAuth (currently prompts for name)
+- Purchasing card spend in reconciliation mode
