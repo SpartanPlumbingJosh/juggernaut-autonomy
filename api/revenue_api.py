@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue_asset_manager import RevenueAssetManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,14 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_purchase(purchase_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle purchase requests."""
+    try:
+        manager = RevenueAssetManager(query_db, lambda *args, **kwargs: None)
+        return await manager.handle_purchase(purchase_data)
+    except Exception as e:
+        return _error_response(500, f"Purchase failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +240,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/purchase
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "purchase" and method == "POST":
+        try:
+            purchase_data = json.loads(body or "{}")
+            return await handle_purchase(purchase_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
     
     return _error_response(404, "Not found")
 
