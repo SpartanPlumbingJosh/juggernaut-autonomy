@@ -1,13 +1,73 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from payment_processors import PaymentProcessor
 
+logger = logging.getLogger(__name__)
+executor = ThreadPoolExecutor(max_workers=10)
+
+
+async def handle_customer_onboarding(email: str, payment_method: str, plan: str) -> Dict[str, Any]:
+    """Handle new customer onboarding flow."""
+    try:
+        processor = PaymentProcessor()
+        
+        # Get plan details
+        plans = {
+            "basic": {"price": 9.99, "currency": "USD"},
+            "pro": {"price": 29.99, "currency": "USD"},
+            "enterprise": {"price": 99.99, "currency": "USD"}
+        }
+        
+        if plan not in plans:
+            return {"success": False, "error": "Invalid plan"}
+            
+        plan_details = plans[plan]
+        
+        # Create payment
+        payment = await processor.create_payment(
+            amount=plan_details["price"],
+            currency=plan_details["currency"],
+            customer_email=email,
+            payment_method=payment_method
+        )
+        
+        if not payment.get("success"):
+            return payment
+            
+        # Provision service
+        def provision_service():
+            try:
+                # TODO: Implement actual service provisioning
+                logger.info(f"Provisioning service for {email} on {plan} plan")
+                return True
+            except Exception as e:
+                logger.error(f"Service provisioning failed: {str(e)}")
+                return False
+                
+        # Run provisioning in background
+        executor.submit(provision_service)
+        
+        return {
+            "success": True,
+            "payment_id": payment["payment_id"],
+            "next_steps": {
+                "stripe": payment.get("client_secret"),
+                "paypal": payment.get("approval_url")
+            }.get(payment_method)
+        }
+        
+    except Exception as e:
+        logger.error(f"Onboarding failed: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 def generate_revenue_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
@@ -275,6 +335,85 @@ def start_experiments_from_top_ideas(
         out["failed"] = len(failures)
     return out
 
+
+async def recover_failed_transactions(execute_sql: Callable[[str], Dict[str, Any]]) -> Dict[str, Any]:
+    """Recover failed transactions and retry processing."""
+    try:
+        # Get failed transactions from last 24 hours
+        res = execute_sql("""
+            SELECT id, payment_id, payment_method, retry_count
+            FROM transactions
+            WHERE status = 'failed'
+              AND created_at >= NOW() - INTERVAL '24 hours'
+              AND retry_count < 3
+            ORDER BY created_at ASC
+            LIMIT 100
+        """)
+        
+        rows = res.get("rows", []) or []
+        processor = PaymentProcessor()
+        recovered = 0
+        
+        for row in rows:
+            transaction_id = row["id"]
+            payment_id = row["payment_id"]
+            payment_method = row["payment_method"]
+            
+            # Retry payment confirmation
+            result = await processor.confirm_payment(payment_id, payment_method)
+            if result.get("success"):
+                execute_sql(f"""
+                    UPDATE transactions
+                    SET status = 'completed',
+                        updated_at = NOW()
+                    WHERE id = '{transaction_id}'
+                """)
+                recovered += 1
+            else:
+                execute_sql(f"""
+                    UPDATE transactions
+                    SET retry_count = retry_count + 1,
+                        updated_at = NOW()
+                    WHERE id = '{transaction_id}'
+                """)
+                
+        return {"success": True, "recovered": recovered, "total": len(rows)}
+        
+    except Exception as e:
+        logger.error(f"Transaction recovery failed: {str(e)}")
+        return {"success": False, "error": str(e)}
+
+async def autonomous_operation_cycle(execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]) -> Dict[str, Any]:
+    """Run all autonomous operation tasks in sequence."""
+    try:
+        # Run revenue idea generation
+        idea_result = generate_revenue_ideas(execute_sql, log_action)
+        
+        # Score pending ideas
+        scoring_result = score_pending_ideas(execute_sql, log_action)
+        
+        # Start experiments
+        experiment_result = start_experiments_from_top_ideas(execute_sql, log_action)
+        
+        # Review experiments
+        review_result = review_experiments_stub(execute_sql, log_action)
+        
+        # Recover failed transactions
+        recovery_result = await recover_failed_transactions(execute_sql)
+        
+        return {
+            "success": True,
+            "results": {
+                "idea_generation": idea_result,
+                "scoring": scoring_result,
+                "experiments": experiment_result,
+                "review": review_result,
+                "recovery": recovery_result
+            }
+        }
+    except Exception as e:
+        logger.error(f"Autonomous operation failed: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
