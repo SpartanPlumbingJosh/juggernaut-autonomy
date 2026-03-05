@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/acquisition - Customer acquisition analytics
+- GET /revenue/pricing - Pricing optimization insights
 """
 
 import json
@@ -162,6 +164,115 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_acquisition_analytics(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get customer acquisition performance data."""
+    try:
+        days = int(query_params.get("days", ["90"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 90))
+        
+        # Acquisition channel performance
+        sql = f"""
+        SELECT 
+            source,
+            COUNT(DISTINCT customer_id) as new_customers,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END)/100.0 as total_revenue,
+            SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END)/100.0 as total_cost,
+            (SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) - 
+             SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END))/100.0 as net_profit
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY source
+        ORDER BY net_profit DESC
+        """
+        
+        result = await query_db(sql)
+        by_source = result.get("rows", [])
+        
+        # Conversion rates
+        conversion_sql = f"""
+        WITH events AS (
+            SELECT 
+                source,
+                COUNT(DISTINCT customer_id) FILTER (WHERE event_type = 'lead') as leads,
+                COUNT(DISTINCT customer_id) FILTER (WHERE event_type = 'conversion') as conversions
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+            GROUP BY source
+        )
+        SELECT
+            source,
+            conversions,
+            leads,
+            CASE WHEN leads > 0 THEN conversions::float / leads ELSE 0 END as conversion_rate
+        FROM events
+        ORDER BY conversion_rate DESC
+        """
+        
+        conversion_result = await query_db(conversion_sql)
+        conversion_rates = conversion_result.get("rows", [])
+        
+        return _make_response(200, {
+            "by_source": by_source,
+            "conversion_rates": conversion_rates,
+            "period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch acquisition analytics: {str(e)}")
+
+
+async def handle_pricing_insights(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get pricing optimization insights."""
+    try:
+        product_id = query_params.get("product_id", [""])[0] if isinstance(query_params.get("product_id"), list) else query_params.get("product_id", "")
+        
+        if not product_id:
+            return _error_response(400, "product_id parameter required")
+            
+        # Get price elasticity
+        elasticity_sql = f"""
+        WITH price_changes AS (
+            SELECT 
+                price,
+                LAG(price) OVER (ORDER BY recorded_at) as prev_price,
+                quantity,
+                LAG(quantity) OVER (ORDER BY recorded_at) as prev_quantity
+            FROM sales_data
+            WHERE product_id = '{product_id}'
+            ORDER BY recorded_at DESC
+            LIMIT 100
+        )
+        SELECT
+            AVG(LN(quantity::float / prev_quantity) / LN(price::float / prev_price)) as elasticity
+        FROM price_changes
+        WHERE prev_price IS NOT NULL AND prev_quantity IS NOT NULL
+          AND prev_price != price
+        """
+        
+        elasticity_result = await query_db(elasticity_sql)
+        elasticity = elasticity_result.get("rows", [{}])[0].get("elasticity", -2.0)
+        
+        # Get price history
+        price_history_sql = f"""
+        SELECT price, quantity, recorded_at
+        FROM sales_data
+        WHERE product_id = '{product_id}'
+        ORDER BY recorded_at DESC
+        LIMIT 100
+        """
+        
+        price_history_result = await query_db(price_history_sql)
+        price_history = price_history_result.get("rows", [])
+        
+        return _make_response(200, {
+            "product_id": product_id,
+            "price_elasticity": elasticity,
+            "price_history": price_history
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch pricing insights: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +342,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/acquisition
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "acquisition" and method == "GET":
+        return handle_acquisition_analytics(query_params)
+        
+    # GET /revenue/pricing
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "pricing" and method == "GET":
+        return handle_pricing_insights(query_params)
     
     return _error_response(404, "Not found")
 

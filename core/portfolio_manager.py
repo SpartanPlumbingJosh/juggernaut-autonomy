@@ -1,12 +1,80 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+import numpy as np
+from scipy.optimize import minimize
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.pricing_models import PriceOptimizer
+
+
+def optimize_acquisition_channels(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    budget: float = 1000.0
+) -> Dict[str, Any]:
+    """Optimize budget allocation across customer acquisition channels."""
+    try:
+        # Get historical performance data
+        res = execute_sql("""
+            SELECT source, 
+                   SUM(amount_cents)/100.0 as total_revenue,
+                   COUNT(*) as conversions,
+                   SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END)/100.0 as total_cost
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '90 days'
+            GROUP BY source
+            HAVING COUNT(*) > 10
+        """)
+        channels = res.get("rows", [])
+        
+        if not channels:
+            return {"success": False, "error": "No channel data available"}
+            
+        # Calculate ROI for each channel
+        channel_data = []
+        for ch in channels:
+            roi = ((float(ch['total_revenue']) - float(ch['total_cost'])) / 
+                  float(ch['total_cost'])) if float(ch['total_cost']) > 0 else 0
+            channel_data.append({
+                'source': ch['source'],
+                'roi': roi,
+                'conversions': int(ch['conversions']),
+                'cost_per_conversion': float(ch['total_cost']) / int(ch['conversions']) 
+                    if int(ch['conversions']) > 0 else 0
+            })
+            
+        # Sort by ROI descending
+        channel_data.sort(key=lambda x: x['roi'], reverse=True)
+        
+        # Allocate budget proportionally to ROI
+        total_roi = sum(ch['roi'] for ch in channel_data)
+        allocations = []
+        for ch in channel_data:
+            if total_roi > 0:
+                alloc = (ch['roi'] / total_roi) * budget
+            else:
+                alloc = budget / len(channel_data)
+            allocations.append({
+                'source': ch['source'],
+                'allocation': round(alloc, 2),
+                'expected_conversions': math.floor(alloc / ch['cost_per_conversion']) 
+                    if ch['cost_per_conversion'] > 0 else 0
+            })
+            
+        return {
+            "success": True,
+            "allocations": allocations,
+            "total_budget": budget
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def generate_revenue_ideas(
@@ -179,6 +247,56 @@ def score_pending_ideas(
         pass
 
     return {"success": True, "scored": scored, "considered": len(rows)}
+
+
+def optimize_pricing_strategy(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    product_id: str,
+    current_price: float,
+    elasticity: float = -2.0
+) -> Dict[str, Any]:
+    """Optimize pricing using historical sales data and price elasticity."""
+    try:
+        # Get historical sales data
+        res = execute_sql(f"""
+            SELECT price, quantity 
+            FROM sales_data 
+            WHERE product_id = '{product_id}'
+            ORDER BY recorded_at DESC
+            LIMIT 100
+        """)
+        sales_data = res.get("rows", [])
+        
+        if not sales_data:
+            return {"success": False, "error": "No sales data available"}
+            
+        # Fit demand curve
+        prices = [float(row['price']) for row in sales_data]
+        quantities = [float(row['quantity']) for row in sales_data]
+        
+        def profit_function(price):
+            quantity = quantities[0] * (price / prices[0]) ** elasticity
+            return -price * quantity  # Negative for minimization
+        
+        # Optimize price
+        result = minimize(profit_function, current_price, 
+                         bounds=[(current_price * 0.5, current_price * 1.5)])
+        
+        if not result.success:
+            return {"success": False, "error": "Optimization failed"}
+            
+        optimal_price = round(float(result.x[0]), 2)
+        
+        return {
+            "success": True,
+            "optimal_price": optimal_price,
+            "current_price": current_price,
+            "expected_demand_change": round(((optimal_price / current_price) ** elasticity - 1) * 100, 1)
+        }
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 def start_experiments_from_top_ideas(
