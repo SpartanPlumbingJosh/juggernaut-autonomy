@@ -11,7 +11,51 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, get_db_pool
+from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.extras import RealDictCursor
+import time
+import logging
+
+# Configure connection pool
+DB_POOL = ThreadedConnectionPool(
+    minconn=1,
+    maxconn=20,
+    dsn="postgresql://user:password@localhost/revenue_db"
+)
+
+# Health check configuration
+HEALTH_CHECK_INTERVAL = 60  # seconds
+LAST_HEALTH_CHECK = time.time()
+
+def check_db_health():
+    """Check database connection health."""
+    global LAST_HEALTH_CHECK
+    try:
+        conn = DB_POOL.getconn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        cursor.close()
+        DB_POOL.putconn(conn)
+        LAST_HEALTH_CHECK = time.time()
+        return True
+    except Exception as e:
+        logging.error(f"Database health check failed: {str(e)}")
+        return False
+
+async def query_db_with_pool(query: str) -> Dict[str, Any]:
+    """Execute query using connection pool."""
+    try:
+        conn = DB_POOL.getconn()
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(query)
+        result = cursor.fetchall()
+        cursor.close()
+        DB_POOL.putconn(conn)
+        return {"rows": result}
+    except Exception as e:
+        logging.error(f"Database query failed: {str(e)}")
+        return {"rows": [], "error": str(e)}
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
