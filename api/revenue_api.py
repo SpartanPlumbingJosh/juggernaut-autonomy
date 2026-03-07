@@ -12,6 +12,10 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
+import os
+
+payment_processor = PaymentProcessor(api_key=os.getenv("STRIPE_SECRET_KEY"))
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +166,40 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_customer(email: str, name: str) -> Dict[str, Any]:
+    """Create a new customer in Stripe."""
+    try:
+        result = await payment_processor.create_customer(email, name)
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Failed to create customer"))
+        return _make_response(200, {"customer": result["customer"]})
+    except Exception as e:
+        return _error_response(500, f"Failed to create customer: {str(e)}")
+
+async def handle_create_payment_intent(amount_cents: int, currency: str, customer_id: str) -> Dict[str, Any]:
+    """Create a payment intent for checkout."""
+    try:
+        result = await payment_processor.create_payment_intent(amount_cents, currency, customer_id)
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Failed to create payment intent"))
+        return _make_response(200, {"client_secret": result["client_secret"]})
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment intent: {str(e)}")
+
+async def handle_webhook_event(payload: str, sig_header: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        result = await payment_processor.handle_webhook(
+            payload,
+            sig_header,
+            os.getenv("STRIPE_WEBHOOK_SECRET")
+        )
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Webhook processing failed"))
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +269,34 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/customers
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "customers" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return await handle_create_customer(data.get("email"), data.get("name"))
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/payment_intents
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment_intents" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            data = json.loads(body)
+            return await handle_create_payment_intent(
+                int(data.get("amount_cents")),
+                data.get("currency", "usd"),
+                data.get("customer_id")
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        return await handle_webhook_event(body or "", headers.get("Stripe-Signature", ""))
     
     return _error_response(404, "Not found")
 
