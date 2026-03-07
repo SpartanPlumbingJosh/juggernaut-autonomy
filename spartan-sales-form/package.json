@@ -1,0 +1,9 @@
+{
+  "name": "spartan-sales-form",
+  "version": "1.0.0",
+  "description": "Spartan Plumbing Sales-to-Install Confirmation Form",
+  "private": true,
+  "scripts": {
+    "dev": "npx serve public -l 3000"
+  }
+}
