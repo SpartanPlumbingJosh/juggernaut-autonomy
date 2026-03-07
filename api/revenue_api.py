@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing capabilities.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- POST /revenue/invoices - Create invoice
+- POST /revenue/payments - Process payment
 """
 
 import json
@@ -162,6 +165,68 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation."""
+    from core.subscription_manager import SubscriptionManager
+    from core.billing_system import BillingSystem
+    
+    billing = BillingSystem(query_db, lambda *args, **kwargs: None)
+    manager = SubscriptionManager(billing, query_db, lambda *args, **kwargs: None)
+    
+    try:
+        customer_id = body.get("customer_id")
+        plan_id = body.get("plan_id")
+        payment_method = body.get("payment_method")
+        
+        if not all([customer_id, plan_id, payment_method]):
+            return _error_response(400, "Missing required fields")
+            
+        result = await manager.create_subscription(customer_id, plan_id, payment_method)
+        return _make_response(201, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+        
+async def handle_create_invoice(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle invoice creation."""
+    from core.billing_system import BillingSystem
+    
+    billing = BillingSystem(query_db, lambda *args, **kwargs: None)
+    
+    try:
+        customer_id = body.get("customer_id")
+        amount_cents = body.get("amount_cents")
+        description = body.get("description")
+        
+        if not all([customer_id, amount_cents, description]):
+            return _error_response(400, "Missing required fields")
+            
+        result = await billing.create_invoice(customer_id, amount_cents, description)
+        return _make_response(201, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create invoice: {str(e)}")
+        
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment processing."""
+    from core.billing_system import BillingSystem
+    
+    billing = BillingSystem(query_db, lambda *args, **kwargs: None)
+    
+    try:
+        invoice_id = body.get("invoice_id")
+        payment_method = body.get("payment_method")
+        amount_cents = body.get("amount_cents")
+        
+        if not all([invoice_id, payment_method, amount_cents]):
+            return _error_response(400, "Missing required fields")
+            
+        result = await billing.process_payment(invoice_id, payment_method, amount_cents)
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+        
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +296,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+        
+    # POST /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "POST":
+        return handle_create_invoice(json.loads(body or "{}"))
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_process_payment(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
