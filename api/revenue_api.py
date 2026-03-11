@@ -1,10 +1,13 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/customer - Create new billing customer
+- POST /billing/subscription - Create new subscription
+- POST /billing/webhook - Handle payment provider webhooks
 """
 
 import json
@@ -12,6 +15,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.billing_manager import BillingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,12 +214,66 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_billing_customer(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle customer creation."""
+    try:
+        billing = BillingManager()
+        return await billing.create_customer(
+            email=body.get("email"),
+            name=body.get("name"),
+            metadata=body.get("metadata", {})
+        )
+    except Exception as e:
+        return _error_response(500, f"Failed to create customer: {str(e)}")
+
+async def handle_billing_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation."""
+    try:
+        billing = BillingManager()
+        return await billing.create_subscription(
+            customer_id=body.get("customer_id"),
+            plan_id=body.get("plan_id"),
+            payment_gateway=body.get("payment_gateway", "stripe")
+        )
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_billing_webhook(body: Dict[str, Any], headers: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment provider webhooks."""
+    try:
+        billing = BillingManager()
+        source = headers.get("X-Payment-Source", "stripe")
+        signature = headers.get("Stripe-Signature") or headers.get("Paypal-Signature")
+        return await billing.handle_webhook(body, signature, source)
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue and billing API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+
+    # Parse body if present
+    request_body = {}
+    if body:
+        try:
+            request_body = json.loads(body)
+        except:
+            pass
+
+    # POST /billing/customer
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "customer" and method == "POST":
+        return handle_billing_customer(request_body)
+
+    # POST /billing/subscription
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscription" and method == "POST":
+        return handle_billing_subscription(request_body)
+
+    # POST /billing/webhook
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "webhook" and method == "POST":
+        return handle_billing_webhook(request_body, headers)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
