@@ -11,7 +11,11 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+import json
 from core.database import query_db
+from services.revenue_engine import RevenueEngine
+
+engine = RevenueEngine()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +235,25 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/onboard
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "onboard" and method == "POST":
+        try:
+            user_data = json.loads(body or "{}")
+            return await engine.onboard_user(user_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
+    
+    # POST /revenue/deliver
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "deliver" and method == "POST":
+        try:
+            service_data = json.loads(body or "{}")
+            return await engine.deliver_service(
+                service_data.get("user_id"),
+                service_data
+            )
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
     
     return _error_response(404, "Not found")
 
