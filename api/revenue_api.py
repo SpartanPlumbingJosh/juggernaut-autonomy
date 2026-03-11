@@ -33,6 +33,53 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def handle_payment_intent(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment intent creation."""
+    from core.payment_processor import PaymentProcessor
+    from core.database import query_db
+    
+    try:
+        amount = int(body.get("amount", 0))
+        currency = str(body.get("currency", "usd")).lower()
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        processor = PaymentProcessor(query_db, logging.info)
+        result = processor.create_payment_intent(amount, currency, metadata)
+        
+        if result.get("success"):
+            return _make_response(200, {"client_secret": result["client_secret"]})
+        return _error_response(500, result.get("error", "Payment processing failed"))
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    from core.payment_processor import PaymentProcessor
+    from core.database import query_db
+    
+    try:
+        event = stripe.Webhook.construct_event(
+            body,
+            headers.get("stripe-signature"),
+            os.getenv('STRIPE_WEBHOOK_SECRET')
+        )
+        
+        if event['type'] == 'payment_intent.succeeded':
+            intent = event['data']['object']
+            processor = PaymentProcessor(query_db, logging.info)
+            result = processor.fulfill_order(intent.id)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Fulfillment failed"))
+                
+        return _make_response(200, {"status": "processed"})
+        
+    except Exception as e:
+        return _error_response(500, f"Webhook processing error: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +278,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /payment/intent
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "intent" and method == "POST":
+        return handle_payment_intent(json.loads(body or "{}"))
+    
+    # POST /payment/webhook
+    if len(parts) == 2 and parts[0] == "payment" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(body, headers)
     
     return _error_response(404, "Not found")
 
