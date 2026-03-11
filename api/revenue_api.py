@@ -8,6 +8,7 @@ Endpoints:
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -16,6 +17,13 @@ from core.database import query_db
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
+    try:
+        # Simple monitoring - TODO: Connect to proper monitoring service
+        with open("/tmp/api_monitoring.log", "a") as f:
+            f.write(f"{datetime.now()},{status_code},{body.get('status','unknown')}\n")
+    except:
+        pass
+    
     return {
         "statusCode": status_code,
         "headers": {
@@ -32,6 +40,28 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_stripe_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process Stripe payment."""
+    try:
+        # Initialize with your Stripe secret key
+        stripe.api_key = "sk_test_..."  # TODO: Move to config
+        
+        amount = int(float(body.get("amount", 0)) * 100)  # Stripe uses cents
+        payment_intent = stripe.PaymentIntent.create(
+            amount=amount,
+            currency=body.get("currency", "usd"),
+            metadata=body.get("metadata", {}),
+            description=body.get("description", "")
+        )
+        
+        return _make_response(200, {
+            "client_secret": payment_intent.client_secret,
+            "payment_id": payment_intent.id
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +261,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payment
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payment" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            return handle_stripe_payment(body_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
     
     return _error_response(404, "Not found")
 
