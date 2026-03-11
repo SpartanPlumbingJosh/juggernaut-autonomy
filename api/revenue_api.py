@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.automated_service import AutomatedService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +232,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/service/onboard - New customer onboarding
+    if (len(parts) == 3 and parts[0] == "revenue" and parts[1] == "service" 
+        and parts[2] == "onboard" and method == "POST"):
+        service = AutomatedService()
+        return await service.onboard_customer(json.loads(body or "{}"))
+        
+    # POST /revenue/service/billing - Process monthly billing
+    if (len(parts) == 3 and parts[0] == "revenue" and parts[1] == "service" 
+        and parts[2] == "billing" and method == "POST"):
+        service = AutomatedService()
+        return await service.process_monthly_billing()
     
     return _error_response(404, "Not found")
 
