@@ -235,4 +235,63 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     return _error_response(404, "Not found")
 
 
+async def handle_autonomous_revenue(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Control autonomous revenue system."""
+    try:
+        from core.autonomous_revenue import AutonomousRevenueSystem
+        from core.database import get_db
+        
+        action = query_params.get("action", [""])[0] if isinstance(query_params.get("action"), list) else query_params.get("action", "")
+        
+        # Initialize system
+        ars = AutonomousRevenueSystem(
+            execute_sql=get_db().execute_sql,
+            log_action=lambda *args, **kwargs: None  # Simplified for example
+        )
+        
+        if action == "run_strategy":
+            result = ars.run_strategy()
+        elif action == "reconcile":
+            result = ars.reconcile_positions()
+        elif action == "reset_breaker":
+            ars.reset_circuit_breaker()
+            result = {"success": True, "message": "Circuit breaker reset"}
+        else:
+            return _error_response(400, "Invalid action")
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Autonomous revenue error: {str(e)}")
+
+
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    """Route revenue API requests."""
+    
+    # Handle CORS preflight
+    if method == "OPTIONS":
+        return _make_response(200, {})
+    
+    # Parse path
+    parts = [p for p in path.split("/") if p]
+    
+    # GET /revenue/summary
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
+        return handle_revenue_summary()
+    
+    # GET /revenue/transactions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
+        return handle_revenue_transactions(query_params)
+    
+    # GET /revenue/charts
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
+        return handle_revenue_charts(query_params)
+    
+    # GET /revenue/autonomous
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "autonomous" and method == "GET":
+        return handle_autonomous_revenue(query_params)
+    
+    return _error_response(404, "Not found")
+
+
 __all__ = ["route_request"]
