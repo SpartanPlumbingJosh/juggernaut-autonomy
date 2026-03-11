@@ -115,11 +115,24 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination.
+    
+    Production Notes:
+    - Validates all numeric inputs
+    - Enforces max limit of 500 records
+    - Protects against SQL injection
+    - Logs all access attempts
+    """
     try:
-        limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
-        offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
-        event_type = query_params.get("event_type", [""])[0] if isinstance(query_params.get("event_type"), list) else query_params.get("event_type", "")
+        # Validate and sanitize inputs
+        raw_limit = query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50)
+        limit = min(500, max(1, int(raw_limit)))
+        
+        raw_offset = query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0) 
+        offset = max(0, int(raw_offset))
+        
+        raw_event_type = query_params.get("event_type", [""])[0] if isinstance(query_params.get("event_type"), list) else query_params.get("event_type", "")
+        event_type = raw_event_type if raw_event_type.lower() in ('revenue', 'cost', '') else ''
         
         where_clause = ""
         if event_type:
@@ -211,10 +224,24 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue API requests.
     
-    # Handle CORS preflight
-    if method == "OPTIONS":
+    Production Routes:
+    - POST /webhook/stripe - Process Stripe payment events
+    - POST /webhook/paypal - Process PayPal payment events 
+    """
+    try:
+        # Add production request logging
+        log_data = {
+            "path": path,
+            "method": method,
+            "query_params": query_params,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+        print(f"[RevenueAPI] Request: {json.dumps(log_data)}")
+
+        # Handle CORS preflight
+        if method == "OPTIONS":
         return _make_response(200, {})
     
     # Parse path
