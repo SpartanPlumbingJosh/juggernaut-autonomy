@@ -115,15 +115,27 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination.
+    
+    Supports filtering by:
+    - user_id: Filter transactions by user
+    - status: Filter by payment status
+    - type: Filter by transaction type (payment, refund, etc)
+    """
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
         event_type = query_params.get("event_type", [""])[0] if isinstance(query_params.get("event_type"), list) else query_params.get("event_type", "")
         
-        where_clause = ""
+        where_clauses = []
         if event_type:
-            where_clause = f"WHERE event_type = '{event_type}'"
+            where_clauses.append(f"event_type = '{event_type}'")
+        if query_params.get("user_id"):
+            where_clauses.append(f"user_id = '{query_params['user_id']}'")
+        if query_params.get("status"):
+            where_clauses.append(f"status = '{query_params['status']}'")
+        
+        where_clause = "WHERE " + " AND ".join(where_clauses) if where_clauses else ""
         
         sql = f"""
         SELECT 
