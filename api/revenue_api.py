@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/systems - Autonomous revenue systems status
 """
 
 import json
@@ -162,6 +163,19 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_systems() -> Dict[str, Any]:
+    """Get status of autonomous revenue systems."""
+    try:
+        # TODO: Implement system status retrieval
+        return _make_response(200, {
+            "systems": [],
+            "total_profit": 0,
+            "total_revenue": 0,
+            "total_cost": 0
+        })
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch system status: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +245,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/systems
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "systems" and method == "GET":
+        return handle_revenue_systems()
     
     return _error_response(404, "Not found")
 
