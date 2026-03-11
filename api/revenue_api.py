@@ -11,7 +11,8 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +163,37 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment processing."""
+    try:
+        processor = PaymentProcessor(execute_db, log_action)
+        result = await processor.process_payment(body)
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Payment processing failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Payment processing error: {str(e)}")
+
+async def handle_refund(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment refund."""
+    try:
+        processor = PaymentProcessor(execute_db, log_action)
+        result = await processor.refund_payment(
+            body["payment_id"],
+            body.get("amount_cents")
+        )
+        
+        if not result.get("success"):
+            return _error_response(400, result.get("error", "Refund processing failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Refund processing error: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -211,6 +243,10 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    try:
+        parsed_body = json.loads(body) if body else {}
+    except json.JSONDecodeError:
+        parsed_body = {}
     """Route revenue API requests."""
     
     # Handle CORS preflight
@@ -231,6 +267,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_payment(parsed_body)
+    
+    # POST /revenue/refunds
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "refunds" and method == "POST":
+        return handle_refund(parsed_body)
     
     return _error_response(404, "Not found")
 
