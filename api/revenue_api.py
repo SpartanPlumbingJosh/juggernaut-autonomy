@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.user_service import UserService
+from services.billing_service import BillingService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +34,37 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_create_user(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new user account"""
+    try:
+        email = body.get("email")
+        if not email:
+            return _error_response(400, "Email is required")
+            
+        user_service = UserService(query_db)
+        user = await user_service.create_user(email)
+        
+        return _make_response(201, user)
+    except Exception as e:
+        return _error_response(500, f"Failed to create user: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create new subscription"""
+    try:
+        user_id = body.get("user_id")
+        plan = body.get("plan")
+        payment_method = body.get("payment_method")
+        
+        if not all([user_id, plan, payment_method]):
+            return _error_response(400, "Missing required fields")
+            
+        billing_service = BillingService(query_db)
+        subscription = await billing_service.create_subscription(user_id, plan, payment_method)
+        
+        return _make_response(201, subscription)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +264,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /users
+    if len(parts) == 1 and parts[0] == "users" and method == "POST":
+        return handle_create_user(json.loads(body or "{}"))
+        
+    # POST /subscriptions
+    if len(parts) == 1 and parts[0] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
