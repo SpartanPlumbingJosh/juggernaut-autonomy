@@ -5,11 +5,15 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create new subscription
+- GET /revenue/subscriptions - List subscriptions
+- POST /revenue/webhook - Handle payment webhooks
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from services.payment_processor import PaymentProcessor
 
 from core.database import query_db
 
@@ -220,6 +224,9 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # Initialize payment processor
+    payment_processor = PaymentProcessor({})
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
@@ -231,6 +238,38 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            customer_id = data.get("customer_id")
+            plan_id = data.get("plan_id")
+            
+            if not customer_id or not plan_id:
+                return _error_response(400, "Missing customer_id or plan_id")
+                
+            result = await payment_processor.create_subscription(customer_id, plan_id)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to create subscription: {str(e)}")
+    
+    # GET /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "GET":
+        try:
+            # TODO: Implement subscription listing
+            return _make_response(200, {"subscriptions": []})
+        except Exception as e:
+            return _error_response(500, f"Failed to list subscriptions: {str(e)}")
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            result = await payment_processor.handle_webhook(data)
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to handle webhook: {str(e)}")
     
     return _error_response(404, "Not found")
 
