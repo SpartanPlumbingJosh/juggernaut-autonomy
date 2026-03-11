@@ -8,10 +8,12 @@ Endpoints:
 """
 
 import json
+import os
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_service import PaymentService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,12 +212,21 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
+    
+    # Handle Stripe webhook
+    if path == "/revenue/webhook" and method == "POST" and body:
+        result = await PaymentService.handle_webhook(
+            payload=body.encode('utf-8'),
+            sig_header=headers.get('Stripe-Signature', '')
+        )
+        return _make_response(200 if 'error' not in result else 400, result)
     
     # Parse path
     parts = [p for p in path.split("/") if p]
