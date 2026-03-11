@@ -1,17 +1,26 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data with authentication.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/webhook/stripe - Stripe webhook handler
 """
 
 import json
+import hmac
+import hashlib
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.logging import logger
+import stripe
+
+# Initialize Stripe
+stripe.api_key = "sk_test_..."  # Should be from environment
+STRIPE_WEBHOOK_SECRET = "whsec_..."  # Should be from environment
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -22,10 +31,53 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Headers": "Content-Type, Authorization",
+            "X-Content-Type-Options": "nosniff"
         },
         "body": json.dumps(body)
     }
+
+def _verify_auth(headers: Dict[str, str]) -> bool:
+    """Verify API key authentication."""
+    api_key = headers.get("Authorization", "").replace("Bearer ", "")
+    if not api_key:
+        return False
+    
+    # In production, this would verify against a database of valid keys
+    return api_key == "test_key"  # TODO: Replace with real auth check
+
+async def _record_stripe_event(event: Dict[str, Any]) -> None:
+    """Record Stripe payment event in revenue_events."""
+    try:
+        amount_cents = event["data"]["object"]["amount"]
+        currency = event["data"]["object"]["currency"].upper()
+        customer_id = event["data"]["object"].get("customer", "")
+        payment_id = event["data"]["object"]["id"]
+        
+        await execute_db(
+            f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, currency, 
+                source, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                '{currency}',
+                'stripe',
+                '{json.dumps({
+                    "stripe_payment_id": payment_id,
+                    "stripe_customer_id": customer_id,
+                    "event_type": event["type"]
+                })}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        logger.info(f"Recorded Stripe payment: {payment_id}")
+    except Exception as e:
+        logger.error(f"Failed to record Stripe event: {str(e)}")
 
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
@@ -210,29 +262,61 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
         return _make_response(200, {})
     
-    # Parse path
+    # Verify authentication for all endpoints except webhook
     parts = [p for p in path.split("/") if p]
+    if not (len(parts) >= 3 and parts[0] == "revenue" and parts[1] == "webhook"):
+        if not _verify_auth(headers):
+            return _error_response(401, "Unauthorized")
     
-    # GET /revenue/summary
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
-    
-    # GET /revenue/transactions
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
-    
-    # GET /revenue/charts
-    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
-    
-    return _error_response(404, "Not found")
+    # Parse path
+    try:
+        # GET /revenue/summary
+        if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
+            return handle_revenue_summary()
+        
+        # GET /revenue/transactions
+        if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
+            return handle_revenue_transactions(query_params)
+        
+        # GET /revenue/charts
+        if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
+            return handle_revenue_charts(query_params)
+        
+        # POST /revenue/webhook/stripe
+        if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "webhook" and parts[2] == "stripe" and method == "POST":
+            if not body:
+                return _error_response(400, "Missing webhook body")
+            
+            try:
+                sig_header = headers.get("Stripe-Signature")
+                if not sig_header:
+                    return _error_response(401, "Missing signature")
+                
+                event = stripe.Webhook.construct_event(
+                    body, sig_header, STRIPE_WEBHOOK_SECRET
+                )
+                
+                if event["type"] == "payment_intent.succeeded":
+                    await _record_stripe_event(event)
+                    return _make_response(200, {"status": "processed"})
+                
+                return _make_response(200, {"status": "ignored"})
+            except Exception as e:
+                logger.error(f"Stripe webhook error: {str(e)}")
+                return _error_response(400, f"Webhook error: {str(e)}")
+        
+        return _error_response(404, "Not found")
+    except Exception as e:
+        logger.error(f"API error: {str(e)}")
+        return _error_response(500, "Internal server error")
 
 
 __all__ = ["route_request"]
