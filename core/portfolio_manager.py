@@ -7,6 +7,8 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from payment.payment_processor import PaymentProcessor
+from auth.user_manager import UserManager
 
 
 def generate_revenue_ideas(
