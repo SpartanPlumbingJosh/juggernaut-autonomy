@@ -1,10 +1,12 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and payment processing.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments/create - Create payment intent
+- POST /revenue/payments/verify - Verify payment status
 """
 
 import json
@@ -12,6 +14,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from services.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +213,47 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_payment_create(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment creation."""
+    try:
+        processor = PaymentProcessor()
+        amount = float(body.get("amount", 0))
+        currency = str(body.get("currency", "usd")).lower()
+        provider = str(body.get("provider", "stripe")).lower()
+        metadata = body.get("metadata", {})
+        
+        if provider == "stripe":
+            result = await processor.create_stripe_payment(amount, currency, metadata)
+        elif provider == "paypal":
+            result = await processor.create_paypal_payment(amount, currency, metadata)
+        else:
+            return _error_response(400, "Invalid payment provider")
+            
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_payment_verify(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Verify payment status."""
+    try:
+        processor = PaymentProcessor()
+        payment_id = str(body.get("payment_id", ""))
+        provider = str(body.get("provider", "stripe")).lower()
+        
+        if not payment_id:
+            return _error_response(400, "Missing payment_id")
+            
+        result = await processor.verify_payment(payment_id, provider)
+        if not result.get("success"):
+            return _error_response(500, result.get("error"))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Payment verification failed: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +275,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "create" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_create(body_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
+    
+    # POST /revenue/payments/verify
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "verify" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment_verify(body_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
     
     return _error_response(404, "Not found")
 
