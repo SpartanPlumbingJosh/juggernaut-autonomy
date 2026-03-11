@@ -276,6 +276,81 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def optimize_acquisition_channels(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    days: int = 30,
+    min_acquisitions: int = 10
+) -> Dict[str, Any]:
+    """Analyze and optimize acquisition channels."""
+    try:
+        # Get performance data
+        sql = f"""
+        SELECT 
+            source,
+            campaign,
+            medium,
+            COUNT(*) as total_acquisitions,
+            SUM(revenue_cents) as total_revenue_cents,
+            AVG(revenue_cents) as avg_revenue_cents
+        FROM acquisition_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY source, campaign, medium
+        HAVING COUNT(*) >= {min_acquisitions}
+        ORDER BY total_revenue_cents DESC
+        """
+        
+        result = execute_sql(sql)
+        channels = result.get("rows", [])
+        
+        # Analyze and make optimization decisions
+        optimizations = []
+        for channel in channels:
+            source = channel.get("source")
+            campaign = channel.get("campaign")
+            medium = channel.get("medium")
+            roi = (channel.get("total_revenue_cents", 0) / 100) / (channel.get("total_acquisitions", 1) * 10)  # Example ROI calc
+            
+            if roi > 2.0:  # Scale up high ROI channels
+                optimizations.append({
+                    "source": source,
+                    "campaign": campaign,
+                    "medium": medium,
+                    "action": "scale_up",
+                    "roi": roi
+                })
+            elif roi < 1.0:  # Scale down low ROI channels
+                optimizations.append({
+                    "source": source,
+                    "campaign": campaign,
+                    "medium": medium,
+                    "action": "scale_down",
+                    "roi": roi
+                })
+        
+        # Log optimizations
+        log_action(
+            "acquisition.optimized",
+            f"Optimized {len(optimizations)} acquisition channels",
+            level="info",
+            output_data={"optimizations": optimizations}
+        )
+        
+        return {
+            "success": True,
+            "optimizations": optimizations,
+            "channels_analyzed": len(channels)
+        }
+        
+    except Exception as e:
+        log_action(
+            "acquisition.optimization_failed",
+            f"Failed to optimize acquisition channels: {str(e)}",
+            level="error"
+        )
+        return {"success": False, "error": str(e)}
+
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],

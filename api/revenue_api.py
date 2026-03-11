@@ -5,6 +5,8 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/acquisition - Track new customer acquisition
+- GET /revenue/acquisition/sources - Get acquisition source performance
 """
 
 import json
@@ -162,6 +164,69 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def track_acquisition_event(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Track a new customer acquisition event."""
+    try:
+        source = body.get("source", "unknown")
+        campaign = body.get("campaign", "unknown")
+        medium = body.get("medium", "unknown")
+        referrer = body.get("referrer", "")
+        landing_page = body.get("landing_page", "")
+        revenue_cents = int(body.get("revenue_cents", 0))
+        
+        sql = f"""
+        INSERT INTO acquisition_events (
+            id, source, campaign, medium, referrer, 
+            landing_page, revenue_cents, recorded_at
+        ) VALUES (
+            gen_random_uuid(),
+            '{source.replace("'", "''")}',
+            '{campaign.replace("'", "''")}',
+            '{medium.replace("'", "''")}',
+            '{referrer.replace("'", "''")}',
+            '{landing_page.replace("'", "''")}',
+            {revenue_cents},
+            NOW()
+        )
+        """
+        
+        await query_db(sql)
+        
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to track acquisition: {str(e)}")
+
+
+async def get_acquisition_sources(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get acquisition source performance data."""
+    try:
+        days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        sql = f"""
+        SELECT 
+            source,
+            COUNT(*) as total_acquisitions,
+            SUM(revenue_cents) as total_revenue_cents,
+            AVG(revenue_cents) as avg_revenue_cents
+        FROM acquisition_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY source
+        ORDER BY total_revenue_cents DESC
+        """
+        
+        result = await query_db(sql)
+        sources = result.get("rows", [])
+        
+        return _make_response(200, {
+            "sources": sources,
+            "period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch acquisition sources: {str(e)}")
+
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +296,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/acquisition
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "acquisition" and method == "POST":
+        return track_acquisition_event(json.loads(body or "{}"))
+    
+    # GET /revenue/acquisition/sources
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "acquisition" and parts[2] == "sources" and method == "GET":
+        return get_acquisition_sources(query_params)
     
     return _error_response(404, "Not found")
 
