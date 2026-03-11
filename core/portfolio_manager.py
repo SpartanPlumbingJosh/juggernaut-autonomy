@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.payment_processor import PaymentProcessor
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 
 def generate_revenue_ideas(
@@ -114,6 +119,37 @@ def generate_revenue_ideas(
 
     return {"success": True, "created": created, "attempted": len(ideas)}
 
+
+def monetize_experiment(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    experiment_id: str,
+    conversion_value: float
+) -> Dict[str, Any]:
+    """Track monetization from an experiment."""
+    processor = PaymentProcessor()
+    try:
+        revenue_cents = int(conversion_value * 100)
+        success = processor.record_revenue_event(
+            execute_sql=execute_sql,
+            event_type="revenue",
+            amount_cents=revenue_cents,
+            source="experiment",
+            metadata={
+                "experiment_id": experiment_id,
+                "conversion_value": conversion_value
+            },
+            experiment_id=experiment_id
+        )
+        
+        if success:
+            return {
+                "success": True,
+                "recorded_revenue_cents": revenue_cents
+            }
+        return {"success": False, "error": "Failed to record revenue"}
+    except Exception as e:
+        logger.error(f"Monetization failed for experiment {experiment_id}: {str(e)}")
+        return {"success": False, "error": str(e)}
 
 def score_pending_ideas(
     execute_sql: Callable[[str], Dict[str, Any]],
