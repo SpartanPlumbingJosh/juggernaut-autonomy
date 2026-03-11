@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -32,6 +33,57 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
     return _make_response(status_code, {"error": message})
 
+
+async def handle_create_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment creation"""
+    try:
+        processor = PaymentProcessor()
+        amount = float(body.get("amount", 0))
+        currency = str(body.get("currency", "usd"))
+        payment_method = str(body.get("payment_method", "stripe"))
+        metadata = body.get("metadata", {})
+        
+        if amount <= 0:
+            return _error_response(400, "Invalid amount")
+            
+        result = await processor.create_payment_intent(
+            amount=amount,
+            currency=currency,
+            payment_method=payment_method,
+            metadata=metadata
+        )
+        
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment failed"))
+            
+        return _make_response(200, result)
+        
+    except Exception as e:
+        return _error_response(500, f"Payment creation failed: {str(e)}")
+
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhooks from Stripe/PayPal"""
+    try:
+        processor = PaymentProcessor()
+        event = body.get("event")
+        payment_id = body.get("payment_id")
+        
+        if event == "payment.succeeded":
+            # Record payment
+            await processor.record_payment(
+                payment_id=payment_id,
+                amount=body.get("amount"),
+                currency=body.get("currency"),
+                user_id=body.get("user_id"),
+                product_id=body.get("product_id")
+            )
+            
+            # Deliver product
+            await processor.deliver_product(payment_id)
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(500, f"Webhook processing failed: {str(e)}")
 
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
@@ -231,6 +283,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_create_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        return handle_payment_webhook(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
