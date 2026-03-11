@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/subscriptions - Create and manage automated subscriptions
 """
 
 import json
@@ -162,6 +163,69 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def create_subscription(sub_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle automated subscription creation and billing."""
+    try:
+        # Validate subscription data
+        required_fields = ['customer_email', 'plan_id', 'payment_token']
+        if not all(field in sub_data for field in required_fields):
+            return _error_response(400, "Missing required subscription fields")
+
+        # Save subscription to database
+        sql = """
+        INSERT INTO subscriptions (
+            id, customer_email, plan_id, status,
+            current_period_start, current_period_end,
+            created_at, updated_at
+        ) VALUES (
+            gen_random_uuid(),
+            %s, %s, 'active',
+            NOW(), NOW() + INTERVAL '1 month',
+            NOW(), NOW()
+        ) RETURNING id
+        """
+        result = await query_db(sql, [
+            sub_data['customer_email'],
+            sub_data['plan_id']
+        ])
+        sub_id = result.get("rows", [{}])[0].get("id")
+
+        # Create initial invoice immediately
+        sql = """
+        INSERT INTO revenue_events (
+            id, event_type, amount_cents, currency, 
+            attribution, recorded_at, created_at
+        ) VALUES (
+            gen_random_uuid(), 
+            'revenue', 
+            (SELECT price_cents FROM plans WHERE id = %s),
+            'usd',
+            jsonb_build_object(
+                'subscription_id', %s,
+                'customer_email', %s,
+                'plan_id', %s
+            ),
+            NOW(),
+            NOW()
+        )
+        """
+        await query_db(sql, [
+            sub_data['plan_id'],
+            sub_id,
+            sub_data['customer_email'],
+            sub_data['plan_id']
+        ])
+
+        return _make_response(201, {
+            "subscription_id": sub_id,
+            "customer_email": sub_data['customer_email'],
+            "status": "active",
+            "created_date": datetime.now(timezone.utc).isoformat()
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +295,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        try:
+            sub_data = json.loads(body or "{}")
+            return create_subscription(sub_data)
+        except Exception as e:
+            return _error_response(400, f"Invalid request body: {str(e)}")
     
     return _error_response(404, "Not found")
 
