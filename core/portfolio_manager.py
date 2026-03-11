@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+import math
+from datetime import datetime, timezone, timedelta
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from dateutil.relativedelta import relativedelta
+
+TARGET_CENTS = 1_200_000_000  # $12M target
+DEADLINE_DATE = datetime(2031, 12, 31).date()
 
 
 def generate_revenue_ideas(
@@ -274,6 +279,129 @@ def start_experiments_from_top_ideas(
         out["failures"] = failures[:10]
         out["failed"] = len(failures)
     return out
+
+
+def calculate_revenue_trajectory(
+    execute_sql: Callable[[str], Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Calculate current revenue trajectory vs target and required growth rate."""
+    try:
+        # Get all-time revenue
+        all_time_result = execute_sql(
+            "SELECT SUM(amount_cents) as total FROM revenue_events WHERE event_type = 'revenue'"
+        )
+        current_cents = float(all_time_result.get("rows", [{}])[0].get("total", 0))
+        
+        # Get monthly revenue
+        monthly_result = execute_sql("""
+            SELECT 
+                DATE_TRUNC('month', recorded_at) as month,
+                SUM(amount_cents) as revenue
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT 12
+        """)
+        monthly_data = monthly_result.get("rows", []) or []
+        
+        # Calculate time remaining
+        today = datetime.now().date()
+        months_remaining = (DEADLINE_DATE.year - today.year) * 12 + (DEADLINE_DATE.month - today.month)
+        if months_remaining <= 0:
+            return {"error": "Deadline has passed"}
+
+        # Calculate required growth
+        remaining_cents = TARGET_CENTS - current_cents
+        if remaining_cents <= 0:
+            return {"status": "target_achieved"}
+
+        # Calculate required monthly growth rate
+        current_monthly_cents = float(abs(monthly_data[0]["revenue"])) if monthly_data else 0
+        required_growth_rate = math.pow(remaining_cents / current_monthly_cents, 1/months_remaining) - 1 if current_monthly_cents > 0 else float('inf')
+
+        # Project trajectory
+        projection = []
+        projected_value = current_cents
+        date = today
+        for _ in range(months_remaining):
+            projected_value += current_monthly_cents
+            projection.append({
+                "date": str(date),
+                "projected_cents": projected_value,
+                "target_cents": TARGET_CENTS * (1 - ((DEADLINE_DATE - date).days / (DEADLINE_DATE - today).days))
+            })
+            date += relativedelta(months=1)
+            current_monthly_cents *= (1 + required_growth_rate)
+
+        # Identify underperforming sources
+        source_result = execute_sql("""
+            SELECT source, SUM(amount_cents) as revenue, 
+                   COUNT(*) as transactions
+            FROM revenue_events
+            WHERE event_type = 'revenue'
+              AND recorded_at >= NOW() - INTERVAL '90 days'
+            GROUP BY source
+            ORDER BY revenue DESC
+        """)
+        sources = source_result.get("rows", [])
+        underperforming = [s for s in sources if float(s["revenue"]) < (TARGET_CENTS / months_remaining / 10)]  # < 10% of monthly requirement
+ 
+        return {
+            "current_cents": current_cents,
+            "target_cents": TARGET_CENTS,
+            "months_remaining": months_remaining,
+            "required_monthly_growth": required_growth_rate,
+            "projection": projection,
+            "monthly_trend": monthly_data,
+            "underperforming_sources": underperforming,
+            "status": "tracking"
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def trigger_optimization_protocols(
+    execute_sql: Callable[[str], Dict[str, Any]], 
+    log_action: Callable[..., Any],
+    underperforming_threshold: float = 0.1
+) -> Dict[str, Any]:
+    """Automatically initiate optimization experiments for underperforming streams."""
+    trajectory = calculate_revenue_trajectory(execute_sql)
+    if trajectory.get("error"):
+        return {"success": False, "error": trajectory["error"]}
+
+    if "underperforming_sources" not in trajectory:
+        return {"success": False, "error": "No performance data available"}
+
+    created = 0
+    for source in trajectory["underperforming_sources"]:
+        source_name = source["source"]
+        context = {
+            "optimize_source": source_name,
+            "current_revenue": source["revenue"],
+            "target_revenue": TARGET_CENTS / trajectory["months_remaining"],
+            "performance_gap": (TARGET_CENTS / trajectory["months_remaining"]) - source["revenue"]
+        }
+
+        try:
+            # Generate optimization ideas
+            result = generate_revenue_ideas(
+                execute_sql=execute_sql,
+                log_action=log_action,
+                context=context,
+                limit=3
+            )
+            if result.get("created", 0) > 0:
+                created += result["created"]
+        except Exception as e:
+            log_action("optimization.failed", f"Failed to generate ideas for {source_name}", error=str(e))
+
+    return {
+        "success": True,
+        "optimization_experiments_created": created,
+        "underperforming_sources_processed": len(trajectory["underperforming_sources"])
+    }
 
 
 def review_experiments_stub(
