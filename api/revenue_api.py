@@ -11,7 +11,9 @@ import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
+import json
 from core.database import query_db
+from payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +164,48 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_payment(query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    """Create a payment intent"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        data = json.loads(body)
+        amount = float(data.get("amount", 0))
+        currency = data.get("currency", "usd")
+        provider = data.get("provider", "stripe")
+        metadata = data.get("metadata", {})
+        
+        processor = PaymentProcessor()
+        if provider == "stripe":
+            result = await processor.create_payment_intent(amount, currency, metadata)
+        elif provider == "paypal":
+            result = await processor.create_paypal_order(amount, currency, metadata)
+        else:
+            return _error_response(400, "Invalid payment provider")
+            
+        if not result.get("success"):
+            return _error_response(500, result.get("error", "Payment creation failed"))
+            
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create payment: {str(e)}")
+
+async def handle_payment_webhook(path: str, headers: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+    """Handle payment webhooks"""
+    try:
+        if not body:
+            return _error_response(400, "Missing request body")
+            
+        processor = PaymentProcessor()
+        if "stripe-signature" in headers:
+            return await processor.handle_stripe_webhook(body, headers["stripe-signature"])
+        else:
+            data = json.loads(body)
+            return await processor.handle_paypal_webhook(data)
+    except Exception as e:
+        return _error_response(500, f"Failed to process webhook: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +275,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_create_payment(query_params, body)
+        
+    # POST /revenue/webhooks
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhooks" and method == "POST":
+        return handle_payment_webhook(path, headers, body)
     
     return _error_response(404, "Not found")
 
