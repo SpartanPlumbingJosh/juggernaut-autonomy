@@ -33,8 +33,38 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def _record_autonomous_revenue(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    amount_cents: int,
+    source: str,
+    service_id: str,
+    metadata: Optional[Dict] = None
+) -> bool:
+    """Record revenue from autonomous service delivery."""
+    try:
+        await execute_sql(f"""
+            INSERT INTO revenue_events (
+                id, event_type, amount_cents, 
+                currency, source, metadata,
+                recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                'revenue',
+                {amount_cents},
+                'USD',
+                '{source}',
+                '{json.dumps(metadata or {})}'::jsonb,
+                NOW(),
+                NOW()
+            )
+        """)
+        return True
+    except Exception:
+        return False
+
+
 async def handle_revenue_summary() -> Dict[str, Any]:
-    """Get MTD/QTD/YTD revenue totals."""
+    """Get MTD/QTD/YTD revenue totals including autonomous deliveries."""
     try:
         now = datetime.now(timezone.utc)
         
@@ -163,9 +193,24 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
 
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get revenue over time for charts."""
+    """Get revenue over time for charts with autonomous delivery breakdown."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        # Get autonomous vs manual revenue breakdown
+        autonomy_sql = f"""
+        SELECT 
+            DATE(recorded_at) as date,
+            SUM(CASE WHEN metadata->>'delivery_mode' = 'autonomous' THEN amount_cents ELSE 0 END) as autonomous_revenue,
+            SUM(CASE WHEN metadata->>'delivery_mode' IS NULL OR metadata->>'delivery_mode' != 'autonomous' THEN amount_cents ELSE 0 END) as manual_revenue
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+          AND event_type = 'revenue'
+        GROUP BY DATE(recorded_at)
+        ORDER BY date DESC
+        """
+        autonomy_result = await query_db(autonomy_sql)
+        autonomy_data = autonomy_result.get("rows", [])
         
         # Daily revenue for the last N days
         sql = f"""
@@ -203,6 +248,7 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _make_response(200, {
             "daily": daily_data,
             "by_source": by_source,
+            "autonomy_breakdown": autonomy_data,
             "period_days": days
         })
         
@@ -231,6 +277,25 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /revenue/autonomous-delivery
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "autonomous-delivery" and method == "POST":
+        try:
+            data = json.loads(body or "{}")
+            success = await _record_autonomous_revenue(
+                execute_sql=query_db,
+                amount_cents=int(data.get("amount_cents", 0)),
+                source=data.get("source", "autonomous"),
+                service_id=data.get("service_id", ""),
+                metadata={
+                    "delivery_mode": "autonomous",
+                    "service_type": data.get("service_type"),
+                    "customer_id": data.get("customer_id")
+                }
+            )
+            return _make_response(200 if success else 400, {"success": success})
+        except Exception as e:
+            return _error_response(400, f"Invalid request: {str(e)}")
     
     return _error_response(404, "Not found")
 
