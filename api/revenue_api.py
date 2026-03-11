@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from marketing.automation import MarketingAutomation
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -232,6 +233,58 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
     
+    # Marketing endpoints
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "landing-page" and method == "POST":
+        campaign_id = query_params.get("campaign_id", [""])[0]
+        if not campaign_id:
+            return _error_response(400, "Missing campaign_id")
+        automation = MarketingAutomation()
+        page = await automation.generate_landing_page(campaign_id)
+        return _make_response(200, page)
+        
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "email-sequence" and method == "POST":
+        campaign_id = query_params.get("campaign_id", [""])[0]
+        if not campaign_id:
+            return _error_response(400, "Missing campaign_id")
+        automation = MarketingAutomation()
+        sequence = await automation.create_email_sequence(campaign_id)
+        return _make_response(200, sequence)
+        
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "track-conversion" and method == "POST":
+        event_type = query_params.get("event_type", [""])[0]
+        campaign_id = query_params.get("campaign_id", [""])[0]
+        user_id = query_params.get("user_id", [""])[0]
+        if not all([event_type, campaign_id, user_id]):
+            return _error_response(400, "Missing required parameters")
+        automation = MarketingAutomation()
+        result = await automation.track_conversion(event_type, campaign_id, user_id)
+        return _make_response(200, result)
+        
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "calculate-cac" and method == "GET":
+        campaign_id = query_params.get("campaign_id", [""])[0]
+        if not campaign_id:
+            return _error_response(400, "Missing campaign_id")
+        automation = MarketingAutomation()
+        result = await automation.calculate_cac(campaign_id)
+        return _make_response(200, result)
+        
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "generate-referral" and method == "POST":
+        user_id = query_params.get("user_id", [""])[0]
+        if not user_id:
+            return _error_response(400, "Missing user_id")
+        automation = MarketingAutomation()
+        result = await automation.generate_referral_code(user_id)
+        return _make_response(200, result)
+        
+    if len(parts) == 2 and parts[0] == "marketing" and parts[1] == "track-referral" and method == "POST":
+        referrer_id = query_params.get("referrer_id", [""])[0]
+        referred_id = query_params.get("referred_id", [""])[0]
+        if not all([referrer_id, referred_id]):
+            return _error_response(400, "Missing required parameters")
+        automation = MarketingAutomation()
+        result = await automation.track_referral(referrer_id, referred_id)
+        return _make_response(200, result)
+        
     return _error_response(404, "Not found")
 
 

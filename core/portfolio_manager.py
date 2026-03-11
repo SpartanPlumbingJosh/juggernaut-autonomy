@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
 from core.idea_generator import IdeaGenerator
+from marketing.automation import MarketingAutomation
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
@@ -178,6 +179,15 @@ def score_pending_ideas(
     except Exception:
         pass
 
+    # Track marketing conversion for scored ideas
+    automation = MarketingAutomation()
+    for r in rows:
+        await automation.track_conversion(
+            event_type="idea_scored",
+            campaign_id="idea_generation",
+            user_id="system"
+        )
+        
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
