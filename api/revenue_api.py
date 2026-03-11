@@ -12,6 +12,9 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.auth import auth_required, create_access_token, verify_token
+from core.service_delivery import ServiceDelivery
+from core.billing import BillingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -33,7 +36,13 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
-async def handle_revenue_summary() -> Dict[str, Any]:
+async def handle_login(email: str, password: str) -> Dict[str, Any]:
+    # In production, verify password against database
+    access_token = create_access_token({"email": email})
+    return _make_response(200, {"access_token": access_token})
+
+@auth_required
+async def handle_revenue_summary(token: str = "") -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
@@ -114,7 +123,8 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch revenue summary: {str(e)}")
 
 
-async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
+@auth_required
+async def handle_revenue_transactions(query_params: Dict[str, Any], token: str = "") -> Dict[str, Any]:
     """Get transaction history with pagination."""
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
@@ -162,7 +172,8 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
-async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
+@auth_required
+async def handle_revenue_charts(query_params: Dict[str, Any], token: str = "") -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
         days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
@@ -209,6 +220,30 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def handle_subscribe(user_id: str, plan: str) -> Dict[str, Any]:
+    billing = BillingManager()
+    service = ServiceDelivery()
+    
+    # Create customer in Stripe
+    customer = await billing.create_customer(user_id)
+    if "error" in customer:
+        return _error_response(500, customer["error"])
+    
+    # Create subscription
+    subscription = await billing.create_subscription(customer["customer_id"], plan)
+    if "error" in subscription:
+        return _error_response(500, subscription["error"])
+    
+    # Deliver service
+    delivery = await service.deliver_service(plan, user_id)
+    if "error" in delivery:
+        return _error_response(500, delivery["error"])
+    
+    return _make_response(200, {
+        "subscription": subscription,
+        "delivery": delivery
+    })
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
