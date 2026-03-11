@@ -14,6 +14,21 @@ from typing import Any, Dict, List, Optional
 from core.database import query_db
 
 
+async def _record_payment_event(event_data: Dict) -> Dict:
+    """Record a payment event in the database."""
+    sql = """
+    INSERT INTO revenue_events (
+        id, event_type, amount_cents, currency, source, 
+        metadata, recorded_at, created_at
+    ) VALUES (
+        gen_random_uuid(), %(event_type)s, %(amount_cents)s, 
+        %(currency)s, %(source)s, %(metadata)s, 
+        %(recorded_at)s, NOW()
+    )
+    RETURNING id
+    """
+    return await query_db(sql, event_data)
+
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
     return {
@@ -22,7 +37,7 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
             "Content-Type": "application/json",
             "Access-Control-Allow-Origin": "*",
             "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Headers": "Content-Type, Authorization,X-Stripe-Signature"
         },
         "body": json.dumps(body)
     }
@@ -209,6 +224,29 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
+
+async def handle_stripe_webhook(body: Dict) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    from services.payment_service import PaymentService
+    
+    event = body.get("data", {}).get("object", {})
+    
+    # Handle payment events
+    if event["object"] == "invoice" and event["paid"]:
+        amount = event["amount_paid"]
+        await PaymentService.record_payment_event(
+            event_id=event["id"],
+            amount=amount,
+            currency=event["currency"],
+            event_type="revenue",
+            metadata={
+                "invoice_id": event["id"],
+                "subscription_id": event["subscription"],
+                "customer_id": event["customer"]
+            }
+        )
+    
+    return _make_response(200, {"status": "processed"})
 
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
