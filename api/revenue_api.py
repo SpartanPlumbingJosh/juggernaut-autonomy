@@ -162,6 +162,35 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_payment_webhook(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment webhook events."""
+    try:
+        event_type = body.get("type")
+        amount_cents = int(float(body.get("amount")) * 100)
+        experiment_id = body.get("experiment_id")
+        metadata = body.get("metadata", {})
+        
+        # Validate required fields
+        if not event_type or not amount_cents:
+            return _error_response(400, "Missing required fields")
+            
+        # Track payment event
+        from core.portfolio_manager import track_payment_event
+        track_res = await track_payment_event(
+            event_type=event_type,
+            amount_cents=amount_cents,
+            experiment_id=experiment_id,
+            metadata=metadata
+        )
+        
+        if not track_res.get("success"):
+            return _error_response(500, "Failed to track payment")
+            
+        return _make_response(200, {"success": True})
+        
+    except Exception as e:
+        return _error_response(500, f"Payment webhook failed: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:

@@ -276,6 +276,79 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def track_payment_event(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    event_type: str,
+    amount_cents: int,
+    experiment_id: Optional[str] = None,
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Track a payment event (revenue or cost)."""
+    try:
+        metadata_json = json.dumps(metadata or {}).replace("'", "''")
+        execute_sql(
+            f"""
+            INSERT INTO revenue_events (
+                id, experiment_id, event_type, amount_cents,
+                currency, metadata, recorded_at, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                {f"'{experiment_id}'" if experiment_id else "NULL"},
+                '{event_type}',
+                {amount_cents},
+                'USD',
+                '{metadata_json}'::jsonb,
+                NOW(),
+                NOW()
+            )
+            """
+        )
+        return {"success": True}
+    except Exception as e:
+        log_action(
+            "payment.tracking_failed",
+            f"Failed to track payment event: {str(e)}",
+            level="error",
+            error_data={"event_type": event_type, "amount_cents": amount_cents}
+        )
+        return {"success": False, "error": str(e)}
+
+def track_user_onboarding(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+    user_id: str,
+    steps_completed: Dict[str, bool],
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Track user onboarding progress."""
+    try:
+        steps_json = json.dumps(steps_completed).replace("'", "''")
+        metadata_json = json.dumps(metadata or {}).replace("'", "''")
+        
+        execute_sql(
+            f"""
+            INSERT INTO user_onboarding (
+                id, user_id, steps_completed, metadata, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{user_id}',
+                '{steps_json}'::jsonb,
+                '{metadata_json}'::jsonb,
+                NOW()
+            )
+            """
+        )
+        return {"success": True}
+    except Exception as e:
+        log_action(
+            "onboarding.tracking_failed",
+            f"Failed to track user onboarding: {str(e)}",
+            level="error",
+            error_data={"user_id": user_id}
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
