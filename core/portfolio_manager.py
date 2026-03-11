@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from core.channel_infrastructure import get_channel_handler
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -187,6 +188,7 @@ def start_experiments_from_top_ideas(
     max_new: int = 1,
     min_score: float = 60.0,
     budget: float = 20.0,
+    channel_config: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
         res = execute_sql(
@@ -244,6 +246,32 @@ def start_experiments_from_top_ideas(
             continue
 
         link_experiment_to_idea(execute_sql=execute_sql, experiment_id=str(exp_id), idea_id=idea_id)
+
+        # Execute channel-specific automation if configured
+        if channel_config and channel_config.get("type"):
+            channel = get_channel_handler(
+                channel_type=channel_config["type"],
+                config=channel_config,
+                execute_sql=execute_sql,
+                log_action=log_action
+            )
+            if channel:
+                if channel_config["type"] == "freelance":
+                    project_details = {
+                        "idea_id": idea_id,
+                        "title": idea.get("title") or "",
+                        "description": idea.get("description") or "",
+                        "budget": budget
+                    }
+                    channel.submit_proposal(project_details)
+                elif channel_config["type"] == "content":
+                    content_details = {
+                        "idea_id": idea_id,
+                        "title": idea.get("title") or "",
+                        "content": idea.get("description") or "",
+                        "keywords": idea.get("tags") or []
+                    }
+                    channel.publish_content(content_details)
 
         try:
             execute_sql(
