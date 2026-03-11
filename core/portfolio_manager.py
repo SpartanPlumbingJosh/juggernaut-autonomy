@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
@@ -132,6 +137,7 @@ def score_pending_ideas(
         )
         rows = res.get("rows", []) or []
     except Exception as e:
+        logger.error(f"Failed to generate revenue ideas: {str(e)}")
         return {"success": False, "error": str(e)}
 
     scorer = IdeaScorer()
@@ -201,6 +207,7 @@ def start_experiments_from_top_ideas(
         )
         ideas = res.get("rows", []) or []
     except Exception as e:
+        logger.error(f"Failed to score ideas: {str(e)}")
         return {"success": False, "error": str(e)}
 
     created = 0
@@ -303,6 +310,7 @@ def review_experiments_stub(
         )
         rows = res.get("rows", []) or []
     except Exception as e:
+        logger.error(f"Failed to start experiments: {str(e)}")
         return {"success": False, "error": str(e)}
 
     running_count = 0

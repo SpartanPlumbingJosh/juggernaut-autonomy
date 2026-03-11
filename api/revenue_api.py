@@ -3,15 +3,21 @@ Revenue API - Expose revenue tracking data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
+- GET /revenue/transactions - Transaction history 
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/health - System health and validation
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+import logging
 
 from core.database import query_db
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -30,7 +36,48 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     """Create error response."""
+    logger.error(f"API Error {status_code}: {message}")
     return _make_response(status_code, {"error": message})
+
+async def handle_revenue_health() -> Dict[str, Any]:
+    """Validate system health and data integrity."""
+    try:
+        # Check database connectivity
+        db_check = await query_db("SELECT 1")
+        if not db_check or "rows" not in db_check:
+            raise Exception("Database connectivity check failed")
+            
+        # Validate recent transactions
+        recent_tx = await query_db("""
+            SELECT COUNT(*) as count, 
+                   MAX(recorded_at) as latest,
+                   MIN(recorded_at) as earliest
+            FROM revenue_events
+            WHERE recorded_at >= NOW() - INTERVAL '1 hour'
+        """)
+        
+        tx_data = recent_tx.get("rows", [{}])[0]
+        count = tx_data.get("count", 0)
+        latest = tx_data.get("latest")
+        earliest = tx_data.get("earliest")
+        
+        # Check for stale data
+        if latest and (datetime.now(timezone.utc) - latest) > timedelta(minutes=15):
+            raise Exception("No recent transactions detected")
+            
+        return _make_response(200, {
+            "status": "healthy",
+            "database": "connected",
+            "recent_transactions": {
+                "count": count,
+                "latest": latest,
+                "earliest": earliest
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"Health check failed: {str(e)}")
+        return _error_response(500, f"Health check failed: {str(e)}")
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
@@ -231,6 +278,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/health
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "health" and method == "GET":
+        return handle_revenue_health()
     
     return _error_response(404, "Not found")
 
