@@ -7,6 +7,7 @@ from typing import Any, Callable, Dict, List, Optional
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
+from core.strategy_automation import StrategyAutomator
 
 
 def generate_revenue_ideas(
@@ -14,7 +15,17 @@ def generate_revenue_ideas(
     log_action: Callable[..., Any],
     context: Optional[Dict[str, Any]] = None,
     limit: int = 5,
+    automate: bool = False,
 ) -> Dict[str, Any]:
+    """Generate revenue ideas with optional automation."""
+    if automate:
+        automator = StrategyAutomator()
+        # Scrape data to enhance idea generation
+        scraped_data = automator.scrape_data("https://example.com/market-data")
+        if scraped_data:
+            context = context or {}
+            context["scraped_data"] = scraped_data[:10000]  # Limit size
+            
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
