@@ -12,6 +12,13 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.revenue.infrastructure import RevenueSystem, PaymentProvider
+from core.revenue.subscriptions import SubscriptionManager
+from core.revenue.billing import BillingManager
+
+revenue_system = RevenueSystem()
+subscription_manager = SubscriptionManager()
+billing_manager = BillingManager()
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
