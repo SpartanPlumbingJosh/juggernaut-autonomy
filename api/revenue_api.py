@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from billing.service import BillingService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -34,6 +35,7 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
 
 
 async def handle_revenue_summary() -> Dict[str, Any]:
+    """Get MTD/QTD/YTD revenue totals including subscriptions."""
     """Get MTD/QTD/YTD revenue totals."""
     try:
         now = datetime.now(timezone.utc)
