@@ -14,6 +14,14 @@ from typing import Any, Dict, List, Optional
 from core.database import query_db
 
 
+def _send_alert(alert_type: str, message: str, data: Dict[str, Any]) -> None:
+    """Send system alerts to monitoring channels."""
+    try:
+        # This would integrate with your alerting system (e.g., PagerDuty, Slack, etc.)
+        print(f"ALERT: {alert_type} - {message} - {json.dumps(data)}")
+    except Exception:
+        pass
+
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
     """Create standardized API response."""
     return {
@@ -81,9 +89,20 @@ async def handle_revenue_summary() -> Dict[str, Any]:
         all_time_result = await query_db(all_time_sql)
         all_time = all_time_result.get("rows", [{}])[0]
         
+        # Check for revenue anomalies
+        mtd_revenue = mtd.get("total_revenue_cents") or 0
+        expected_revenue = 1000000  # Your expected monthly revenue target
+        
+        if mtd_revenue < expected_revenue * 0.8:
+            _send_alert(
+                "revenue_low",
+                f"MTD revenue is below 80% of target: {mtd_revenue/100}",
+                {"mtd_revenue": mtd_revenue, "target": expected_revenue}
+            )
+            
         return _make_response(200, {
             "mtd": {
-                "revenue_cents": mtd.get("total_revenue_cents") or 0,
+                "revenue_cents": mtd_revenue,
                 "cost_cents": mtd.get("total_cost_cents") or 0,
                 "profit_cents": mtd.get("net_profit_cents") or 0,
                 "transaction_count": mtd.get("transaction_count") or 0,

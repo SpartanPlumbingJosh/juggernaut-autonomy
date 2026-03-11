@@ -276,6 +276,103 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def manage_billing_cycles(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Handle recurring billing cycles and payment failures."""
+    try:
+        # Get active subscriptions with upcoming renewals
+        res = execute_sql("""
+            SELECT id, customer_id, plan_id, renewal_date, payment_method_id, status
+            FROM subscriptions
+            WHERE status = 'active'
+              AND renewal_date <= NOW() + INTERVAL '1 day'
+            ORDER BY renewal_date ASC
+            LIMIT 100
+        """)
+        subscriptions = res.get("rows", []) or []
+        
+        processed = 0
+        failures = []
+        
+        for sub in subscriptions:
+            try:
+                # Attempt payment
+                payment_result = execute_sql(f"""
+                    INSERT INTO payments (
+                        subscription_id, amount, currency, status, attempt_count
+                    ) VALUES (
+                        '{sub['id']}',
+                        (SELECT price FROM plans WHERE id = '{sub['plan_id']}'),
+                        'USD',
+                        'pending',
+                        1
+                    )
+                    RETURNING id
+                """)
+                
+                # Process payment (this would call external payment gateway)
+                payment_id = payment_result.get("rows", [{}])[0].get("id")
+                execute_sql(f"""
+                    UPDATE payments
+                    SET status = 'success',
+                        processed_at = NOW()
+                    WHERE id = '{payment_id}'
+                """)
+                
+                # Update subscription
+                execute_sql(f"""
+                    UPDATE subscriptions
+                    SET renewal_date = renewal_date + INTERVAL '1 month',
+                        updated_at = NOW()
+                    WHERE id = '{sub['id']}'
+                """)
+                
+                processed += 1
+                
+            except Exception as e:
+                failures.append({
+                    "subscription_id": sub['id'],
+                    "error": str(e)[:200]
+                })
+                # Mark payment as failed
+                execute_sql(f"""
+                    UPDATE payments
+                    SET status = 'failed',
+                        error_message = '{str(e)[:200]}',
+                        updated_at = NOW()
+                    WHERE id = '{payment_id}'
+                """)
+                # Handle payment failure
+                execute_sql(f"""
+                    UPDATE subscriptions
+                    SET status = 'payment_failed',
+                        updated_at = NOW()
+                    WHERE id = '{sub['id']}'
+                """)
+        
+        log_action(
+            "billing.processed",
+            f"Processed {processed} billing cycles",
+            level="info",
+            output_data={"processed": processed, "failures": failures}
+        )
+        
+        return {
+            "success": True,
+            "processed": processed,
+            "failures": failures
+        }
+        
+    except Exception as e:
+        log_action(
+            "billing.error",
+            f"Billing cycle processing failed: {str(e)}",
+            level="error"
+        )
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
