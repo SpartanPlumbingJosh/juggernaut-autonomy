@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Our Product</title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+<body class="bg-gray-100">
+    <div class="max-w-4xl mx-auto py-12 px-4 sm:px-6 lg:px-8">
+        <div class="bg-white shadow rounded-lg p-8">
+            <h1 class="text-3xl font-bold mb-6">Our Awesome Product</h1>
+            <p class="text-gray-600 mb-8">
+                Transform your business with our cutting-edge solution. Get started today!
+            </p>
+            
+            <div class="mb-8">
+                <h2 class="text-xl font-semibold mb-4">Features</h2>
+                <ul class="list-disc list-inside text-gray-600">
+                    <li>Feature One</li>
+                    <li>Feature Two</li>
+                    <li>Feature Three</li>
+                </ul>
+            </div>
+
+            <div class="border-t pt-8">
+                <h2 class="text-xl font-semibold mb-4">Get Started</h2>
+                <div id="payment-form" class="space-y-4">
+                    <input type="email" id="email" placeholder="Your email" class="w-full p-2 border rounded">
+                    <div id="card-element" class="p-2 border rounded"></div>
+                    <button id="submit" class="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700">
+                        Pay $49.99
+                    </button>
+                    <div id="error-message" class="text-red-500 hidden"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://js.stripe.com/v3/"></script>
+    <script>
+        const stripe = Stripe('{{ STRIPE_PUBLIC_KEY }}');
+        const elements = stripe.elements();
+        const cardElement = elements.create('card');
+        cardElement.mount('#card-element');
+
+        const form = document.getElementById('payment-form');
+        const submitButton = document.getElementById('submit');
+        const errorMessage = document.getElementById('error-message');
+
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            submitButton.disabled = true;
+
+            const {paymentMethod, error} = await stripe.createPaymentMethod({
+                type: 'card',
+                card: cardElement,
+                billing_details: {
+                    email: document.getElementById('email').value
+                }
+            });
+
+            if (error) {
+                errorMessage.textContent = error.message;
+                errorMessage.classList.remove('hidden');
+                submitButton.disabled = false;
+            } else {
+                const response = await fetch('/payment', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        payment_method_id: paymentMethod.id,
+                        amount: 49.99,
+                        currency: 'usd',
+                        product_id: 'prod_123',
+                        user_email: document.getElementById('email').value
+                    })
+                });
+
+                const result = await response.json();
+                if (result.success) {
+                    window.location.href = '/thank-you';
+                } else {
+                    errorMessage.textContent = result.error || 'Payment failed';
+                    errorMessage.classList.remove('hidden');
+                    submitButton.disabled = false;
+                }
+            }
+        });
+    </script>
+</body>
+</html>
