@@ -1,17 +1,21 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /billing/subscriptions - Create new subscription
+- POST /billing/invoices - Create invoice
+- POST /billing/payments - Process payment
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_sql
+from services.billing_service import BillingService
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,8 +214,61 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def parse_body(body: Optional[str]) -> Dict[str, Any]:
+    """Parse request body."""
+    if not body:
+        return {}
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        return {}
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle subscription creation."""
+    billing = BillingService()
+    customer_id = body.get("customer_id")
+    plan_id = body.get("plan_id")
+    
+    if not customer_id or not plan_id:
+        return _error_response(400, "Missing customer_id or plan_id")
+    
+    try:
+        result = await billing.create_subscription(customer_id, plan_id)
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create subscription: {str(e)}")
+
+async def handle_create_invoice(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle invoice creation."""
+    billing = BillingService()
+    subscription_id = body.get("subscription_id")
+    
+    if not subscription_id:
+        return _error_response(400, "Missing subscription_id")
+    
+    try:
+        result = await billing.create_invoice(subscription_id)
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to create invoice: {str(e)}")
+
+async def handle_process_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle payment processing."""
+    billing = BillingService()
+    invoice_id = body.get("invoice_id")
+    payment_method = body.get("payment_method")
+    
+    if not invoice_id or not payment_method:
+        return _error_response(400, "Missing invoice_id or payment_method")
+    
+    try:
+        result = await billing.process_payment(invoice_id, payment_method)
+        return _make_response(200, result)
+    except Exception as e:
+        return _error_response(500, f"Failed to process payment: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
-    """Route revenue API requests."""
+    """Route revenue and billing API requests."""
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -231,6 +288,21 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # POST /billing/subscriptions
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "subscriptions" and method == "POST":
+        body_data = await parse_body(body)
+        return await handle_create_subscription(body_data)
+        
+    # POST /billing/invoices
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "invoices" and method == "POST":
+        body_data = await parse_body(body)
+        return await handle_create_invoice(body_data)
+        
+    # POST /billing/payments
+    if len(parts) == 2 and parts[0] == "billing" and parts[1] == "payments" and method == "POST":
+        body_data = await parse_body(body)
+        return await handle_process_payment(body_data)
     
     return _error_response(404, "Not found")
 
