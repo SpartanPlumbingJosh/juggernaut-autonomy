@@ -1,10 +1,15 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking data and handle payments.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/payments/create - Create payment intent
+- POST /revenue/payments/webhook/stripe - Stripe webhook handler
+- POST /revenue/payments/webhook/paypal - PayPal webhook handler
+- POST /revenue/subscriptions/create - Create subscription
+- POST /revenue/subscriptions/cancel - Cancel subscription
 """
 
 import json
@@ -12,6 +17,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.payment_processor import PaymentProcessor
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -220,6 +226,13 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # Parse path
     parts = [p for p in path.split("/") if p]
     
+    # Initialize payment processor
+    payment_processor = PaymentProcessor(
+        stripe_api_key="sk_test_...",  # Should come from config
+        paypal_client_id="...",        # Should come from config
+        paypal_secret="..."            # Should come from config
+    )
+    
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
         return handle_revenue_summary()
@@ -231,6 +244,85 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            amount = float(body_data.get("amount", 0))
+            currency = body_data.get("currency", "usd")
+            metadata = body_data.get("metadata", {})
+            
+            if "payment_method" not in body_data:
+                return _error_response(400, "Payment method required")
+            
+            if body_data["payment_method"] == "stripe":
+                result = await payment_processor.create_stripe_payment_intent(amount, currency, metadata)
+            elif body_data["payment_method"] == "paypal":
+                result = await payment_processor.create_paypal_payment(amount, currency, metadata)
+            else:
+                return _error_response(400, "Invalid payment method")
+            
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Payment processing failed"))
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Payment creation failed: {str(e)}")
+    
+    # POST /revenue/payments/webhook/stripe
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "webhook" and parts[3] == "stripe" and method == "POST":
+        try:
+            sig_header = query_params.get("stripe-signature", [""])[0]
+            status, result = await payment_processor.handle_stripe_webhook(body or "", sig_header, "whsec_...")  # Webhook secret from config
+            return _make_response(status, result)
+        except Exception as e:
+            return _error_response(500, f"Stripe webhook processing failed: {str(e)}")
+    
+    # POST /revenue/payments/webhook/paypal
+    if len(parts) == 4 and parts[0] == "revenue" and parts[1] == "payments" and parts[2] == "webhook" and parts[3] == "paypal" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            status, result = await payment_processor.handle_paypal_webhook(body_data)
+            return _make_response(status, result)
+        except Exception as e:
+            return _error_response(500, f"PayPal webhook processing failed: {str(e)}")
+    
+    # POST /revenue/subscriptions/create
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "create" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            customer_id = body_data.get("customer_id")
+            plan_id = body_data.get("plan_id")
+            metadata = body_data.get("metadata", {})
+            
+            if not customer_id or not plan_id:
+                return _error_response(400, "Customer ID and Plan ID required")
+                
+            result = await payment_processor.create_subscription(customer_id, plan_id, metadata)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Subscription creation failed"))
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Subscription creation failed: {str(e)}")
+    
+    # POST /revenue/subscriptions/cancel
+    if len(parts) == 3 and parts[0] == "revenue" and parts[1] == "subscriptions" and parts[2] == "cancel" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            subscription_id = body_data.get("subscription_id")
+            
+            if not subscription_id:
+                return _error_response(400, "Subscription ID required")
+                
+            result = await payment_processor.cancel_subscription(subscription_id)
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Subscription cancellation failed"))
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Subscription cancellation failed: {str(e)}")
     
     return _error_response(404, "Not found")
 
