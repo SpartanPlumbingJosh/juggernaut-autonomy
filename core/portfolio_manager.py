@@ -280,6 +280,7 @@ def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
 ) -> Dict[str, Any]:
+    """Review running experiments and process subscriptions."""
     """Review running experiments and trigger learning loop for completed ones."""
     try:
         from core.learning_loop import on_experiment_complete
@@ -403,9 +404,15 @@ def review_experiments_stub(
     except Exception:
         pass
 
+    # Process subscription renewals
+    from core.subscription_manager import SubscriptionManager
+    sub_manager = SubscriptionManager(execute_sql, log_action)
+    billing_result = await sub_manager.process_recurring_billing()
+    
     return {
         "success": True,
         "running": running_count,
         "completed": completed_count,
-        "learning_triggered": learning_triggered
+        "learning_triggered": learning_triggered,
+        "subscriptions_renewed": billing_result.get('processed', 0)
     }
