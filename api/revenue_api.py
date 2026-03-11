@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/operations - Current operational metrics
 """
 
 import json
@@ -210,6 +211,40 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_revenue_operations() -> Dict[str, Any]:
+    """Get current operational metrics."""
+    try:
+        result = await query_db("""
+            WITH metrics AS (
+                SELECT 
+                    COUNT(*) FILTER (WHERE status = 'running') as active_experiments,
+                    COUNT(*) FILTER (WHERE status IN ('completed', 'failed')) as completed_experiments,
+                    COUNT(*) FILTER (WHERE status = 'pending') as pending_ideas
+                FROM experiments
+            )
+            SELECT 
+                m.active_experiments,
+                m.completed_experiments,
+                m.pending_ideas,
+                COALESCE(SUM(e.revenue_cents - e.cost_cents), 0) as net_profit_cents,
+                COALESCE(SUM(e.transaction_count), 0) as transactions_today
+            FROM metrics m,
+            LATERAL (
+                SELECT 
+                    SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+                    SUM(CASE WHEN event_type = 'cost' THEN amount_cents ELSE 0 END) as cost_cents,
+                    COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+                FROM revenue_events
+                WHERE recorded_at >= CURRENT_DATE
+            ) e
+            GROUP BY 1, 2, 3
+        """)
+        
+        return _make_response(200, result.get("rows", [{}])[0])
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch operational metrics: {str(e)}")
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -231,6 +266,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+        
+    # GET /revenue/operations
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "operations" and method == "GET":
+        return handle_revenue_operations()
     
     return _error_response(404, "Not found")
 
