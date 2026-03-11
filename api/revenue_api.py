@@ -5,6 +5,7 @@ Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- GET /revenue/sources - Breakdown by payment source
 """
 
 import json
@@ -162,6 +163,33 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_revenue_sources(query_params: Dict[str, Any]) -> Dict[str, Any]:
+    """Get revenue breakdown by payment source."""
+    try:
+        days = int(query_params.get("days", ["30"])[0] if isinstance(query_params.get("days"), list) else query_params.get("days", 30))
+        
+        sql = f"""
+        SELECT 
+            source,
+            SUM(CASE WHEN event_type = 'revenue' THEN amount_cents ELSE 0 END) as revenue_cents,
+            COUNT(*) FILTER (WHERE event_type = 'revenue') as transaction_count
+        FROM revenue_events
+        WHERE recorded_at >= NOW() - INTERVAL '{days} days'
+        GROUP BY source
+        ORDER BY revenue_cents DESC
+        """
+        
+        result = await query_db(sql)
+        sources = result.get("rows", [])
+        
+        return _make_response(200, {
+            "sources": sources,
+            "period_days": days
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Failed to fetch revenue sources: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +259,10 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # GET /revenue/sources
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "sources" and method == "GET":
+        return handle_revenue_sources(query_params)
     
     return _error_response(404, "Not found")
 
