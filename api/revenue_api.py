@@ -12,6 +12,71 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from datetime import datetime
+from functools import wraps
+import time
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Rate limiting decorator
+def rate_limited(max_per_minute: int):
+    min_interval = 60.0 / float(max_per_minute)
+    last_time_called = 0.0
+
+    def decorator(func):
+        @wraps(func)
+        async def rate_limited_function(*args, **kwargs):
+            nonlocal last_time_called
+            elapsed = time.time() - last_time_called
+            wait_time = min_interval - elapsed
+            
+            if wait_time > 0:
+                time.sleep(wait_time)
+            
+            last_time_called = time.time()
+            return await func(*args, **kwargs)
+        return rate_limited_function
+    return decorator
+
+# Transaction logging decorator
+def log_transaction(func):
+    @wraps(func)
+    async def wrapper(*args, **kwargs):
+        start_time = datetime.now()
+        try:
+            result = await func(*args, **kwargs)
+            duration = (datetime.now() - start_time).total_seconds()
+            
+            logger.info(
+                "Transaction completed",
+                extra={
+                    "function": func.__name__,
+                    "status": "success",
+                    "duration": duration,
+                    "timestamp": start_time.isoformat()
+                }
+            )
+            return result
+        except Exception as e:
+            duration = (datetime.now() - start_time).total_seconds()
+            logger.error(
+                "Transaction failed",
+                extra={
+                    "function": func.__name__,
+                    "status": "failed",
+                    "error": str(e),
+                    "duration": duration,
+                    "timestamp": start_time.isoformat()
+                }
+            )
+            raise
+    return wrapper
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
