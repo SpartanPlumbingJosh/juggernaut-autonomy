@@ -33,6 +33,52 @@ def _error_response(status_code: int, message: str) -> Dict[str, Any]:
     return _make_response(status_code, {"error": message})
 
 
+async def handle_autonomous_onboarding(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Handle fully automated customer onboarding."""
+    try:
+        # Validate payload
+        required_fields = ['email', 'product_type', 'initial_budget']
+        if not all(field in payload for field in required_fields):
+            return _error_response(400, "Missing required fields")
+        
+        # Start autonomous onboarding flow
+        onboarding_data = {
+            'customer': payload['email'],
+            'product': payload['product_type'],
+            'initial_budget': float(payload['initial_budget']),
+            'status': 'pending',
+            'created_at': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Store onboarding record
+        await execute_db(
+            f"""
+            INSERT INTO customer_onboarding (
+                id, customer_email, product_type, 
+                initial_budget, status, created_at
+            ) VALUES (
+                gen_random_uuid(),
+                '{payload['email'].replace("'", "''")}',
+                '{payload['product_type'].replace("'", "''")}',
+                {float(payload['initial_budget'])},
+                'pending',
+                NOW()
+            )
+            """
+        )
+        
+        # Trigger autonomous configuration
+        # This would connect to other services to provision resources
+        
+        return _make_response(200, {
+            'success': True,
+            'onboarding_id': onboarding_data['customer'],
+            'next_steps': 'automatic_configuration'
+        })
+        
+    except Exception as e:
+        return _error_response(500, f"Onboarding failed: {str(e)}")
+
 async def handle_revenue_summary() -> Dict[str, Any]:
     """Get MTD/QTD/YTD revenue totals."""
     try:
@@ -231,6 +277,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /autonomous/onboard
+    if len(parts) == 2 and parts[0] == "autonomous" and parts[1] == "onboard" and method == "POST":
+        try:
+            payload = json.loads(body or "{}")
+            return await handle_autonomous_onboarding(payload)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON payload")
     
     return _error_response(404, "Not found")
 
