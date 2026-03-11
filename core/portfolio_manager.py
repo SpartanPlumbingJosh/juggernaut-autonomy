@@ -1,20 +1,50 @@
 from __future__ import annotations
 
 import json
+import time
+import logging
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
+from concurrent.futures import ThreadPoolExecutor
 
 from core.idea_generator import IdeaGenerator
 from core.idea_scorer import IdeaScorer
 from core.experiment_runner import create_experiment_from_idea, link_experiment_to_idea
 
+logger = logging.getLogger(__name__)
 
-def generate_revenue_ideas(
-    execute_sql: Callable[[str], Dict[str, Any]],
-    log_action: Callable[..., Any],
-    context: Optional[Dict[str, Any]] = None,
-    limit: int = 5,
-) -> Dict[str, Any]:
+class PortfolioManager:
+    """Autonomous portfolio management system."""
+    
+    def __init__(self, execute_sql: Callable[[str], Dict[str, Any]], log_action: Callable[..., Any]):
+        self.execute_sql = execute_sql
+        self.log_action = log_action
+        self.executor = ThreadPoolExecutor(max_workers=4)
+        
+    def run_autonomous_cycle(self, interval_minutes: int = 60) -> None:
+        """Run continuous autonomous management cycle."""
+        logger.info("Starting autonomous portfolio management")
+        while True:
+            try:
+                self._run_management_cycle()
+            except Exception as e:
+                logger.error(f"Management cycle failed: {str(e)}", exc_info=True)
+                self.log_action(
+                    "portfolio.error",
+                    f"Management cycle failed: {str(e)}",
+                    level="error",
+                    error_data={"error": str(e)}
+                )
+            
+            logger.info(f"Sleeping for {interval_minutes} minutes")
+            time.sleep(interval_minutes * 60)
+
+
+    def generate_revenue_ideas(
+        self,
+        context: Optional[Dict[str, Any]] = None,
+        limit: int = 5,
+    ) -> Dict[str, Any]:
     context = context or {}
     gen = IdeaGenerator()
     ideas = gen.generate_ideas(context)[: int(limit)]
@@ -115,11 +145,10 @@ def generate_revenue_ideas(
     return {"success": True, "created": created, "attempted": len(ideas)}
 
 
-def score_pending_ideas(
-    execute_sql: Callable[[str], Dict[str, Any]],
-    log_action: Callable[..., Any],
-    limit: int = 20,
-) -> Dict[str, Any]:
+    def score_pending_ideas(
+        self,
+        limit: int = 20,
+    ) -> Dict[str, Any]:
     try:
         res = execute_sql(
             f"""
@@ -181,13 +210,12 @@ def score_pending_ideas(
     return {"success": True, "scored": scored, "considered": len(rows)}
 
 
-def start_experiments_from_top_ideas(
-    execute_sql: Callable[[str], Dict[str, Any]],
-    log_action: Callable[..., Any],
-    max_new: int = 1,
-    min_score: float = 60.0,
-    budget: float = 20.0,
-) -> Dict[str, Any]:
+    def start_experiments_from_top_ideas(
+        self,
+        max_new: int = 1,
+        min_score: float = 60.0,
+        budget: float = 20.0,
+    ) -> Dict[str, Any]:
     try:
         res = execute_sql(
             f"""
@@ -276,10 +304,7 @@ def start_experiments_from_top_ideas(
     return out
 
 
-def review_experiments_stub(
-    execute_sql: Callable[[str], Dict[str, Any]],
-    log_action: Callable[..., Any],
-) -> Dict[str, Any]:
+    def review_experiments_stub(self) -> Dict[str, Any]:
     """Review running experiments and trigger learning loop for completed ones."""
     try:
         from core.learning_loop import on_experiment_complete
@@ -409,3 +434,30 @@ def review_experiments_stub(
         "completed": completed_count,
         "learning_triggered": learning_triggered
     }
+
+    def _run_management_cycle(self) -> None:
+        """Execute one full management cycle."""
+        logger.info("Starting management cycle")
+        
+        # Run tasks in parallel
+        futures = [
+            self.executor.submit(self.generate_revenue_ideas),
+            self.executor.submit(self.score_pending_ideas),
+            self.executor.submit(self.start_experiments_from_top_ideas),
+            self.executor.submit(self.review_experiments_stub)
+        ]
+        
+        # Wait for completion
+        for future in futures:
+            try:
+                future.result()
+            except Exception as e:
+                logger.error(f"Task failed: {str(e)}", exc_info=True)
+                self.log_action(
+                    "portfolio.task_error",
+                    f"Task failed: {str(e)}",
+                    level="error",
+                    error_data={"error": str(e)}
+                )
+        
+        logger.info("Completed management cycle")
