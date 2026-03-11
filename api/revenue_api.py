@@ -1,22 +1,141 @@
 """
 Revenue API - Expose revenue tracking data to Spartan HQ.
 
+API Documentation:
+
+Authentication:
+- All requests require an API key passed in the Authorization header
+- Format: "Bearer <your_api_key>"
+
+Rate Limits:
+- Basic: 100 requests/minute
+- Pro: 1,000 requests/minute 
+- Enterprise: 10,000 requests/minute
+
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
-- GET /revenue/transactions - Transaction history
-- GET /revenue/charts - Revenue over time data
+1. GET /revenue/summary
+   - Returns MTD/QTD/YTD revenue totals
+   - Response format:
+     {
+       "mtd": {
+         "revenue_cents": int,
+         "cost_cents": int,
+         "profit_cents": int,
+         "transaction_count": int
+       },
+       "qtd": {...},
+       "ytd": {...},
+       "all_time": {...}
+     }
+
+2. GET /revenue/transactions
+   - Returns paginated transaction history
+   - Parameters:
+     - limit: Number of results per page (default: 50)
+     - offset: Pagination offset (default: 0)
+     - event_type: Filter by event type (optional)
+   - Response format:
+     {
+       "transactions": [{
+         "id": str,
+         "experiment_id": str,
+         "event_type": str,
+         "amount_cents": int,
+         "currency": str,
+         "source": str,
+         "metadata": dict,
+         "recorded_at": str
+       }],
+       "total": int,
+       "limit": int,
+       "offset": int
+     }
+
+3. GET /revenue/charts
+   - Returns revenue data for visualization
+   - Parameters:
+     - days: Number of days to include (default: 30)
+   - Response format:
+     {
+       "daily": [{
+         "date": str,
+         "revenue_cents": int,
+         "cost_cents": int,
+         "profit_cents": int,
+         "transaction_count": int
+       }],
+       "by_source": [{
+         "source": str,
+         "revenue_cents": int,
+         "transaction_count": int
+       }],
+       "period_days": int
+     }
+
+Error Responses:
+- 401 Unauthorized: Invalid or missing API key
+- 429 Too Many Requests: Rate limit exceeded
+- 500 Internal Server Error: Server error
+- 404 Not Found: Invalid endpoint
 """
 
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
+from functools import wraps
 
 from core.database import query_db
 
+# Rate limiting storage
+RATE_LIMITS = {}
+API_KEYS = {
+    "basic": {"rate_limit": 100, "per": 60},  # 100 requests per minute
+    "pro": {"rate_limit": 1000, "per": 60},  # 1000 requests per minute
+    "enterprise": {"rate_limit": 10000, "per": 60}  # 10,000 requests per minute
+}
 
-def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
+def authenticate_and_limit(f):
+    @wraps(f)
+    async def wrapper(*args, **kwargs):
+        api_key = kwargs.get("headers", {}).get("Authorization", "")
+        if not api_key or not api_key.startswith("Bearer "):
+            return _error_response(401, "Missing or invalid API key")
+        
+        key = api_key[7:]
+        if key not in API_KEYS:
+            return _error_response(401, "Invalid API key")
+        
+        plan = API_KEYS[key]
+        current_time = time.time()
+        request_count = RATE_LIMITS.get(key, {}).get("count", 0)
+        last_reset = RATE_LIMITS.get(key, {}).get("last_reset", current_time)
+        
+        # Reset counter if time window has passed
+        if current_time - last_reset > plan["per"]:
+            RATE_LIMITS[key] = {"count": 1, "last_reset": current_time}
+        else:
+            if request_count >= plan["rate_limit"]:
+                return _error_response(429, "Rate limit exceeded")
+            RATE_LIMITS[key]["count"] += 1
+        
+        return await f(*args, **kwargs)
+    return wrapper
+
+
+async def _track_usage(api_key: str, endpoint: str):
+    """Track API usage for billing."""
+    try:
+        await query_db(f"""
+            INSERT INTO api_usage (api_key, endpoint, timestamp)
+            VALUES ('{api_key}', '{endpoint}', NOW())
+        """)
+    except Exception:
+        pass
+
+def _make_response(status_code: int, body: Dict[str, Any], api_key: str = None, endpoint: str = None) -> Dict[str, Any]:
     """Create standardized API response."""
-    return {
+    response = {
         "statusCode": status_code,
         "headers": {
             "Content-Type": "application/json",
@@ -26,6 +145,11 @@ def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
         },
         "body": json.dumps(body)
     }
+    
+    if api_key and endpoint:
+        _track_usage(api_key, endpoint)
+    
+    return response
 
 
 def _error_response(status_code: int, message: str) -> Dict[str, Any]:
@@ -210,8 +334,9 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
-def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
+def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None, headers: Dict[str, Any] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
+    headers = headers or {}
     
     # Handle CORS preflight
     if method == "OPTIONS":
@@ -222,15 +347,18 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
-        return handle_revenue_summary()
+        api_key = headers.get("Authorization", "")
+        return _make_response(200, handle_revenue_summary(), api_key, "revenue/summary")
     
     # GET /revenue/transactions
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "transactions" and method == "GET":
-        return handle_revenue_transactions(query_params)
+        api_key = headers.get("Authorization", "")
+        return _make_response(200, handle_revenue_transactions(query_params), api_key, "revenue/transactions")
     
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
-        return handle_revenue_charts(query_params)
+        api_key = headers.get("Authorization", "")
+        return _make_response(200, handle_revenue_charts(query_params), api_key, "revenue/charts")
     
     return _error_response(404, "Not found")
 
