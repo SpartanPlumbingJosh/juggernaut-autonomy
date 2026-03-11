@@ -276,6 +276,31 @@ def start_experiments_from_top_ideas(
     return out
 
 
+def monitor_trading_engine(
+    execute_sql: Callable[[str], Dict[str, Any]],
+    log_action: Callable[..., Any],
+) -> Dict[str, Any]:
+    """Monitor trading engine health and performance."""
+    try:
+        from core.trading_engine import TradingEngine
+        engine = TradingEngine(execute_sql, log_action)
+        monitor_data = engine.monitor_engine()
+        
+        if not monitor_data.get("success"):
+            return {"success": False, "error": "Monitoring failed"}
+            
+        # Log monitoring results
+        log_action(
+            "trading.monitor",
+            "Trading engine monitoring completed",
+            level="info",
+            output_data=monitor_data["stats"]
+        )
+        
+        return {"success": True, "stats": monitor_data["stats"]}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
 def review_experiments_stub(
     execute_sql: Callable[[str], Dict[str, Any]],
     log_action: Callable[..., Any],
