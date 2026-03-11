@@ -12,6 +12,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from api.payment_processor import process_payment, log_transaction_to_db
+from api.service_delivery import deliver_service
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -115,7 +117,25 @@ async def handle_revenue_summary() -> Dict[str, Any]:
 
 
 async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str, Any]:
-    """Get transaction history with pagination."""
+    """Get transaction history with pagination and process new payments."""
+    # Check if this is a payment request
+    if query_params.get("action") == "process_payment":
+        payment_method = query_params.get("payment_method")
+        payment_details = json.loads(query_params.get("payment_details", "{}"))
+        amount = float(query_params.get("amount", 0))
+        currency = query_params.get("currency", "USD")
+        
+        # Process payment
+        payment_result = await process_payment(payment_method, payment_details, amount, currency)
+        if payment_result.get("success"):
+            # Log transaction
+            await log_transaction_to_db(query_db, payment_result)
+            # Deliver service
+            await deliver_service(query_db, payment_result["transaction_id"])
+            return _make_response(200, payment_result)
+        return _error_response(400, payment_result.get("error", "Payment failed"))
+
+    # Otherwise handle transaction listing
     try:
         limit = int(query_params.get("limit", ["50"])[0] if isinstance(query_params.get("limit"), list) else query_params.get("limit", 50))
         offset = int(query_params.get("offset", ["0"])[0] if isinstance(query_params.get("offset"), list) else query_params.get("offset", 0))
