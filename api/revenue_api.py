@@ -162,6 +162,8 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+from revenue.strategies import RevenueGenerator
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +233,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/strategy
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "strategy" and method == "POST":
+        try:
+            body_data = json.loads(body or "{}")
+            strategy = body_data.get("strategy")
+            config = body_data.get("config", {})
+            
+            if not strategy:
+                return _error_response(400, "Missing strategy parameter")
+                
+            generator = RevenueGenerator(strategy, config)
+            result = generator.execute_strategy()
+            
+            if not result.get("success"):
+                return _error_response(500, result.get("error", "Strategy execution failed"))
+                
+            return _make_response(200, result)
+        except Exception as e:
+            return _error_response(500, f"Failed to execute strategy: {str(e)}")
     
     return _error_response(404, "Not found")
 
