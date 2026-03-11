@@ -1,17 +1,24 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Handle payments, subscriptions and revenue tracking.
 
 Endpoints:
-- GET /revenue/summary - MTD/QTD/YTD totals
+- POST /revenue/checkout - Create payment checkout session
+- POST /revenue/webhook - Handle payment webhooks
+- GET /revenue/subscriptions - Get user subscriptions
+- GET /revenue/summary - MTD/QTD/YTD totals 
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
 """
 
 import json
+import stripe
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from core.config import STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET
+
+stripe.api_key = STRIPE_SECRET_KEY
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +217,54 @@ async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
         return _error_response(500, f"Failed to fetch chart data: {str(e)}")
 
 
+async def handle_checkout(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create Stripe checkout session."""
+    try:
+        price_id = body.get("price_id")
+        if not price_id:
+            return _error_response(400, "Missing price_id")
+            
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price': price_id,
+                'quantity': 1,
+            }],
+            mode='subscription',
+            success_url=body.get("success_url", "https://example.com/success"),
+            cancel_url=body.get("cancel_url", "https://example.com/cancel"),
+        )
+        
+        return _make_response(200, {"session_id": session.id, "url": session.url})
+    except Exception as e:
+        return _error_response(500, f"Checkout failed: {str(e)}")
+
+async def handle_webhook(body: bytes, signature: str) -> Dict[str, Any]:
+    """Handle Stripe webhook events."""
+    try:
+        event = stripe.Webhook.construct_event(
+            body, signature, STRIPE_WEBHOOK_SECRET
+        )
+        
+        if event['type'] == 'checkout.session.completed':
+            session = event['data']['object']
+            await handle_successful_payment(session)
+            
+        return _make_response(200, {"success": True})
+    except Exception as e:
+        return _error_response(400, f"Webhook error: {str(e)}")
+
+async def handle_successful_payment(session: Dict[str, Any]) -> None:
+    """Process successful payment and activate subscription."""
+    customer_id = session.get("customer")
+    subscription_id = session.get("subscription")
+    
+    # Store in database
+    await query_db(f"""
+        INSERT INTO subscriptions (id, customer_id, status, created_at)
+        VALUES ('{subscription_id}', '{customer_id}', 'active', NOW())
+    """)
+
 def route_request(path: str, method: str, query_params: Dict[str, Any], body: Optional[str] = None) -> Dict[str, Any]:
     """Route revenue API requests."""
     
@@ -219,6 +274,14 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     
     # Parse path
     parts = [p for p in path.split("/") if p]
+    
+    # POST /revenue/checkout
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "checkout" and method == "POST":
+        return handle_checkout(json.loads(body or "{}"))
+    
+    # POST /revenue/webhook
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "webhook" and method == "POST":
+        return handle_webhook(body.encode(), query_params.get("signature", ""))
     
     # GET /revenue/summary
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "summary" and method == "GET":
