@@ -12,6 +12,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
 from core.database import query_db
+from .payment_processor import process_payment, refund_payment, PaymentError, ValidationError
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -135,7 +136,9 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
             source,
             metadata,
             recorded_at,
-            created_at
+            created_at,
+            status,
+            error_message
         FROM revenue_events
         {where_clause}
         ORDER BY recorded_at DESC
@@ -160,6 +163,115 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         
     except Exception as e:
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
+
+async def handle_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a payment transaction."""
+    try:
+        # Process payment through payment processor
+        payment_result = await process_payment(body)
+        
+        # Record the transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at,
+            created_at,
+            status
+        ) VALUES (
+            gen_random_uuid(),
+            'payment',
+            {payment_result["amount_cents"]},
+            '{payment_result["currency"]}',
+            '{payment_result["source"]}',
+            '{json.dumps(payment_result["metadata"])}',
+            NOW(),
+            NOW(),
+            'success'
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, payment_result)
+        
+    except ValidationError as e:
+        return _error_response(400, f"Invalid transaction: {str(e)}")
+    except PaymentError as e:
+        # Record failed transaction
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at,
+            created_at,
+            status,
+            error_message
+        ) VALUES (
+            gen_random_uuid(),
+            'payment',
+            {body.get("amount_cents", 0)},
+            '{body.get("currency", "USD")}',
+            '{body.get("source", "unknown")}',
+            '{json.dumps(body.get("metadata", {}))}',
+            NOW(),
+            NOW(),
+            'failed',
+            '{str(e)}'
+        )
+        """
+        await query_db(sql)
+        return _error_response(500, f"Payment processing failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Unexpected error: {str(e)}")
+
+async def handle_refund(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Process a refund transaction."""
+    try:
+        refund_result = await refund_payment(
+            body["transaction_id"],
+            body["amount_cents"]
+        )
+        
+        # Record the refund
+        sql = f"""
+        INSERT INTO revenue_events (
+            id,
+            event_type,
+            amount_cents,
+            currency,
+            source,
+            metadata,
+            recorded_at,
+            created_at,
+            status
+        ) VALUES (
+            gen_random_uuid(),
+            'refund',
+            {refund_result["amount_cents"]},
+            '{refund_result["original_transaction_id"]}',
+            'refund',
+            '{json.dumps(refund_result)}',
+            NOW(),
+            NOW(),
+            'success'
+        )
+        """
+        await query_db(sql)
+        
+        return _make_response(200, refund_result)
+        
+    except PaymentError as e:
+        return _error_response(500, f"Refund processing failed: {str(e)}")
+    except Exception as e:
+        return _error_response(500, f"Unexpected error: {str(e)}")
 
 
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -231,6 +343,26 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_payment(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
+    
+    # POST /revenue/refunds
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "refunds" and method == "POST":
+        if not body:
+            return _error_response(400, "Missing request body")
+        try:
+            body_data = json.loads(body)
+            return handle_refund(body_data)
+        except json.JSONDecodeError:
+            return _error_response(400, "Invalid JSON")
     
     return _error_response(404, "Not found")
 
