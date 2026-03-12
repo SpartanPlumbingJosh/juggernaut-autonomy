@@ -1,17 +1,22 @@
 """
-Revenue API - Expose revenue tracking data to Spartan HQ.
+Revenue API - Expose revenue tracking and billing data to Spartan HQ.
 
 Endpoints:
 - GET /revenue/summary - MTD/QTD/YTD totals
 - GET /revenue/transactions - Transaction history
 - GET /revenue/charts - Revenue over time data
+- POST /revenue/invoices - Create new invoice
+- POST /revenue/payments - Record payment
+- POST /revenue/subscriptions - Create subscription
+- POST /revenue/recognize - Record revenue recognition
 """
 
 import json
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, List, Optional
 
-from core.database import query_db
+from core.database import query_db, execute_db
+from core.billing_manager import BillingManager
 
 
 def _make_response(status_code: int, body: Dict[str, Any]) -> Dict[str, Any]:
@@ -162,6 +167,60 @@ async def handle_revenue_transactions(query_params: Dict[str, Any]) -> Dict[str,
         return _error_response(500, f"Failed to fetch transactions: {str(e)}")
 
 
+async def handle_create_invoice(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new invoice."""
+    try:
+        manager = BillingManager(execute_db)
+        result = manager.create_invoice(
+            customer_id=body["customer_id"],
+            amount_cents=int(body["amount_cents"]),
+            description=body["description"],
+            due_date=datetime.fromisoformat(body["due_date"])
+        )
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(400, f"Failed to create invoice: {str(e)}")
+
+async def handle_record_payment(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record a payment."""
+    try:
+        manager = BillingManager(execute_db)
+        result = manager.record_payment(
+            invoice_id=body["invoice_id"],
+            amount_cents=int(body["amount_cents"]),
+            payment_method=body["payment_method"],
+            transaction_id=body["transaction_id"]
+        )
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(400, f"Failed to record payment: {str(e)}")
+
+async def handle_create_subscription(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Create a new subscription."""
+    try:
+        manager = BillingManager(execute_db)
+        result = manager.create_subscription(
+            customer_id=body["customer_id"],
+            plan_id=body["plan_id"],
+            start_date=datetime.fromisoformat(body["start_date"]),
+            end_date=datetime.fromisoformat(body["end_date"])
+        )
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(400, f"Failed to create subscription: {str(e)}")
+
+async def handle_recognize_revenue(body: Dict[str, Any]) -> Dict[str, Any]:
+    """Record revenue recognition."""
+    try:
+        manager = BillingManager(execute_db)
+        result = manager.recognize_revenue(
+            invoice_id=body["invoice_id"],
+            recognition_schedule=body["recognition_schedule"]
+        )
+        return _make_response(201, result)
+    except Exception as e:
+        return _error_response(400, f"Failed to recognize revenue: {str(e)}")
+
 async def handle_revenue_charts(query_params: Dict[str, Any]) -> Dict[str, Any]:
     """Get revenue over time for charts."""
     try:
@@ -231,6 +290,22 @@ def route_request(path: str, method: str, query_params: Dict[str, Any], body: Op
     # GET /revenue/charts
     if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "charts" and method == "GET":
         return handle_revenue_charts(query_params)
+    
+    # POST /revenue/invoices
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "invoices" and method == "POST":
+        return handle_create_invoice(json.loads(body or "{}"))
+    
+    # POST /revenue/payments
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "payments" and method == "POST":
+        return handle_record_payment(json.loads(body or "{}"))
+    
+    # POST /revenue/subscriptions
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "subscriptions" and method == "POST":
+        return handle_create_subscription(json.loads(body or "{}"))
+    
+    # POST /revenue/recognize
+    if len(parts) == 2 and parts[0] == "revenue" and parts[1] == "recognize" and method == "POST":
+        return handle_recognize_revenue(json.loads(body or "{}"))
     
     return _error_response(404, "Not found")
 
