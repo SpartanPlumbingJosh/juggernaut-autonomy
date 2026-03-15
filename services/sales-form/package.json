@@ -1,0 +1,13 @@
+{
+  "name": "spartan-sales-form",
+  "version": "1.0.0",
+  "description": "Spartan Plumbing — Sales to Install Form + Material List",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5"
+  }
+}
