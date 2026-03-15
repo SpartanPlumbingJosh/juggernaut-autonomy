@@ -1,0 +1,11 @@
+# Railway Configuration for Spartan Sales Form
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile.salesform"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 100
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
