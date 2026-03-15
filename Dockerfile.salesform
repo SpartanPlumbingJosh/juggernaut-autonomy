@@ -1,0 +1,7 @@
+FROM node:20-alpine
+WORKDIR /app
+COPY services/sales-form/package.json .
+RUN npm install --production
+COPY services/sales-form/ .
+EXPOSE 3000
+CMD ["node", "server.js"]
