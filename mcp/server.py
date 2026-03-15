@@ -1,4 +1,4 @@
-"""
+﻿"""
 JUGGERNAUT MCP Server - Full Stack (v10)
 
 Complete autonomous capabilities:
@@ -114,8 +114,11 @@ GOOGLE_MAPS_API_KEY = os.environ.get('GOOGLE_MAPS_API_KEY', '')
 GOOGLE_SERVICE_ACCOUNT = os.environ.get('GOOGLE_SERVICE_ACCOUNT', '')  # JSON string
 GOOGLE_SHEETS_TOKEN = os.environ.get('GOOGLE_SHEETS_TOKEN', '')
 
-# Neon
-NEON_ENDPOINT = "https://ep-crimson-bar-aetz67os-pooler.c-2.us-east-2.aws.neon.tech/sql"
+# Supabase (spartan_ops)
+SUPABASE_RPC_URL = os.environ.get('SUPABASE_RPC_URL', 'https://kong.thejuggernaut.org/rest/v1/rpc/run_sql')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
+CF_ACCESS_CLIENT_ID = os.environ.get('CF_ACCESS_CLIENT_ID', '')
+CF_ACCESS_CLIENT_SECRET = os.environ.get('CF_ACCESS_CLIENT_SECRET', '')
 
 # Token caches
 _st_token = {"token": None, "expires": 0}
@@ -133,10 +136,26 @@ mcp = Server("juggernaut-mcp")
 # =============================================================================
 
 async def execute_sql(query: str, params: list[Any] | None = None) -> dict[str, Any]:
-    """Execute SQL against Neon database."""
+    """Execute SQL against Supabase database via PostgREST RPC."""
+    headers = {
+        "Content-Type": "application/json",
+        "apikey": SUPABASE_SERVICE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+        "Content-Profile": "spartan_ops",
+        "Accept-Profile": "spartan_ops",
+    }
+    if CF_ACCESS_CLIENT_ID:
+        headers["CF-Access-Client-Id"] = CF_ACCESS_CLIENT_ID
+        headers["CF-Access-Client-Secret"] = CF_ACCESS_CLIENT_SECRET
     async with aiohttp.ClientSession() as session:
-        async with session.post(NEON_ENDPOINT, headers={"Content-Type": "application/json", "Neon-Connection-String": DATABASE_URL}, json={"query": query, "params": params or []}) as resp:
-            return await resp.json()
+        async with session.post(SUPABASE_RPC_URL, headers=headers, json={"query": query}) as resp:
+            data = await resp.json()
+            if isinstance(data, list):
+                fields = [{"name": k, "dataTypeID": 25, "tableID": 0, "columnID": 0, "dataTypeSize": -1, "dataTypeModifier": -1, "format": "text"} for k in (data[0].keys() if data else [])]
+                return {"fields": fields, "rows": data, "command": "SELECT", "rowCount": len(data), "rowAsArray": False}
+            elif isinstance(data, dict) and "command" in data:
+                return data
+            return {"fields": [], "rows": [], "command": "UNKNOWN", "rowCount": 0, "rowAsArray": False, "raw": data}
 
 
 async def github_api(method: str, endpoint: str, data: dict = None) -> dict[str, Any]:
