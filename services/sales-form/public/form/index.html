@@ -458,8 +458,8 @@ async function loadPrefill() {
     }
 
     // Show material list if available
-    if (prefillData.material_list) {
-      renderMaterialList(prefillData.material_list);
+    if (prefillData.material_list_json) {
+      renderMaterialList(prefillData.material_list_json);
     }
 
     updateGauge();
