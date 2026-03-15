@@ -3,637 +3,503 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Spartan — Sales to Install</title>
+<title>Job Tracker — Spartan Plumbing</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-:root{--bg:#0a0a0a;--card:#141414;--border:#2a2a2a;--red:#c41230;--red-dim:#8b0d22;--green:#22c55e;--yellow:#eab308;--orange:#f97316;--text:#e5e5e5;--text-dim:#888;--font:'Segoe UI',system-ui,sans-serif}
-body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.5;padding:16px;max-width:900px;margin:0 auto}
-h1{color:var(--red);font-size:28px;text-align:center;margin:16px 0 4px;letter-spacing:1px;text-transform:uppercase}
-.subtitle{text-align:center;color:var(--text-dim);margin-bottom:24px;font-size:14px}
-.section{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px}
-.section-title{color:var(--red);font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
-.row{display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap}
-.field{flex:1;min-width:200px}
-.field label{display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.3px}
-.field input,.field select,.field textarea{width:100%;background:#1a1a1a;border:1px solid var(--border);border-radius:6px;padding:10px 12px;color:var(--text);font-size:14px;font-family:var(--font)}
-.field input:focus,.field select:focus,.field textarea:focus{outline:none;border-color:var(--red)}
-.field textarea{resize:vertical;min-height:60px}
-.toggle-group{display:flex;gap:8px;margin-top:4px}
-.toggle-btn{flex:1;padding:8px;text-align:center;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;background:#1a1a1a;color:var(--text-dim);transition:all .2s}
-.toggle-btn.active-yes{background:var(--green);color:#000;border-color:var(--green);font-weight:600}
-.toggle-btn.active-no{background:var(--red);color:#fff;border-color:var(--red);font-weight:600}
-.checkbox-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:6px}
-.cb-item{display:flex;align-items:center;gap:8px;padding:6px 10px;background:#1a1a1a;border:1px solid var(--border);border-radius:6px;cursor:pointer;font-size:13px;transition:all .15s}
-.cb-item:hover{border-color:#444}
-.cb-item.checked{border-color:var(--red);background:#1a0a0e}
-.cb-item input{display:none}
-.cb-check{width:18px;height:18px;border:2px solid var(--border);border-radius:4px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .15s}
-.cb-item.checked .cb-check{background:var(--red);border-color:var(--red)}
-.cb-item.checked .cb-check::after{content:'✓';color:#fff;font-size:12px;font-weight:700}
-.gauge-container{background:#1a1a1a;border-radius:8px;padding:16px;margin-top:12px}
-.gauge-bar{height:32px;border-radius:6px;background:linear-gradient(90deg,var(--green) 0%,var(--green) 25%,var(--yellow) 25%,var(--yellow) 50%,var(--orange) 50%,var(--orange) 75%,var(--red) 75%);position:relative;overflow:hidden}
-.gauge-marker{position:absolute;top:-4px;width:4px;height:40px;background:#fff;border-radius:2px;transition:left .3s}
-.gauge-labels{display:flex;justify-content:space-between;margin-top:6px;font-size:11px;color:var(--text-dim)}
-.gauge-value{text-align:center;font-size:24px;font-weight:700;margin-top:8px}
-.btn-submit{display:block;width:100%;padding:16px;background:var(--red);color:#fff;border:none;border-radius:8px;font-size:18px;font-weight:700;cursor:pointer;text-transform:uppercase;letter-spacing:1px;transition:background .2s;margin-top:8px}
-.btn-submit:hover{background:#d91538}
-.btn-submit:disabled{background:#333;color:#666;cursor:not-allowed}
-.material-section{margin-top:24px}
-.mat-category{margin-bottom:16px}
-.mat-category h3{font-size:14px;color:var(--red);text-transform:uppercase;margin-bottom:8px}
-.mat-table{width:100%;border-collapse:collapse}
-.mat-table th{text-align:left;font-size:11px;color:var(--text-dim);padding:6px 8px;border-bottom:1px solid var(--border);text-transform:uppercase}
-.mat-table td{padding:8px;border-bottom:1px solid #1a1a1a;font-size:13px}
-.mat-table tr:hover td{background:#1a1a1a}
-.cost-summary{background:#1a1a1a;border-radius:8px;padding:16px;margin-top:12px}
-.cost-row{display:flex;justify-content:space-between;padding:4px 0;font-size:14px}
-.cost-row.total{font-weight:700;font-size:16px;border-top:1px solid var(--border);padding-top:8px;margin-top:8px}
-.status-banner{padding:12px 16px;border-radius:8px;text-align:center;font-weight:600;margin-bottom:16px}
-.status-confirmed{background:#0a2e1a;border:1px solid var(--green);color:var(--green)}
-.status-pending{background:#2e1a0a;border:1px solid var(--orange);color:var(--orange)}
-.loading{text-align:center;padding:40px;color:var(--text-dim)}
-.none-label{color:var(--text-dim);font-style:italic;padding:8px 0;font-size:13px}
+:root{
+  --bg:#050609;--s1:#0a0c13;--s2:#0e1019;--s3:#131620;--s4:#181c28;--s5:#1e2233;
+  --b1:rgba(255,255,255,.03);--b2:rgba(255,255,255,.06);--b3:rgba(255,255,255,.1);
+  --t1:#f0f2f8;--t2:#7e85a0;--t3:#4a5068;--t4:#2d3248;
+  --fire:#ff2d46;--fire2:#ff5c70;--firebg:rgba(255,45,70,.07);--firebd:rgba(255,45,70,.18);--fireg:rgba(255,45,70,.4);
+  --volt:#2d7aff;--volt2:#5c9aff;--voltbg:rgba(45,122,255,.07);--voltbd:rgba(45,122,255,.18);--voltg:rgba(45,122,255,.35);
+  --mint:#00e87b;--mint2:#44ffaa;--mintbg:rgba(0,232,123,.06);--mintbd:rgba(0,232,123,.16);--mintg:rgba(0,232,123,.3);
+  --grape:#9945ff;--grapebg:rgba(153,69,255,.07);--grapebd:rgba(153,69,255,.16);--grapeg:rgba(153,69,255,.3);
+  --amber:#ffa726;--amberbg:rgba(255,167,38,.06);--amberbd:rgba(255,167,38,.16);
+  --ice:#00d4ff;--icebg:rgba(0,212,255,.05);--icebd:rgba(0,212,255,.14);
+  --hot:#ff4ecd;--hotbg:rgba(255,78,205,.06);--hotbd:rgba(255,78,205,.16);
+  --sans:'Outfit',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;--disp:'Space Grotesk',sans-serif;
+}
+html{font-size:14px;scroll-behavior:smooth}
+body{background:var(--bg);color:var(--t1);font-family:var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:
+  radial-gradient(ellipse 55% 30% at 10% -8%,rgba(255,45,70,.07),transparent 50%),
+  radial-gradient(ellipse 40% 25% at 90% 0%,rgba(45,122,255,.06),transparent 45%),
+  radial-gradient(ellipse 35% 20% at 50% -5%,rgba(153,69,255,.04),transparent 40%),
+  radial-gradient(ellipse 50% 50% at 50% 100%,rgba(0,232,123,.02),transparent 40%);
+  pointer-events:none;z-index:0}
+::selection{background:var(--fire);color:#fff}
+.shell{display:grid;grid-template-columns:56px 1fr 330px;min-height:100vh}
+
+/* RAIL */
+.rail{background:var(--s1);border-right:1px solid var(--b1);position:fixed;top:0;left:0;bottom:0;width:56px;z-index:20;display:flex;flex-direction:column;align-items:center;padding:12px 0}
+.rail-logo{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:900;font-size:17px;color:#fff;margin-bottom:24px;background:var(--fire);position:relative;box-shadow:0 0 24px var(--fireg),0 0 48px rgba(255,45,70,.12)}
+.rail-logo::before{content:'';position:absolute;inset:-3px;border-radius:13px;background:conic-gradient(from 180deg,var(--fire),var(--grape),var(--volt),var(--fire));opacity:.3;filter:blur(6px);z-index:-1;animation:logospin 8s linear infinite}
+@keyframes logospin{to{transform:rotate(360deg)}}
+.ri{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;color:var(--t3);margin-bottom:4px}
+.ri:hover{background:rgba(255,255,255,.03);color:var(--t2)}
+.ri.on{background:var(--firebg);color:var(--fire);box-shadow:inset 0 0 0 1px var(--firebd)}
+.ri svg{width:17px;height:17px}
+.rsep{width:20px;height:1px;background:var(--b1);margin:6px 0}
+
+/* MAIN */
+.main{grid-column:2;padding:18px 22px 80px;position:relative;z-index:1;margin-left:56px}
+
+/* TOP */
+.top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}
+.top-l .crumb{font-family:var(--mono);font-size:10px;color:var(--t4);margin-bottom:5px;letter-spacing:.3px}
+.top-l .crumb a{color:var(--t3);text-decoration:none}.top-l .crumb a:hover{color:var(--fire)}
+.top-l h1{font-family:var(--disp);font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
+.top-l h1 .n{color:var(--fire)}
+.top-l .sub{font-size:11.5px;color:var(--t2);margin-top:4px}
+.pills{display:flex;gap:6px}
+.pill{padding:4px 11px;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;gap:5px}
+.pill::before{content:'';width:5px;height:5px;border-radius:50%}
+.p-sold{background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)}.p-sold::before{background:var(--mint);box-shadow:0 0 6px var(--mintg)}
+.p-inst{background:var(--grapebg);border:1px solid var(--grapebd);color:var(--grape)}.p-inst::before{background:var(--grape);box-shadow:0 0 6px var(--grapeg)}
+.p-svc{background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)}.p-svc::before{background:var(--volt);box-shadow:0 0 6px var(--voltg)}
+
+/* AI SUMMARY */
+.ai-sum{background:linear-gradient(135deg,rgba(0,232,123,.06),rgba(0,212,255,.04));border:1px solid var(--mintbd);border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:16px}
+.ai-ring{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0}
+.ai-ring .pct{font-family:var(--mono);font-size:16px;font-weight:700;position:relative;z-index:1}
+.ai-stats{flex:1;display:flex;gap:16px}
+.ai-s{text-align:center}
+.ai-s .n{font-family:var(--mono);font-size:20px;font-weight:700}
+.ai-s .l{font-size:9px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;margin-top:2px}
+
+/* HERO */
+.hero{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.st{border-radius:12px;padding:16px;position:relative;overflow:hidden}
+.st::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.st .num{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-1px;line-height:1;margin-bottom:4px}
+.st .lbl{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase}
+.st .ai{position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%}
+.ai-ok{background:var(--mint);box-shadow:0 0 6px var(--mintg)}
+.ai-warn{background:var(--amber);box-shadow:0 0 6px rgba(255,167,38,.4)}
+.ai-fail{background:var(--fire);box-shadow:0 0 6px var(--fireg)}
+.ai-wait{background:var(--t3)}
+.sf{background:linear-gradient(150deg,rgba(255,45,70,.14),rgba(255,45,70,.02) 70%);border:1px solid var(--firebd)}.sf::before{background:linear-gradient(90deg,var(--fire),transparent)}.sf .num{color:var(--fire)}.sf .lbl{color:var(--fire2)}
+.sv{background:linear-gradient(150deg,rgba(45,122,255,.14),rgba(45,122,255,.02) 70%);border:1px solid var(--voltbd)}.sv::before{background:linear-gradient(90deg,var(--volt),transparent)}.sv .num{color:var(--volt)}.sv .lbl{color:var(--volt2)}
+.sm{background:linear-gradient(150deg,rgba(0,232,123,.12),rgba(0,232,123,.02) 70%);border:1px solid var(--mintbd)}.sm::before{background:linear-gradient(90deg,var(--mint),transparent)}.sm .num{color:var(--mint)}.sm .lbl{color:var(--mint2)}
+.sg{background:linear-gradient(150deg,rgba(153,69,255,.14),rgba(153,69,255,.02) 70%);border:1px solid var(--grapebd)}.sg::before{background:linear-gradient(90deg,var(--grape),transparent)}.sg .num{color:var(--grape)}.sg .lbl{color:var(--grape)}
+
+/* PIPELINE */
+.pipe-wrap{background:var(--s2);border:1px solid var(--b1);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+.pipe-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.pipe-top h2{font-family:var(--disp);font-size:12px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:var(--t2)}
+.pipe-top .step{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--volt)}
+.pipe{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
+.pn{text-align:center}
+.pb{height:7px;border-radius:4px;margin-bottom:6px;overflow:hidden;position:relative}
+.pb.done{background:var(--mint);box-shadow:0 0 8px var(--mintg)}
+.pb.now{background:linear-gradient(90deg,var(--volt),var(--ice));box-shadow:0 0 12px var(--voltg);animation:ppulse 2s ease-in-out infinite}
+@keyframes ppulse{0%,100%{box-shadow:0 0 8px var(--voltg)}50%{box-shadow:0 0 20px var(--voltg)}}
+.pb.now::after{content:'';position:absolute;top:0;left:0;height:100%;width:35%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent);animation:shim 2s infinite}
+@keyframes shim{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+.pb.w{background:var(--t4)}
+.pt{font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+.pn.done .pt{color:var(--mint)}.pn.now .pt{color:var(--volt)}.pn.w .pt{color:var(--t4)}
+
+/* GRID + CARDS */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.full{margin-bottom:12px}
+.c{background:var(--s2);border:1px solid var(--b1);border-radius:12px;overflow:hidden}
+.ch{padding:12px 16px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center}
+.ch h3{font-family:var(--disp);font-size:10.5px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--t2)}
+.ch .tg{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:6px}
+.cb{padding:14px 16px}
+
+/* VERIFIED ROWS */
+.vr{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid var(--b1);font-size:12px;gap:8px}
+.vr:last-child{border-bottom:none}
+.vr .ai-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.vr .k{flex:1;color:var(--t2)}.vr .v{font-weight:600;text-align:right}
+
+/* CHIPS */
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:7px;font-size:10px;font-weight:700;letter-spacing:.3px}
+.c-ok{background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)}
+.c-fail{background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)}
+.c-warn{background:var(--amberbg);border:1px solid var(--amberbd);color:var(--amber)}
+.c-info{background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)}
+
+/* SCOPE — WHITE TEXT */
+.slbl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.slbl .ai-dot{width:6px;height:6px;border-radius:50%}
+.stxt{background:var(--s3);border-radius:8px;padding:11px 14px;font-size:12.5px;line-height:1.65;color:var(--t1);position:relative;padding-left:16px;margin-bottom:8px}
+.stxt::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:2px}
+.stxt.cv::before{background:var(--volt)}.stxt.cg::before{background:var(--grape)}.stxt.ca::before{background:var(--amber)}.stxt.cm::before{background:var(--mint)}.stxt.cf::before{background:var(--fire)}.stxt.ci::before{background:var(--ice)}
+
+/* MATERIAL TABLE */
+.mt{width:100%;border-collapse:collapse}
+.mt th{text-align:left;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3);padding:7px 8px;border-bottom:1px solid var(--b2)}.mt th:first-child{text-align:center;width:38px}.mt th:last-child{text-align:right}
+.mt td{padding:7px 8px;font-size:11.5px;border-bottom:1px solid var(--b1)}
+.mt td:first-child{font-family:var(--mono);font-weight:600;text-align:center;color:var(--ice)}
+.mt td:nth-child(3){font-family:var(--mono);font-size:10px;color:var(--t3)}
+.mt td:last-child{text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--t2)}
+.mt tr:hover td{background:rgba(255,255,255,.015)}
+.mlbl{font-size:9.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--t3);margin-bottom:6px;margin-top:14px;display:flex;align-items:center;gap:6px}
+.mlbl:first-child{margin-top:0}
+.mlbl .ai-dot{width:6px;height:6px;border-radius:50%}
+
+/* BUDGET */
+.bpct{display:flex;align-items:center;justify-content:space-between;background:var(--s3);border-radius:10px;padding:14px 18px;margin-bottom:14px;border:1px solid var(--b1)}
+.bpct-left{display:flex;align-items:center;gap:12px}
+.bpct-num{font-family:var(--mono);font-size:42px;font-weight:700;letter-spacing:-2px;line-height:1}
+.bpct-info{font-size:11px;color:var(--t2);line-height:1.5}
+.bpct-info strong{color:var(--t1)}
+.bpct-bar{width:120px}
+.bpct-track{height:6px;border-radius:3px;background:rgba(255,255,255,.04);margin-bottom:4px}
+.bpct-fill{height:100%;border-radius:3px}
+.bpct-sub{font-family:var(--mono);font-size:9px;color:var(--t3);text-align:right}
+
+/* ACTIVITY PANEL */
+.panel{grid-column:3;background:var(--s1);border-left:1px solid var(--b1);position:fixed;top:0;right:0;bottom:0;width:330px;display:flex;flex-direction:column;z-index:10}
+.panel-h{padding:16px 18px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center}
+.panel-h h2{font-family:var(--disp);font-size:12px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:var(--t1)}
+.live{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:var(--mint);text-transform:uppercase;letter-spacing:1px}
+.live::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--mint);box-shadow:0 0 8px var(--mintg);animation:blink 1.5s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.panel-f{flex:1;overflow-y:auto;padding:10px 14px}
+.act{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--b1)}.act:last-child{border-bottom:none}
+.act-d{width:9px;height:9px;border-radius:50%;margin-top:4px;flex-shrink:0;position:relative}
+.act-d::after{content:'';position:absolute;top:13px;left:3.5px;width:2px;bottom:-14px;background:var(--b1)}.act:last-child .act-d::after{display:none}
+.act-d.fire{background:var(--fire);box-shadow:0 0 7px var(--fireg)}
+.act-d.volt{background:var(--volt);box-shadow:0 0 7px var(--voltg)}
+.act-d.mint{background:var(--mint);box-shadow:0 0 7px var(--mintg)}
+.act-d.grape{background:var(--grape);box-shadow:0 0 7px var(--grapeg)}
+.act-d.amber{background:var(--amber);box-shadow:0 0 5px rgba(255,167,38,.3)}
+.act-d.ice{background:var(--ice);box-shadow:0 0 5px rgba(0,212,255,.3)}
+.act-d.hot{background:var(--hot);box-shadow:0 0 5px rgba(255,78,205,.3)}
+.act-b{flex:1;min-width:0}
+.act-t{font-size:12px;font-weight:600;line-height:1.3}
+.act-m{font-family:var(--mono);font-size:9.5px;color:var(--t3);margin-top:2px;display:flex;gap:8px}
+.act-box{margin-top:5px;background:var(--s2);border:1px solid var(--b1);border-radius:6px;padding:7px 9px;font-size:11px;color:var(--t2);line-height:1.45}
+
+/* ACTIONS */
+.actions{display:flex;gap:10px;margin-top:18px}
+.btn{padding:12px 24px;border-radius:10px;font-size:13px;font-weight:700;font-family:var(--sans);cursor:pointer;transition:all .15s;border:none}
+.btn-go{background:linear-gradient(135deg,var(--fire),#ff6b3d);color:#fff;box-shadow:0 4px 20px var(--fireg);flex:1;font-size:14px}
+.btn-go:hover{box-shadow:0 6px 28px var(--fireg);transform:translateY(-1px)}
+.btn-go:disabled{opacity:.3;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-2{background:var(--s3);color:var(--t2);border:1px solid var(--b2)}.btn-2:hover{background:var(--s4)}
+
+.loading{display:flex;align-items:center;justify-content:center;height:60vh;color:var(--t3);font-size:14px;font-family:var(--mono)}
 .hidden{display:none}
-@media(max-width:600px){.row{flex-direction:column}.field{min-width:100%}.checkbox-grid{grid-template-columns:1fr}h1{font-size:22px}}
+
+@media(max-width:1100px){.shell{grid-template-columns:56px 1fr}.panel{display:none}}
+@media(max-width:700px){.shell{grid-template-columns:1fr}.rail{display:none}.main{margin-left:0;padding:12px}.hero{grid-template-columns:1fr 1fr}.g2{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
+<div class="shell">
 
-<h1>⚔️ Spartan — Sales to Install</h1>
-<p class="subtitle">Production Handoff Form</p>
+<nav class="rail">
+  <div class="rail-logo">S</div>
+  <div class="ri on" title="Tracker"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg></div>
+  <div class="ri" title="Materials" onclick="window.location.href='/materials?id='+formId"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg></div>
+  <div class="ri" title="Financials"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></div>
+  <div class="rsep"></div>
+  <div class="ri" title="Calls"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72 11.042 11.042 0 00.7 2.81 2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45 11.042 11.042 0 002.81.7A2 2 0 0122 16.92z"/></svg></div>
+  <div class="ri" title="Photos"><svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg></div>
+</nav>
 
-<div id="statusBanner" class="hidden"></div>
-<div id="loadingState" class="loading">Loading form data...</div>
-
-<form id="salesForm" class="hidden" onsubmit="return false">
-
-<!-- CUSTOMER INFO -->
-<div class="section">
-  <div class="section-title">Customer Information</div>
-  <div class="row">
-    <div class="field"><label>Customer Name</label><input type="text" id="customerName" required></div>
-    <div class="field"><label>Job Number</label><input type="text" id="jobNumber" required></div>
-  </div>
-  <div class="row">
-    <div class="field" style="flex:2"><label>Address</label><input type="text" id="address"></div>
-    <div class="field"><label>Phone</label><input type="text" id="phone"></div>
-  </div>
-  <div class="row">
-    <div class="field"><label>Date Sold</label><input type="text" id="dateSold"></div>
-    <div class="field"><label>Sold By</label><input type="text" id="soldBy"></div>
-    <div class="field"><label>Slack Channel ID</label><input type="text" id="slackChannelId"></div>
-  </div>
+<div class="main">
+  <div id="loading" class="loading">Loading job data...</div>
+  <div id="content" class="hidden"></div>
 </div>
 
-<!-- JOB DETAILS -->
-<div class="section">
-  <div class="section-title">Job Details</div>
-  <div class="row">
-    <div class="field"><label>Hours Bid</label><input type="number" id="hoursBid" step="0.5" min="0"></div>
-    <div class="field"><label>Star Package</label>
-      <select id="starPackage"><option value="">Select...</option><option>1 Star</option><option>2 Star</option><option>3 Star</option><option>4 Star</option><option>5 Star</option></select>
-    </div>
-    <div class="field"><label>Sale Amount ($)</label><input type="number" id="saleAmount" step="0.01" min="0"></div>
-  </div>
-  <div class="row">
-    <div class="field"><label>Payment Method</label>
-      <select id="paymentMethod"><option value="">Select...</option><option>Cash</option><option>Check</option><option>Credit Card</option><option>Financing</option></select>
-    </div>
-    <div class="field"><label>Financing Company</label>
-      <select id="financingCompany"><option value="">N/A</option><option>Goodleap</option><option>Synchrony</option><option>Greensky</option><option>Enerbank</option><option>Other</option></select>
-    </div>
-  </div>
-  <!-- Pricing Gauge -->
-  <div class="gauge-container">
-    <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase;margin-bottom:8px">Rate Per Hour</div>
-    <div class="gauge-bar"><div class="gauge-marker" id="gaugeMarker"></div></div>
-    <div class="gauge-labels"><span>CRITICAL</span><span>TIGHT</span><span>GOOD</span><span>EXCELLENT</span></div>
-    <div class="gauge-value" id="gaugeValue">—</div>
-    <div style="text-align:center;font-size:12px;color:var(--text-dim)" id="gaugeStatus"></div>
-  </div>
-</div>
+<aside class="panel">
+  <div class="panel-h"><h2>Activity</h2><div class="live">Live</div></div>
+  <div class="panel-f" id="activityFeed"></div>
+</aside>
 
-<!-- COMPLIANCE -->
-<div class="section">
-  <div class="section-title">Compliance</div>
-  <div class="row">
-    <div class="field"><label>3 Day Right to Cancel Completed?</label>
-      <div class="toggle-group" data-field="threeDayCancel"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>40% Deposit Collected?</label>
-      <div class="toggle-group" data-field="fortyPctDeposit"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-  </div>
-</div>
-
-<!-- SERVICE CATEGORIES -->
-<div class="section">
-  <div class="section-title">Water Heater Services</div>
-  <div class="checkbox-grid" id="cat_waterHeater"></div>
-</div>
-<div class="section">
-  <div class="section-title">Bathroom Installation Services</div>
-  <div class="checkbox-grid" id="cat_bathroom"></div>
-</div>
-<div class="section">
-  <div class="section-title">Kitchen Installation Services</div>
-  <div class="checkbox-grid" id="cat_kitchen"></div>
-</div>
-<div class="section">
-  <div class="section-title">Pipe Installation & Re-piping Services</div>
-  <div class="checkbox-grid" id="cat_pipe"></div>
-</div>
-<div class="section">
-  <div class="section-title">Drain & Sewer Services</div>
-  <div class="checkbox-grid" id="cat_drain"></div>
-</div>
-<div class="section">
-  <div class="section-title">Maintenance & Inspection Services</div>
-  <div class="checkbox-grid" id="cat_maintenance"></div>
-</div>
-<div class="section">
-  <div class="section-title">Water Treatment & Filtration Services</div>
-  <div class="checkbox-grid" id="cat_waterTreatment"></div>
-</div>
-<div class="section">
-  <div class="section-title">Pump & Well System Services</div>
-  <div class="checkbox-grid" id="cat_pumpWell"></div>
-</div>
-<div class="section">
-  <div class="section-title">Valve, Fixture & Specialty Services</div>
-  <div class="checkbox-grid" id="cat_valveFixture"></div>
-</div>
-
-<!-- WORK DETAILS -->
-<div class="section">
-  <div class="section-title">Work Details</div>
-  <div class="row">
-    <div class="field" style="flex:2"><label>What type of work is to be completed?</label><textarea id="workType" rows="2"></textarea></div>
-  </div>
-  <div class="row">
-    <div class="field" style="flex:2"><label>Main equipment or material being installed?</label><textarea id="equipment" rows="2"></textarea></div>
-  </div>
-  <div class="row">
-    <div class="field"><label>Dust containment needed?</label>
-      <div class="toggle-group" data-field="dustContainment"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-  </div>
-  <div class="row">
-    <div class="field" style="flex:2"><label>Promises or expectations given to customer?</label><textarea id="promises" rows="2"></textarea></div>
-  </div>
-  <div class="row">
-    <div class="field"><label>Special tools required?</label><textarea id="specialTools" rows="2"></textarea></div>
-    <div class="field"><label>Encouraging message to crew (optional)</label><textarea id="encouragement" rows="2"></textarea></div>
-  </div>
-</div>
-
-<!-- DOCUMENTATION -->
-<div class="section">
-  <div class="section-title">Documentation</div>
-  <div class="row">
-    <div class="field"><label>Pictures posted to Slack?</label>
-      <div class="toggle-group" data-field="pictures"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>Video posted to Slack?</label>
-      <div class="toggle-group" data-field="video"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-  </div>
-</div>
-
-<!-- RETURN VISIT -->
-<div class="section">
-  <div class="section-title">Return Visit</div>
-  <div class="row">
-    <div class="field"><label>Plan to return to job?</label>
-      <div class="toggle-group" data-field="returnVisit"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>When / at what part?</label><input type="text" id="returnWhen"></div>
-  </div>
-</div>
-
-<!-- EXCAVATION -->
-<div class="section">
-  <div class="section-title">Excavation</div>
-  <div class="row">
-    <div class="field"><label>Are we excavating?</label>
-      <div class="toggle-group" data-field="excavating"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>Inside or Outside?</label>
-      <select id="excInOut"><option value="">N/A</option><option>Inside</option><option>Outside</option><option>Both</option></select>
-    </div>
-  </div>
-  <div class="row">
-    <div class="field"><label>Area marked with white spray paint?</label>
-      <div class="toggle-group" data-field="excMarked"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>Called OUPS?</label>
-      <div class="toggle-group" data-field="oups"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>OUPS Ticket Number</label><input type="text" id="oupsTicket"></div>
-  </div>
-</div>
-
-<!-- SUBCONTRACTOR -->
-<div class="section">
-  <div class="section-title">Subcontractor</div>
-  <div class="row">
-    <div class="field"><label>Need a subcontractor?</label>
-      <div class="toggle-group" data-field="needSub"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-    <div class="field"><label>Subcontractor name</label><input type="text" id="subName"></div>
-    <div class="field"><label>Sub signed agreement?</label>
-      <div class="toggle-group" data-field="subSigned"><div class="toggle-btn" data-val="Yes">Yes</div><div class="toggle-btn" data-val="No">No</div></div>
-    </div>
-  </div>
-</div>
-
-<!-- SUBMIT -->
-<div class="section">
-  <button type="button" class="btn-submit" id="btnSubmit" onclick="submitForm()">✅ Confirm & Submit</button>
-</div>
-
-</form>
-
-<!-- MATERIAL LIST -->
-<div id="materialSection" class="section material-section hidden">
-  <div class="section-title">📦 Material List — Lee Supply</div>
-  <div id="materialContent"></div>
 </div>
 
 <script>
-// === SERVICE CATEGORY OPTIONS ===
-const CATEGORIES = {
-  waterHeater: [
-    'Water Heater Installation - Tank (Gas)','Water Heater Installation - Tank (Electric)',
-    'Water Heater Installation - Tankless (Gas)','Water Heater Installation - Tankless (Electric)',
-    'Water Heater Repair','Water Heater Flush','Expansion Tank Installation',
-    'Recirculation Pump Installation','Water Heater Replacement - Tank (Gas)',
-    'Water Heater Replacement - Tank (Electric)','Water Heater Replacement - Tankless (Gas)',
-    'Water Heater Replacement - Tankless (Electric)'
-  ],
-  bathroom: [
-    'Toilet Installation - Standard','Toilet Installation - Wall-Mounted','Toilet Repair',
-    'Shower Valve Installation','Shower/Tub Installation','Bathtub Faucet Installation',
-    'Bathroom Sink Installation','Bathroom Faucet Installation','Shower Pan Installation',
-    'Bathroom Remodel - Rough In','Bathtub Replacement','Shower Door Installation',
-    'Bidet Installation','ADA Grab Bar Installation'
-  ],
-  kitchen: [
-    'Kitchen Sink Installation - Drop-In','Kitchen Sink Installation - Undermount',
-    'Kitchen Faucet Installation','Garbage Disposal Installation','Dishwasher Installation',
-    'Ice Maker Line Installation','Kitchen Sink Repair','Pot Filler Installation',
-    'Instant Hot Water Dispenser'
-  ],
-  pipe: [
-    'Whole House Repipe - PEX','Whole House Repipe - Copper','Partial Repipe - PEX',
-    'Partial Repipe - Copper','Pipe Repair - PEX','Pipe Repair - Copper','Pipe Repair - PVC',
-    'Pipe Repair - Cast Iron','Gas Line Installation','Gas Line Repair',
-    'Water Line Repair','Water Line Replacement','Pipe Insulation','Freeze Protection'
-  ],
-  drain: [
-    'Drain Cleaning - Kitchen','Drain Cleaning - Bathroom','Drain Cleaning - Shower',
-    'Drain Cleaning - Main Line','Drain Cleaning - Floor Drain','Sewer Line Repair',
-    'Sewer Line Replacement','Sewer Line Lining','Drain Line Replacement',
-    'Camera Inspection','Hydro Jetting','Sump Pump Drain Extension',
-    'Downspout Drain Installation','French Drain Installation'
-  ],
-  maintenance: [
-    'Annual Plumbing Inspection','Gas Line Inspection','Leak Detection Service',
-    'Water Pressure Test','Backflow Testing','Backflow Installation',
-    'Hose Bib Repair/Replace','Shut-Off Valve Replacement','Water Meter Installation'
-  ],
-  waterTreatment: [
-    'Water Softener Installation','Water Softener Repair','Water Filtration System',
-    'Reverse Osmosis Installation','UV Treatment System','Iron Filter Installation',
-    'Whole House Water Filter','Water Conditioner Installation'
-  ],
-  pumpWell: [
-    'Sump Pump Installation','Sump Pump Repair','Ejector Pump Installation',
-    'Ejector Pump Repair','Well Pump Installation','Well Pump Repair',
-    'Booster Pump Installation','Sewage Pump Installation','Battery Backup Sump Pump'
-  ],
-  valveFixture: [
-    'Main Shut-Off Valve Replacement','PRV Installation/Replacement','Mixing Valve Installation',
-    'Outdoor Faucet Installation','Laundry Box Installation','Washing Machine Hookup',
-    'Utility Sink Installation','Floor Drain Installation','Cleanout Installation',
-    'Ball Valve Installation','Gate Valve Replacement'
-  ]
-};
+let formId = new URLSearchParams(location.search).get('id');
 
-// === TOGGLE & CHECKBOX STATE ===
-const toggleState = {};
-const checkboxState = {};
-
-// === INIT CATEGORIES ===
-Object.entries(CATEGORIES).forEach(([key, options]) => {
-  checkboxState[key] = [];
-  const container = document.getElementById('cat_' + key);
-  if (!container) return;
-  options.forEach(opt => {
-    const div = document.createElement('div');
-    div.className = 'cb-item';
-    div.innerHTML = `<input type="checkbox" value="${opt}"><div class="cb-check"></div><span>${opt}</span>`;
-    div.onclick = () => {
-      div.classList.toggle('checked');
-      const idx = checkboxState[key].indexOf(opt);
-      if (idx >= 0) checkboxState[key].splice(idx, 1);
-      else checkboxState[key].push(opt);
-    };
-    container.appendChild(div);
-  });
-});
-
-// === TOGGLE BUTTONS ===
-document.querySelectorAll('.toggle-group').forEach(group => {
-  const field = group.dataset.field;
-  toggleState[field] = '';
-  group.querySelectorAll('.toggle-btn').forEach(btn => {
-    btn.onclick = () => {
-      group.querySelectorAll('.toggle-btn').forEach(b => b.className = 'toggle-btn');
-      toggleState[field] = btn.dataset.val;
-      btn.classList.add(btn.dataset.val === 'Yes' ? 'active-yes' : 'active-no');
-    };
-  });
-});
-
-// === PRICING GAUGE ===
-function updateGauge() {
-  const hours = parseFloat(document.getElementById('hoursBid').value) || 0;
-  const amount = parseFloat(document.getElementById('saleAmount').value) || 0;
-  const marker = document.getElementById('gaugeMarker');
-  const valEl = document.getElementById('gaugeValue');
-  const statusEl = document.getElementById('gaugeStatus');
-  if (!hours || !amount) { valEl.textContent = '—'; statusEl.textContent = ''; marker.style.left = '-10px'; return; }
-  const rate = amount / hours;
-  valEl.textContent = '$' + rate.toFixed(0) + '/hr';
-  // Tiers: <$500 CRITICAL, $500-$750 TIGHT, $750-$1000 GOOD, >$1000 EXCELLENT
-  let pct, status, color;
-  if (rate >= 1000) { pct = 87.5; status = 'EXCELLENT'; color = 'var(--green)'; }
-  else if (rate >= 750) { pct = 62.5 + ((rate - 750) / 250) * 25; status = 'GOOD'; color = 'var(--yellow)'; }
-  else if (rate >= 500) { pct = 37.5 + ((rate - 500) / 250) * 25; status = 'TIGHT'; color = 'var(--orange)'; }
-  else { pct = Math.max(5, (rate / 500) * 37.5); status = 'CRITICAL'; color = 'var(--red)'; }
-  // Gauge goes from CRITICAL (left) to EXCELLENT (right)
-  marker.style.left = pct + '%';
-  statusEl.textContent = status;
-  statusEl.style.color = color;
-  valEl.style.color = color;
-}
-document.getElementById('hoursBid').addEventListener('input', updateGauge);
-document.getElementById('saleAmount').addEventListener('input', updateGauge);
-
-// === PREFILL ===
-let formId = null;
-let prefillData = null;
-
-async function loadPrefill() {
-  const params = new URLSearchParams(window.location.search);
-  formId = params.get('id');
-  if (!formId) {
-    document.getElementById('loadingState').classList.add('hidden');
-    document.getElementById('salesForm').classList.remove('hidden');
-    return;
-  }
+async function load() {
+  if (!formId) { document.getElementById('loading').textContent = 'No job ID. Use ?id=N'; return; }
   try {
-    const resp = await fetch('/api/prefill/' + formId);
-    if (!resp.ok) throw new Error('Not found');
-    prefillData = await resp.json();
-
-    if (prefillData.form_confirmed && prefillData.confirmed_data) {
-      const banner = document.getElementById('statusBanner');
-      banner.className = 'status-banner status-confirmed';
-      banner.textContent = '✅ This form has already been confirmed and submitted.';
-      banner.classList.remove('hidden');
-    }
-
-    const f = prefillData.form_fields || {};
-    setVal('customerName', f.customer_name || prefillData.customer_name);
-    setVal('jobNumber', f.st_job_number || f.job_number || prefillData.job_number);
-    setVal('address', f.address);
-    setVal('phone', f.phone);
-    setVal('dateSold', f.date_sold);
-    setVal('soldBy', f.sold_by || prefillData.sold_by);
-    setVal('slackChannelId', f.slack_channel_id || prefillData.slack_channel_id);
-    setVal('hoursBid', f.hours_bid);
-    setVal('starPackage', f.star_package ? f.star_package + (f.star_package.toString().includes('Star') ? '' : ' Star') : '');
-    setVal('saleAmount', f.package_amount || f.sale_amount || prefillData.sold_amount);
-    setVal('paymentMethod', f.payment_method);
-    setVal('financingCompany', f.financing_company);
-    setVal('workType', f.work_description || f.work_type);
-    setVal('equipment', f.main_equipment_material || f.equipment);
-    setVal('promises', f.promises);
-    setVal('specialTools', f.special_tools);
-    setVal('encouragement', f.message_to_crew || f.encouragement);
-    setVal('returnWhen', f.return_when);
-    setVal('excInOut', f.exc_in_out);
-    setVal('oupsTicket', f.oups_ticket);
-    setVal('subName', f.sub_name || f.subcontractor_name);
-
-    // Toggles
-    setToggle('threeDayCancel', f.three_day_cancel);
-    setToggle('fortyPctDeposit', f.forty_pct_deposit);
-    setToggle('dustContainment', f.dust_containment);
-    setToggle('pictures', f.photos_posted || f.pictures);
-    setToggle('video', f.video_posted || f.video);
-    setToggle('returnVisit', f.return_visit);
-    setToggle('excavating', f.excavating);
-    setToggle('excMarked', f.exc_marked);
-    setToggle('oups', f.oups || f.called_oups);
-    setToggle('needSub', f.subcontractor_needed || f.need_sub);
-    setToggle('subSigned', f.sub_signed);
-
-    // Service categories from job_types array
-    if (f.job_types && Array.isArray(f.job_types)) {
-      f.job_types.forEach(jt => {
-        const name = jt.name || jt;
-        // Try to match against all categories
-        Object.entries(CATEGORIES).forEach(([catKey, opts]) => {
-          opts.forEach(opt => {
-            if (opt.toLowerCase().includes(name.toString().toLowerCase()) ||
-                name.toString().toLowerCase().includes(opt.toLowerCase())) {
-              checkCheckbox(catKey, opt);
-            }
-          });
-        });
-      });
-    }
-
-    // Show material list if available
-    if (prefillData.material_list_json) {
-      renderMaterialList(prefillData.material_list_json);
-    }
-
-    updateGauge();
-  } catch (e) {
-    console.error('Prefill error:', e);
-  }
-  document.getElementById('loadingState').classList.add('hidden');
-  document.getElementById('salesForm').classList.remove('hidden');
+    const d = await (await fetch('/api/prefill/' + formId)).json();
+    if (d.error) throw d.error;
+    render(d);
+  } catch(e) { document.getElementById('loading').textContent = 'Error: ' + e; }
 }
 
-function setVal(id, val) {
-  if (val === undefined || val === null || val === 'N/A') return;
-  const el = document.getElementById(id);
-  if (!el) return;
-  // For select elements, try to match option
-  if (el.tagName === 'SELECT') {
-    const opts = Array.from(el.options);
-    const match = opts.find(o => o.value.toLowerCase() === val.toString().toLowerCase() ||
-                                  o.text.toLowerCase() === val.toString().toLowerCase());
-    if (match) el.value = match.value;
-    else el.value = val;
-  } else {
-    el.value = val;
-  }
+function render(d) {
+  const f = d.form_fields || {};
+  const ml = d.material_list_json || {};
+  const amt = parseFloat(f.package_amount || d.sold_amount || 0);
+  const hrs = parseFloat(f.hours_bid || 0);
+  const rate = hrs > 0 ? amt / hrs : 0;
+  const stars = f.star_package || '—';
+  const starEmoji = typeof stars === 'number' ? '⭐'.repeat(stars) : (parseInt(stars) ? '⭐'.repeat(parseInt(stars)) : stars);
+
+  // Rate tier
+  let rateTier = '—', rateColor = 'var(--t3)';
+  if (rate >= 1000) { rateTier = 'Excellent'; rateColor = 'var(--mint)'; }
+  else if (rate >= 750) { rateTier = 'Good'; rateColor = 'var(--volt)'; }
+  else if (rate >= 500) { rateTier = 'Tight'; rateColor = 'var(--amber)'; }
+  else if (rate > 0) { rateTier = 'Critical'; rateColor = 'var(--fire)'; }
+
+  // Material cost %
+  let matCost = 0;
+  ['parts','consumables'].forEach(c => (ml[c]||[]).forEach(i => matCost += (i.est_cost||0)*(i.qty||1)));
+  const matPct = amt > 0 ? (matCost / amt * 100).toFixed(1) : '—';
+  const matColor = parseFloat(matPct) > 18 ? 'var(--fire)' : 'var(--mint)';
+  const matItems = (ml.parts||[]).length + (ml.tools||[]).length + (ml.consumables||[]).length;
+
+  // Track type pill
+  const track = (d.track_type || '').toLowerCase();
+  const trackPill = track === 'install' ? '<div class="pill p-inst">Install</div>' :
+                    track === 'service' ? '<div class="pill p-svc">Service</div>' : '';
+
+  // Verification checks
+  const checks = [];
+  const addCheck = (name, pass, failMsg) => checks.push({ name, status: pass === true ? 'ok' : pass === false ? 'fail' : pass === 'warn' ? 'warn' : 'wait', failMsg });
+  addCheck('3 Day Cancel', f.three_day_cancel === true);
+  addCheck('40% Deposit', f.forty_pct_deposit === true, 'Not collected');
+  addCheck('Photos in Slack', f.photos_posted === true);
+  addCheck('Video in Slack', f.video_posted === true, 'Not found');
+  addCheck('Excavation Safety', f.excavating && !f.oups ? 'warn' : f.excavating ? true : null, 'OUPS needed');
+  addCheck('Subcontractor Agreement', f.subcontractor_needed ? f.sub_signed : null);
+  addCheck('Customer Name', !!f.customer_name);
+  addCheck('Job Number', !!(f.st_job_number || d.job_number));
+  addCheck('Sale Amount', amt > 0);
+  addCheck('Hours Bid', hrs > 0);
+  addCheck('Payment Method', !!f.payment_method);
+  addCheck('Work Description', !!(f.work_description || f.work_type));
+  addCheck('Equipment Listed', !!(f.main_equipment_material || f.equipment));
+  addCheck('Material List', matItems > 0);
+
+  const passed = checks.filter(c => c.status === 'ok').length;
+  const failed = checks.filter(c => c.status === 'fail').length;
+  const warned = checks.filter(c => c.status === 'warn').length;
+  const pending = checks.filter(c => c.status === 'wait').length;
+  const total = checks.length - pending;
+  const score = total > 0 ? Math.round(passed / total * 100) : 0;
+  const scoreColor = score >= 80 ? 'var(--mint)' : score >= 60 ? 'var(--amber)' : 'var(--fire)';
+
+  // Conic gradient for ring
+  const okDeg = (passed / checks.length) * 360;
+  const failDeg = okDeg + (failed / checks.length) * 360;
+  const warnDeg = failDeg + (warned / checks.length) * 360;
+
+  // Job type name
+  const jobTypeName = (f.job_types && f.job_types[0]) ? (f.job_types[0].name || f.job_types[0]) : (d.business_unit || '');
+
+  const html = `
+    <div class="top">
+      <div class="top-l">
+        <div class="crumb"><a href="#">Jobs</a> / <a href="#">#${d.job_number || ''}</a> / Tracker</div>
+        <h1><span class="n">#${d.job_number || ''}</span> ${d.customer_name || ''}</h1>
+        <div class="sub">${jobTypeName} · ${d.business_unit || ''} · ${f.date_sold || ''}</div>
+      </div>
+      <div class="pills"><div class="pill p-sold">Sold</div>${trackPill}</div>
+    </div>
+
+    <div class="ai-sum">
+      <div class="ai-ring" style="background:conic-gradient(var(--mint) 0deg,var(--mint) ${okDeg}deg,var(--fire) ${okDeg}deg,var(--fire) ${failDeg}deg,var(--amber) ${failDeg}deg,var(--amber) ${warnDeg}deg,var(--t4) ${warnDeg}deg);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 4px));mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 4px))">
+        <span class="pct" style="color:${scoreColor}">${score}%</span>
+      </div>
+      <div class="ai-stats">
+        <div class="ai-s"><div class="n" style="color:var(--mint)">${passed}</div><div class="l" style="color:var(--mint2)">Verified</div></div>
+        <div class="ai-s"><div class="n" style="color:var(--fire)">${failed}</div><div class="l" style="color:var(--fire2)">Failed</div></div>
+        <div class="ai-s"><div class="n" style="color:var(--amber)">${warned}</div><div class="l" style="color:var(--amber)">Warning</div></div>
+        ${pending > 0 ? `<div class="ai-s"><div class="n" style="color:var(--t3)">${pending}</div><div class="l" style="color:var(--t3)">N/A</div></div>` : ''}
+      </div>
+    </div>
+
+    <div class="hero">
+      <div class="st sf"><div class="ai ai-ok"></div><div class="num">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Sale Amount</div></div>
+      <div class="st sv"><div class="ai ${rate >= 500 ? 'ai-ok' : 'ai-warn'}"></div><div class="num" style="color:${rateColor}">$${rate.toFixed(0)}<span style="font-size:13px;opacity:.5">/hr</span></div><div class="lbl">${hrs} Hrs · ${rateTier}</div></div>
+      <div class="st sm"><div class="ai ${parseFloat(matPct) <= 18 ? 'ai-ok' : 'ai-fail'}"></div><div class="num" style="color:${matColor}">${matPct}%</div><div class="lbl">Material Cost</div></div>
+      <div class="st sg"><div class="ai ai-ok"></div><div class="num" style="font-size:${(f.financing_company||'—').length > 8 ? 18 : 22}px">${f.financing_company || f.payment_method || '—'}</div><div class="lbl">${f.payment_method === 'Financing' ? 'Financing' : 'Payment'}</div></div>
+    </div>
+
+    <div class="pipe-wrap">
+      <div class="pipe-top"><h2>Job Lifecycle</h2><div class="step">Stage 1 / 6</div></div>
+      <div class="pipe">
+        ${['Job Sold','Contact','Pre-Install','Day Before','Install','Post-Install'].map((s,i) => {
+          const cls = i === 0 ? 'now' : 'w';
+          return `<div class="pn ${cls}"><div class="pb ${cls}"></div><div class="pt">${s}</div></div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="g2">
+      <div class="c">
+        <div class="ch"><h3>Customer</h3></div>
+        <div class="cb">
+          ${vr('ai-ok', 'Name', d.customer_name || '—')}
+          ${vr('ai-ok', 'Job #', '#' + (d.job_number||''), 'font-family:var(--mono);color:var(--ice)')}
+          ${vr('ai-ok', 'Date Sold', f.date_sold || '—')}
+          ${vr('ai-ok', 'Star Package', starEmoji)}
+          ${vr('ai-ok', 'Payment', f.payment_method || '—')}
+          ${vr('ai-ok', 'Slack', d.slack_channel_id || '—', 'font-family:var(--mono);font-size:10px;color:var(--ice)')}
+        </div>
+      </div>
+      <div class="c">
+        <div class="ch"><h3>Verification Checks</h3></div>
+        <div class="cb">
+          ${checks.filter(c => c.status !== 'wait' || c.name === 'Subcontractor Agreement').slice(0,8).map(c => {
+            const dot = c.status === 'ok' ? 'ai-ok' : c.status === 'fail' ? 'ai-fail' : c.status === 'warn' ? 'ai-warn' : 'ai-wait';
+            const chip = c.status === 'ok' ? '<span class="chip c-ok">✓ Verified</span>' :
+                         c.status === 'fail' ? `<span class="chip c-fail">✗ ${c.failMsg || 'Failed'}</span>` :
+                         c.status === 'warn' ? `<span class="chip c-warn">⚠ ${c.failMsg || 'Check'}</span>` :
+                         '<span class="chip c-info">— N/A</span>';
+            return `<div class="vr"><div class="ai-dot ${dot}"></div><span class="k">${c.name}</span>${chip}</div>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
+
+    <div class="c full">
+      <div class="ch"><h3>Work Scope</h3></div>
+      <div class="cb">
+        <div><div class="slbl"><div class="ai-dot ai-ok"></div>Description</div><div class="stxt cv">${esc(f.work_description || f.work_type || 'Not specified')}</div></div>
+        <div class="g2" style="margin-top:8px;margin-bottom:0">
+          <div><div class="slbl"><div class="ai-dot ai-ok"></div>Equipment</div><div class="stxt cg">${esc(f.main_equipment_material || f.equipment || 'Not specified')}</div></div>
+          <div><div class="slbl"><div class="ai-dot ${f.special_tools ? 'ai-ok' : 'ai-wait'}"></div>Special Tools</div><div class="stxt ca">${esc(f.special_tools || 'None listed')}</div></div>
+        </div>
+        ${f.promises ? `<div style="margin-top:8px"><div class="slbl"><div class="ai-dot ai-warn"></div>Customer Expectations</div><div class="stxt cf">${esc(f.promises)}</div></div>` : ''}
+      </div>
+    </div>
+
+    ${matItems > 0 ? renderMaterials(ml, amt, matCost, matPct, matColor, matItems) : ''}
+
+    <div class="actions">
+      <button class="btn btn-go" id="btnSubmit" onclick="doSubmit()">Confirm & Push to Production</button>
+      <button class="btn btn-2" onclick="window.location.href='/materials?id='+formId">View Materials</button>
+    </div>
+  `;
+
+  document.getElementById('content').innerHTML = html;
+  document.getElementById('content').classList.remove('hidden');
+  document.getElementById('loading').classList.add('hidden');
+
+  // Activity feed
+  renderActivity(d, f, ml, matCost, matPct, passed, failed, warned, pending, score);
 }
 
-function setToggle(field, val) {
-  if (val === undefined || val === null) return;
-  const isYes = val === true || val === 'Yes' || val === 'yes' || val === true;
-  const group = document.querySelector(`.toggle-group[data-field="${field}"]`);
-  if (!group) return;
-  const target = isYes ? 'Yes' : 'No';
-  toggleState[field] = target;
-  group.querySelectorAll('.toggle-btn').forEach(btn => {
-    btn.className = 'toggle-btn';
-    if (btn.dataset.val === target) btn.classList.add(target === 'Yes' ? 'active-yes' : 'active-no');
-  });
+function vr(dot, key, val, style) {
+  return `<div class="vr"><div class="ai-dot ${dot}"></div><span class="k">${key}</span><span class="v"${style ? ` style="${style}"` : ''}>${val}</span></div>`;
 }
 
-function checkCheckbox(catKey, optionText) {
-  const container = document.getElementById('cat_' + catKey);
-  if (!container) return;
-  container.querySelectorAll('.cb-item').forEach(item => {
-    const input = item.querySelector('input');
-    if (input && input.value === optionText && !item.classList.contains('checked')) {
-      item.classList.add('checked');
-      if (!checkboxState[catKey].includes(optionText)) checkboxState[catKey].push(optionText);
-    }
-  });
-}
+function esc(s) { return (s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
-// === MATERIAL LIST RENDER ===
-function renderMaterialList(ml) {
-  const section = document.getElementById('materialSection');
-  const container = document.getElementById('materialContent');
-  section.classList.remove('hidden');
-
-  let html = '';
-  const saleAmount = parseFloat(document.getElementById('saleAmount')?.value) || parseFloat(prefillData?.sold_amount) || 0;
+function renderMaterials(ml, amt, matCost, matPct, matColor, matItems) {
+  const fillW = amt > 0 ? Math.min(100, matCost / (amt * 0.25) * 100) : 0;
+  let h = `
+    <div class="c full">
+      <div class="ch"><h3>Materials — Lee Supply</h3><div class="tg" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">${matItems} items</div></div>
+      <div class="cb">
+        <div class="bpct">
+          <div class="bpct-left">
+            <div class="bpct-num" style="color:${matColor}">${matPct}%</div>
+            <div class="bpct-info"><strong>$${matCost.toFixed(2)}</strong> of $${amt.toLocaleString()}<br>Target: under 18%</div>
+          </div>
+          <div class="bpct-bar">
+            <div class="bpct-track"><div class="bpct-fill" style="width:${fillW}%;background:linear-gradient(90deg,var(--mint),var(--ice));border-radius:3px;box-shadow:0 0 8px var(--mintg)"></div></div>
+            <div class="bpct-sub">18% → $${(amt * 0.18).toFixed(0)}</div>
+          </div>
+        </div>`;
 
   ['parts','tools','consumables'].forEach(cat => {
     const items = ml[cat];
-    if (!items || items.length === 0) return;
-    html += `<div class="mat-category"><h3>${cat === 'parts' ? '🔧 Parts' : cat === 'tools' ? '🛠️ Tools' : '📎 Consumables'}</h3>`;
-    html += '<table class="mat-table"><thead><tr><th>Qty</th><th>Item</th><th>Lee #</th><th>Est. Cost</th></tr></thead><tbody>';
-    items.forEach(item => {
-      const cost = item.est_cost ? '$' + (item.est_cost * (item.qty || 1)).toFixed(2) : '—';
-      html += `<tr><td>${item.qty || 1}</td><td>${item.item || item.name || ''}</td><td>${item.lee_number || '—'}</td><td>${cost}</td></tr>`;
+    if (!items?.length) return;
+    const label = {parts:'Parts',tools:'Tools',consumables:'Consumables'}[cat];
+    h += `<div class="mlbl"><div class="ai-dot ai-ok"></div>${label} — ${items.length}</div>`;
+    h += '<table class="mt"><thead><tr><th>Qty</th><th>Item</th><th>Lee #</th><th>Cost</th></tr></thead><tbody>';
+    items.forEach(i => {
+      const cost = i.est_cost ? '$' + (i.est_cost * (i.qty||1)).toFixed(2) : '—';
+      h += `<tr><td>${i.qty||1}</td><td>${esc(i.item||i.name||'')}</td><td>${i.lee_number||'—'}</td><td>${cost}</td></tr>`;
     });
-    html += '</tbody></table></div>';
+    h += '</tbody></table>';
   });
 
-  // Cost summary
-  let totalCost = 0;
-  ['parts','consumables'].forEach(cat => {
-    (ml[cat] || []).forEach(item => { totalCost += (item.est_cost || 0) * (item.qty || 1); });
-  });
-  const pct = saleAmount > 0 ? ((totalCost / saleAmount) * 100).toFixed(1) : '—';
-  const budgetColor = parseFloat(pct) > 18 ? 'var(--red)' : 'var(--green)';
-
-  html += `<div class="cost-summary">
-    <div class="cost-row"><span>Total Material Cost</span><span>$${totalCost.toFixed(2)}</span></div>
-    <div class="cost-row"><span>Job Revenue</span><span>$${saleAmount.toFixed(2)}</span></div>
-    <div class="cost-row total"><span>Material % of Revenue</span><span style="color:${budgetColor}">${pct}%</span></div>
-    <div style="font-size:11px;color:var(--text-dim);margin-top:8px">Target: under 18%</div>
-  </div>`;
-
-  container.innerHTML = html;
+  h += '</div></div>';
+  return h;
 }
 
-// === COLLECT FORM DATA ===
-function collectFormData() {
-  return {
-    timestamp: new Date().toISOString(),
-    customer_name: document.getElementById('customerName').value,
-    address: document.getElementById('address').value,
-    phone: document.getElementById('phone').value,
-    job_number: document.getElementById('jobNumber').value,
-    slack_channel_id: document.getElementById('slackChannelId').value,
-    date_sold: document.getElementById('dateSold').value,
-    sold_by: document.getElementById('soldBy').value,
-    hours_bid: document.getElementById('hoursBid').value,
-    star_package: document.getElementById('starPackage').value,
-    sale_amount: document.getElementById('saleAmount').value,
-    payment_method: document.getElementById('paymentMethod').value,
-    financing_company: document.getElementById('financingCompany').value,
-    three_day_cancel: toggleState.threeDayCancel,
-    forty_pct_deposit: toggleState.fortyPctDeposit,
-    water_heater: checkboxState.waterHeater.join(', ') || 'NONE',
-    bathroom: checkboxState.bathroom.join(', ') || 'NONE',
-    kitchen: checkboxState.kitchen.join(', ') || 'NONE',
-    pipe: checkboxState.pipe.join(', ') || 'NONE',
-    drain: checkboxState.drain.join(', ') || 'NONE',
-    maintenance: checkboxState.maintenance.join(', ') || 'NONE',
-    water_treatment: checkboxState.waterTreatment.join(', ') || 'NONE',
-    pump_well: checkboxState.pumpWell.join(', ') || 'NONE',
-    valve_fixture: checkboxState.valveFixture.join(', ') || 'NONE',
-    work_type: document.getElementById('workType').value,
-    equipment: document.getElementById('equipment').value,
-    dust_containment: toggleState.dustContainment,
-    promises: document.getElementById('promises').value,
-    special_tools: document.getElementById('specialTools').value,
-    encouragement: document.getElementById('encouragement').value,
-    pictures: toggleState.pictures,
-    video: toggleState.video,
-    return_visit: toggleState.returnVisit,
-    return_when: document.getElementById('returnWhen').value,
-    excavating: toggleState.excavating,
-    exc_in_out: document.getElementById('excInOut').value,
-    exc_marked: toggleState.excMarked,
-    oups: toggleState.oups,
-    oups_ticket: document.getElementById('oupsTicket').value,
-    need_sub: toggleState.needSub,
-    sub_name: document.getElementById('subName').value,
-    sub_signed: toggleState.subSigned
-  };
+function renderActivity(d, f, ml, matCost, matPct, passed, failed, warned, pending, score) {
+  const feed = document.getElementById('activityFeed');
+  const amt = parseFloat(f.package_amount || d.sold_amount || 0);
+  const matItems = (ml.parts||[]).length + (ml.tools||[]).length + (ml.consumables||[]).length;
+  const events = [];
+
+  events.push({ dot:'fire', title:'Job Sold — Estimate accepted', time: f.date_sold || '—', src:'ServiceTitan',
+    detail: `${f.star_package ? f.star_package + (String(f.star_package).includes('Star')?'':'-Star') : ''} · $${amt.toLocaleString()} · ${f.payment_method || ''}${f.financing_company ? ' via ' + f.financing_company : ''}` });
+
+  events.push({ dot:'volt', title:'AI Pre-fill Complete', time: d.generated_at ? new Date(d.generated_at).toLocaleString() : '—', src: d.ai_model || 'Opus 4.6',
+    detail: `Form fields populated from ServiceTitan data + Slack channel history. ${passed + failed + warned}/${passed + failed + warned + pending} checks evaluated.` });
+
+  if (matItems > 0) {
+    events.push({ dot:'mint', title:'Material List Generated', time: d.generated_at ? new Date(d.generated_at).toLocaleString() : '—', src: d.ai_model || 'Opus 4.6',
+      detail: `${matItems} items · Lee Supply catalog · $${matCost.toFixed(2)} · ${matPct}% of revenue` });
+  }
+
+  if (d.slack_channel_id) {
+    events.push({ dot:'ice', title:'Posted to Slack', time: '—', src:'Slack Bot' });
+  }
+
+  if (f.three_day_cancel === true) {
+    events.push({ dot:'grape', title:'3-Day Cancel — Verified ✓', time: '—', src:'AI Verification',
+      detail:'Document requirement met per ServiceTitan data.' });
+  }
+
+  if (f.forty_pct_deposit === false) {
+    events.push({ dot:'fire', title:'⚠ 40% Deposit — Failed Verification', time: '—', src:'AI Check',
+      detail: `No deposit record found. ${f.payment_method === 'Financing' ? 'Financing job — may not apply.' : 'Deposit required before install.'}` });
+  }
+
+  if (f.excavating && !f.oups) {
+    events.push({ dot:'amber', title:'⚠ OUPS — Not Called', time: '—', src:'AI Check',
+      detail:'Excavation flagged but no OUPS ticket. Must call before dig.' });
+  }
+
+  if (f.video_posted === false) {
+    events.push({ dot:'amber', title:'⚠ Video Not Posted', time: '—', src:'AI Check',
+      detail:'No video found in Slack channel.' });
+  }
+
+  events.push({ dot:'hot', title:`AI Verification: ${score}%`, time: 'Latest', src:'System',
+    detail: `${passed} passed · ${failed} failed · ${warned} warnings · ${pending} N/A` });
+
+  events.push({ dot:'volt', title: d.form_confirmed ? 'Production Confirmed ✓' : 'Awaiting Production Review', time: 'Now', src: d.form_confirmed ? 'Confirmed' : 'Waiting' });
+
+  feed.innerHTML = events.map(e => `
+    <div class="act"><div class="act-d ${e.dot}"></div><div class="act-b">
+      <div class="act-t">${e.title}</div>
+      <div class="act-m"><span>${e.time}</span><span>${e.src}</span></div>
+      ${e.detail ? `<div class="act-box">${e.detail}</div>` : ''}
+    </div></div>
+  `).join('');
 }
 
-// === SUBMIT ===
-async function submitForm() {
+async function doSubmit() {
   const btn = document.getElementById('btnSubmit');
-  btn.disabled = true;
-  btn.textContent = 'Submitting...';
-
-  const confirmed_data = collectFormData();
-
+  btn.disabled = true; btn.textContent = 'Submitting...';
   try {
-    const resp = await fetch('/api/submit', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ id: formId, confirmed_data, confirmed_by: 'production' })
-    });
-    const result = await resp.json();
-    if (result.success) {
-      btn.textContent = '✅ Submitted!';
-      btn.style.background = 'var(--green)';
-      const banner = document.getElementById('statusBanner');
-      banner.className = 'status-banner status-confirmed';
-      banner.textContent = '✅ Form confirmed and submitted successfully.';
-      banner.classList.remove('hidden');
-    } else {
-      throw new Error(result.error || 'Submit failed');
-    }
-  } catch (e) {
-    btn.textContent = '❌ Error — Try Again';
-    btn.style.background = 'var(--red)';
+    const r = await (await fetch('/api/submit', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ id: formId, confirmed_data: { confirmed: true, confirmed_at: new Date().toISOString() }, confirmed_by: 'production' })
+    })).json();
+    if (r.success) {
+      btn.textContent = '✓ Pushed to Production';
+      btn.style.background = 'var(--mint)';
+      btn.style.boxShadow = '0 4px 20px var(--mintg)';
+    } else throw 0;
+  } catch(e) {
+    btn.textContent = 'Error — Retry';
     btn.disabled = false;
-    console.error('Submit error:', e);
-    setTimeout(() => { btn.textContent = '✅ Confirm & Submit'; btn.style.background = ''; }, 3000);
+    setTimeout(() => { btn.textContent = 'Confirm & Push to Production'; btn.style.background = ''; btn.style.boxShadow = ''; }, 3000);
   }
 }
 
-// === INIT ===
-loadPrefill();
+load();
 </script>
 </body>
 </html>
