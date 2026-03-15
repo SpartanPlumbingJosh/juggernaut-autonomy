@@ -1,0 +1,521 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+
+// ─── Tab definitions ─────────────────────────────────────────────
+const TABS = [
+  { id: 'intel',      num: 1,  label: 'Customer Intel',   icon: '🔍', status: 'preview' },
+  { id: 'service',    num: 2,  label: 'Service Process',  icon: '🔧', status: 'soon' },
+  { id: 'sales',      num: 3,  label: 'Sales Process',    icon: '💰', status: 'soon' },
+  { id: 'materials',  num: 4,  label: 'Materials',        icon: '📦', status: 'soon' },
+  { id: 'permits',    num: 5,  label: 'Permits',          icon: '📋', status: 'soon' },
+  { id: 'cards',      num: 6,  label: 'Purchasing Cards', icon: '💳', status: 'soon' },
+  { id: 'install',    num: 7,  label: 'Install',          icon: '🏗️', status: 'soon' },
+  { id: 'financials', num: 8,  label: 'Financials',       icon: '📊', status: 'preview' },
+  { id: 'postinstall',num: 9,  label: 'Post-Install',     icon: '✅', status: 'soon' },
+  { id: 'blockers',   num: 10, label: 'Blockers & Risk',  icon: '⚠️', status: 'soon' },
+  { id: 'verify',     num: 11, label: 'Verification',     icon: '🛡️', status: 'preview' },
+  { id: 'calls',      num: 12, label: 'Calls & Scripts',  icon: '📞', status: 'soon' },
+] as const;
+
+type TabId = typeof TABS[number]['id'];
+
+// ─── Types ───────────────────────────────────────────────────────
+interface JobData {
+  deployment: Record<string, any> | null;
+  job: Record<string, any> | null;
+  relatedJobs: Record<string, any>[];
+  verifications: Record<string, any>[];
+  appointments: Record<string, any>[];
+  invoices: Record<string, any>[];
+}
+
+// ─── Component ───────────────────────────────────────────────────
+export default function JTClient({ jobNumber }: { jobNumber: string }) {
+  const [data, setData] = useState<JobData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<TabId>('intel');
+
+  useEffect(() => {
+    fetch(`/api/job/${jobNumber}`)
+      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
+      .then(setData)
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [jobNumber]);
+
+  if (loading) return <LoadingState />;
+  if (error) return <ErrorState error={error} jobNumber={jobNumber} />;
+  if (!data?.job) return <ErrorState error="No data" jobNumber={jobNumber} />;
+
+  const job = data.job;
+  const dep = data.deployment;
+
+  return (
+    <div className="min-h-screen bg-surface-0">
+      {/* ── Header ── */}
+      <header className="border-b border-white/5 bg-surface-1/80 backdrop-blur-sm sticky top-0 z-50">
+        <div className="max-w-[1400px] mx-auto px-4 sm:px-6">
+          {/* Top bar */}
+          <div className="flex items-center justify-between h-14">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-lg bg-spartan-600 flex items-center justify-center font-display font-bold text-sm text-white">
+                JT
+              </div>
+              <div>
+                <h1 className="font-display font-bold text-white text-base leading-tight">
+                  {job.customer_name || 'Unknown Customer'}
+                </h1>
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span className="font-mono">#{jobNumber}</span>
+                  <span className="text-slate-600">·</span>
+                  <span>{job.customer_address || 'No address'}</span>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <StatusBadge status={job.job_status || job.status} />
+              <TrackBadge track={job.track_type || dep?.track_type} />
+              {job.sold_amount && parseFloat(job.sold_amount) > 0 && (
+                <span className="text-sm font-mono text-emerald-400 bg-emerald-400/10 px-2 py-0.5 rounded">
+                  ${parseFloat(job.sold_amount).toLocaleString()}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* Tab bar */}
+          <div className="flex overflow-x-auto no-scrollbar -mb-px">
+            {TABS.map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  activeTab === tab.id
+                    ? 'border-spartan-500 text-white'
+                    : 'border-transparent text-slate-500 hover:text-slate-300 hover:border-slate-700'
+                }`}
+              >
+                <span className="text-sm">{tab.icon}</span>
+                <span className="hidden sm:inline">{tab.label}</span>
+                <span className="sm:hidden">{tab.num}</span>
+                {tab.status === 'soon' && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-slate-600 ml-0.5" />
+                )}
+              </button>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      {/* ── Tab Content ── */}
+      <main className="max-w-[1400px] mx-auto px-4 sm:px-6 py-6">
+        <div className="fade-in">
+          {activeTab === 'intel' && <TabIntel data={data} />}
+          {activeTab === 'financials' && <TabFinancials data={data} />}
+          {activeTab === 'verify' && <TabVerification data={data} />}
+          {!['intel', 'financials', 'verify'].includes(activeTab) && (
+            <TabComingSoon tab={TABS.find(t => t.id === activeTab)!} />
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}
+
+// ─── Status Badges ───────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const colors: Record<string, string> = {
+    Completed: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+    InProgress: 'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    Scheduled: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    Canceled: 'bg-red-500/15 text-red-400 border-red-500/20',
+    Hold: 'bg-orange-500/15 text-orange-400 border-orange-500/20',
+    Pending: 'bg-slate-500/15 text-slate-400 border-slate-500/20',
+  };
+  return (
+    <span className={`text-xs font-medium px-2 py-0.5 rounded border ${colors[status] || colors.Pending}`}>
+      {status || 'Unknown'}
+    </span>
+  );
+}
+
+function TrackBadge({ track }: { track: string }) {
+  if (!track || track === 'unknown') return null;
+  return (
+    <span className={`text-xs font-medium px-2 py-0.5 rounded border ${
+      track === 'install'
+        ? 'bg-purple-500/15 text-purple-400 border-purple-500/20'
+        : 'bg-cyan-500/15 text-cyan-400 border-cyan-500/20'
+    }`}>
+      {track}
+    </span>
+  );
+}
+
+// ─── Tab: Customer Intel ─────────────────────────────────────────
+function TabIntel({ data }: { data: JobData }) {
+  const job = data.job!;
+  const related = data.relatedJobs || [];
+  const appointments = data.appointments || [];
+
+  return (
+    <div className="space-y-6">
+      {/* Job Overview */}
+      <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+        <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 bg-spartan-500 rounded-full" />
+          Job Overview
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <InfoField label="Customer" value={job.customer_name} />
+          <InfoField label="Address" value={job.customer_address} />
+          <InfoField label="Job Type" value={job.job_type_name} />
+          <InfoField label="Business Unit" value={job.business_unit_name} />
+          <InfoField label="Scope" value={job.scope_summary} span={2} />
+          <InfoField label="Created" value={formatDate(job.job_created || job.created_on)} />
+          <InfoField label="Completed" value={formatDate(job.completed_on)} />
+        </div>
+      </section>
+
+      {/* Related Jobs in Channel */}
+      {related.length > 1 && (
+        <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+          <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+            <span className="w-1 h-4 bg-amber-500 rounded-full" />
+            Related Jobs in Channel ({related.length})
+          </h2>
+          <div className="space-y-2">
+            {related.map((rj, i) => (
+              <a
+                key={i}
+                href={`/job/${rj.st_job_number}`}
+                className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                  rj.st_job_number === job.st_job_number
+                    ? 'bg-spartan-600/10 border-spartan-500/30'
+                    : 'bg-surface-2/50 border-white/5 hover:border-white/10'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CategoryBadge category={rj.job_type_category} />
+                  <div>
+                    <span className="text-sm text-white font-mono">#{rj.st_job_number}</span>
+                    <span className="text-xs text-slate-400 ml-2">{rj.job_type_name}</span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {rj.sold_amount && parseFloat(rj.sold_amount) > 0 && (
+                    <span className="text-xs font-mono text-emerald-400">${parseFloat(rj.sold_amount).toLocaleString()}</span>
+                  )}
+                  <StatusBadge status={rj.job_status} />
+                </div>
+              </a>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* Appointments */}
+      {appointments.length > 0 && (
+        <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+          <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+            <span className="w-1 h-4 bg-cyan-500 rounded-full" />
+            Appointments
+          </h2>
+          <div className="space-y-2">
+            {appointments.map((apt, i) => (
+              <div key={i} className="flex items-center justify-between p-3 bg-surface-2/50 rounded-lg border border-white/5">
+                <div className="text-sm text-slate-300">
+                  {formatDate(apt.start_time)}
+                  {apt.end_time && <span className="text-slate-500"> → {formatTime(apt.end_time)}</span>}
+                </div>
+                <StatusBadge status={apt.status} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* AI Briefing Placeholder */}
+      <section className="bg-surface-1 rounded-xl border border-dashed border-white/10 p-5">
+        <h2 className="text-sm font-semibold text-slate-500 mb-2 flex items-center gap-2">
+          <span className="w-1 h-4 bg-slate-600 rounded-full" />
+          AI Pre-Dispatch Briefing
+        </h2>
+        <p className="text-sm text-slate-500">
+          AI-generated customer briefing will appear here — combining prior job history, 
+          Slack channel context, open estimates, equipment age data, and identified opportunities.
+        </p>
+      </section>
+    </div>
+  );
+}
+
+// ─── Tab: Financials ─────────────────────────────────────────────
+function TabFinancials({ data }: { data: JobData }) {
+  const job = data.job!;
+  const invoices = data.invoices || [];
+  const soldAmount = parseFloat(job.sold_amount) || 0;
+
+  return (
+    <div className="space-y-6">
+      {/* Revenue Summary */}
+      <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+        <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 bg-emerald-500 rounded-full" />
+          Revenue
+        </h2>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+          <MetricCard label="Sold Amount" value={`$${soldAmount.toLocaleString()}`} color="emerald" />
+          <MetricCard
+            label="Invoice Total"
+            value={`$${invoices.reduce((s, i) => s + (parseFloat(i.total) || 0), 0).toLocaleString()}`}
+            color="blue"
+          />
+          <MetricCard
+            label="18% Material Budget"
+            value={`$${Math.round(soldAmount * 0.18).toLocaleString()}`}
+            color="amber"
+          />
+        </div>
+      </section>
+
+      {/* Invoices */}
+      {invoices.length > 0 && (
+        <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+          <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+            <span className="w-1 h-4 bg-blue-500 rounded-full" />
+            Invoices ({invoices.length})
+          </h2>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-slate-500 border-b border-white/5">
+                  <th className="text-left py-2 font-medium">Invoice #</th>
+                  <th className="text-left py-2 font-medium">Status</th>
+                  <th className="text-right py-2 font-medium">Subtotal</th>
+                  <th className="text-right py-2 font-medium">Tax</th>
+                  <th className="text-right py-2 font-medium">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoices.map((inv, i) => (
+                  <tr key={i} className="border-b border-white/5 last:border-0">
+                    <td className="py-2 font-mono text-slate-300">{inv.invoice_number || inv.st_invoice_id}</td>
+                    <td className="py-2"><StatusBadge status={inv.status} /></td>
+                    <td className="py-2 text-right font-mono text-slate-300">${parseFloat(inv.subtotal || 0).toLocaleString()}</td>
+                    <td className="py-2 text-right font-mono text-slate-400">${parseFloat(inv.tax || 0).toLocaleString()}</td>
+                    <td className="py-2 text-right font-mono text-white">${parseFloat(inv.total || 0).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {/* Placeholder sections */}
+      <PlaceholderSection title="Deposit Tracking (40% Rule)" description="Payment tracking against 40% deposit requirement for cash/check/credit card jobs." />
+      <PlaceholderSection title="Financing Status" description="Loan application monitoring from financing@spartan-plumbing.com." />
+      <PlaceholderSection title="Money Manager Review" description="Post-close profitability review by Jessie Czikra." />
+    </div>
+  );
+}
+
+// ─── Tab: Verification ───────────────────────────────────────────
+function TabVerification({ data }: { data: JobData }) {
+  const verifications = data.verifications || [];
+
+  // Group by result
+  const passed = verifications.filter(v => v.result === 'pass');
+  const failed = verifications.filter(v => v.result === 'fail');
+  // pending verifications not displayed yet
+  const passRate = verifications.length > 0
+    ? Math.round((passed.length / verifications.length) * 100)
+    : null;
+
+  return (
+    <div className="space-y-6">
+      {/* Summary */}
+      <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+        <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+          <span className="w-1 h-4 bg-spartan-500 rounded-full" />
+          Verification Summary
+        </h2>
+        {verifications.length === 0 ? (
+          <p className="text-sm text-slate-500">No verifications recorded for this job yet.</p>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <MetricCard label="Total Checks" value={String(verifications.length)} color="slate" />
+            <MetricCard label="Passed" value={String(passed.length)} color="emerald" />
+            <MetricCard label="Failed" value={String(failed.length)} color="red" />
+            <MetricCard label="Pass Rate" value={passRate !== null ? `${passRate}%` : '—'} color={
+              passRate !== null ? (passRate >= 80 ? 'emerald' : passRate >= 60 ? 'amber' : 'red') : 'slate'
+            } />
+          </div>
+        )}
+      </section>
+
+      {/* Checks list */}
+      {verifications.length > 0 && (
+        <section className="bg-surface-1 rounded-xl border border-white/5 p-5">
+          <h2 className="text-sm font-semibold text-white mb-4 flex items-center gap-2">
+            <span className="w-1 h-4 bg-cyan-500 rounded-full" />
+            All Checks
+          </h2>
+          <div className="space-y-1">
+            {verifications.map((v, i) => (
+              <div key={i} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-surface-2/50">
+                <div className="flex items-center gap-2">
+                  <span className={`w-2 h-2 rounded-full ${
+                    v.result === 'pass' ? 'bg-emerald-400' : v.result === 'fail' ? 'bg-red-400' : 'bg-slate-500'
+                  }`} />
+                  <span className="text-sm text-slate-300">{v.verification_name}</span>
+                </div>
+                <div className="flex items-center gap-3">
+                  {v.ai_confidence && (
+                    <span className="text-xs font-mono text-slate-500">{Math.round(parseFloat(v.ai_confidence) * 100)}%</span>
+                  )}
+                  <span className={`text-xs font-medium ${
+                    v.result === 'pass' ? 'text-emerald-400' : v.result === 'fail' ? 'text-red-400' : 'text-slate-500'
+                  }`}>
+                    {v.result?.toUpperCase() || 'PENDING'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+// ─── Tab: Coming Soon ────────────────────────────────────────────
+const TAB_DESCRIPTIONS: Record<string, string> = {
+  service: 'Live-scored Rules of the Road checklist — auto-selects the correct playbook (plservice/drservice/plphone/drphone) and tracks every step in real-time as photos, messages, and call recordings arrive.',
+  sales: 'Sales process scoring from Q3 through Post Game Recap, including 3-day right to cancel enforcement on sales over $3K.',
+  materials: 'AI-generated material lists from Lee Supply catalog, tech verification, staging photo verification, and 18% budget tracking.',
+  permits: 'Jurisdiction-aware permit tracking with AI cold-start research for new areas, document upload verification, and expiration monitoring.',
+  cards: 'Full purchasing card lifecycle — Slack trigger detection, response time KPIs (3/5/8 min tiers), receipt quality AI gate, and tools/material split enforcement.',
+  install: 'Day-of execution tracking with 13 checkpoints, code compliance verification, photo coverage analysis, and hard gates on after photos + walkthrough video.',
+  postinstall: 'Happy call SLA tracking (24hr), call scorecards, review monitoring, customer callback frequency, and recall lifecycle management.',
+  blockers: 'Central blocker tracking with automated escalation (30min → 1hr → 2hr), AI-generated timeline risk assessment (Green/Yellow/Red).',
+  calls: '17 preset call scripts with personalization, AI script builder, call recording playback with AI scorecards, and off-platform call detection.',
+};
+
+function TabComingSoon({ tab }: { tab: typeof TABS[number] }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-20">
+      <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-white/5 flex items-center justify-center text-3xl mb-4">
+        {tab.icon}
+      </div>
+      <h2 className="text-lg font-display font-bold text-white mb-2">{tab.label}</h2>
+      <p className="text-sm text-slate-400 max-w-md text-center leading-relaxed">
+        {TAB_DESCRIPTIONS[tab.id] || 'This tab is under development.'}
+      </p>
+      <div className="mt-6 px-3 py-1.5 rounded-full bg-surface-2 border border-white/5 text-xs text-slate-500 font-medium">
+        Coming Soon
+      </div>
+    </div>
+  );
+}
+
+// ─── Shared Components ───────────────────────────────────────────
+function InfoField({ label, value, span }: { label: string; value?: string | null; span?: number }) {
+  return (
+    <div className={span ? `col-span-${span}` : ''}>
+      <dt className="text-xs text-slate-500 mb-0.5">{label}</dt>
+      <dd className="text-sm text-slate-200">{value || '—'}</dd>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, color }: { label: string; value: string; color: string }) {
+  const bgMap: Record<string, string> = {
+    emerald: 'bg-emerald-500/10 border-emerald-500/20',
+    blue: 'bg-blue-500/10 border-blue-500/20',
+    amber: 'bg-amber-500/10 border-amber-500/20',
+    red: 'bg-red-500/10 border-red-500/20',
+    slate: 'bg-slate-500/10 border-slate-500/20',
+  };
+  const textMap: Record<string, string> = {
+    emerald: 'text-emerald-400',
+    blue: 'text-blue-400',
+    amber: 'text-amber-400',
+    red: 'text-red-400',
+    slate: 'text-slate-400',
+  };
+  return (
+    <div className={`rounded-lg border p-3 ${bgMap[color] || bgMap.slate}`}>
+      <div className="text-xs text-slate-400 mb-1">{label}</div>
+      <div className={`text-lg font-display font-bold ${textMap[color] || textMap.slate}`}>{value}</div>
+    </div>
+  );
+}
+
+function CategoryBadge({ category }: { category: string }) {
+  const map: Record<string, { bg: string; label: string }> = {
+    sj: { bg: 'bg-blue-500/20 text-blue-400', label: 'SJ' },
+    to: { bg: 'bg-amber-500/20 text-amber-400', label: 'TO' },
+    prj: { bg: 'bg-purple-500/20 text-purple-400', label: 'PRJ' },
+    recall: { bg: 'bg-red-500/20 text-red-400', label: 'RCL' },
+    suspicious: { bg: 'bg-orange-500/20 text-orange-400', label: '???' },
+  };
+  const c = map[category] || { bg: 'bg-slate-500/20 text-slate-400', label: category };
+  return <span className={`text-xs font-bold px-1.5 py-0.5 rounded ${c.bg}`}>{c.label}</span>;
+}
+
+function PlaceholderSection({ title, description }: { title: string; description: string }) {
+  return (
+    <section className="bg-surface-1 rounded-xl border border-dashed border-white/10 p-5">
+      <h2 className="text-sm font-semibold text-slate-500 mb-2">{title}</h2>
+      <p className="text-sm text-slate-600">{description}</p>
+    </section>
+  );
+}
+
+// ─── States ──────────────────────────────────────────────────────
+function LoadingState() {
+  return (
+    <div className="min-h-screen bg-surface-0 flex items-center justify-center">
+      <div className="text-center">
+        <div className="w-10 h-10 rounded-xl bg-spartan-600 flex items-center justify-center font-display font-bold text-white mx-auto mb-3 animate-pulse">
+          JT
+        </div>
+        <p className="text-sm text-slate-500">Loading job data...</p>
+      </div>
+    </div>
+  );
+}
+
+function ErrorState({ error, jobNumber }: { error: string; jobNumber: string }) {
+  return (
+    <div className="min-h-screen bg-surface-0 flex items-center justify-center">
+      <div className="text-center max-w-md">
+        <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex items-center justify-center text-xl mx-auto mb-3">
+          ⚠️
+        </div>
+        <h1 className="text-lg font-display font-bold text-white mb-2">Job Not Found</h1>
+        <p className="text-sm text-slate-400">
+          Could not load data for job <span className="font-mono text-slate-300">#{jobNumber}</span>.
+        </p>
+        <p className="text-xs text-slate-600 mt-2">{error}</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────
+function formatDate(d: string | null | undefined): string {
+  if (!d) return '—';
+  try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); }
+  catch { return d; }
+}
+
+function formatTime(d: string | null | undefined): string {
+  if (!d) return '—';
+  try { return new Date(d).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }); }
+  catch { return d; }
+}
