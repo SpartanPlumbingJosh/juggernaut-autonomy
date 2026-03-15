@@ -291,6 +291,39 @@ body::before{content:'';position:fixed;inset:0;background:
 const formId = new URLSearchParams(location.search).get('id');
 let DATA = null, FORM = {}, ML = {}, CHECKS = [];
 let activeTab = 'dashboard';
+let INTEL_DATA = null, FINANCIAL_DATA = null, VERIFY_DATA = null, JOB_TYPES = {};
+
+async function loadIntel() {
+  if (INTEL_DATA) return INTEL_DATA;
+  try {
+    INTEL_DATA = await (await fetch('/api/intel/' + formId)).json();
+    return INTEL_DATA;
+  } catch(e) { return null; }
+}
+
+async function loadFinancials() {
+  if (FINANCIAL_DATA) return FINANCIAL_DATA;
+  try {
+    FINANCIAL_DATA = await (await fetch('/api/financials/' + (DATA.st_job_id || ''))).json();
+    return FINANCIAL_DATA;
+  } catch(e) { return null; }
+}
+
+async function loadVerifications() {
+  if (VERIFY_DATA) return VERIFY_DATA;
+  try {
+    VERIFY_DATA = await (await fetch('/api/verifications/' + (DATA.st_job_id || ''))).json();
+    return VERIFY_DATA;
+  } catch(e) { return null; }
+}
+
+async function loadJobTypes() {
+  if (Object.keys(JOB_TYPES).length) return;
+  try {
+    const rows = await (await fetch('/api/jobtypes')).json();
+    (rows || []).forEach(r => JOB_TYPES[r.st_job_type_id] = r.name);
+  } catch(e) {}
+}
 
 // ─── TAB DEFINITIONS ───
 const TABS = [
@@ -418,17 +451,31 @@ function getScore(){
 }
 
 // ─── TAB ROUTER ───
-function renderActiveTab(){
+async function renderActiveTab(){
   const el=document.getElementById('content');
-  const renderers={
-    dashboard:renderDashboard, intel:renderIntel, service:renderServiceProcess,
-    sales:renderSalesProcess, materials:renderMaterials, permits:renderPermits,
-    cards:renderPurchasingCards, install:renderInstall, financials:renderFinancials,
-    postinstall:renderPostInstall, blockers:renderBlockers, verify:renderVerifyDash,
-    calls:renderCalls
-  };
-  el.innerHTML=(renderers[activeTab]||renderDashboard)();
-  el.scrollTop=0;
+  // Tabs that need async data loading
+  if (activeTab === 'intel') {
+    el.innerHTML = '<div class="loading">Loading customer intel...</div>';
+    await loadIntel();
+    await loadJobTypes();
+    el.innerHTML = renderIntel();
+  } else if (activeTab === 'financials') {
+    el.innerHTML = '<div class="loading">Loading financials...</div>';
+    await loadFinancials();
+    el.innerHTML = renderFinancials();
+  } else if (activeTab === 'verify') {
+    el.innerHTML = '<div class="loading">Loading verifications...</div>';
+    await loadVerifications();
+    el.innerHTML = renderVerifyDash();
+  } else {
+    const renderers={
+      dashboard:renderDashboard, service:renderServiceProcess,
+      sales:renderSalesProcess, materials:renderMaterials, permits:renderPermits,
+      cards:renderPurchasingCards, install:renderInstall,
+      postinstall:renderPostInstall, blockers:renderBlockers, calls:renderCalls
+    };
+    el.innerHTML=(renderers[activeTab]||renderDashboard)();
+  }
   document.querySelector('.main').scrollTop=0;
 }
 
@@ -529,55 +576,85 @@ function renderDashboard(){
 function renderIntel(){
   const f=FORM,d=DATA;
   const amt=parseFloat(f.package_amount||d.sold_amount||0);
-  return`
+  const intel = INTEL_DATA || {};
+  const stats = intel.stats || {};
+  const cust = intel.customer || {};
+  const jobs = intel.prior_jobs || [];
+  const ests = intel.open_estimates || [];
+  const addr = cust ? [cust.address_street, cust.address_city, cust.address_state, cust.address_zip].filter(Boolean).join(', ') : '';
+  const sinceDate = stats.customer_since ? new Date(stats.customer_since).toLocaleDateString() : '—';
+
+  let h = `
     <div class="tab-hdr">
       <div class="tab-icon" style="background:var(--icebg);border:1px solid var(--icebd);color:var(--ice)">${svgIcon('search')}</div>
       <div class="tab-info"><div class="tab-title">Customer Intel</div><div class="tab-desc">AI-assembled pre-dispatch briefing — know everything before you knock</div></div>
       <div class="tab-badge" style="background:var(--icebg);border:1px solid var(--icebd);color:var(--ice)">READ-ONLY</div>
-    </div>
-
-    <div class="intel" style="border-color:var(--icebd)">
-      <div class="intel-h"><div class="intel-icon" style="background:var(--voltbg);color:var(--volt)">${svgIcon('flag')}</div><div class="intel-title">Customer Profile</div></div>
-      <div class="intel-body">
-        <strong>${d.customer_name||'Unknown Customer'}</strong><br>
-        Job #${d.job_number||'—'} · ${d.business_unit||'—'}<br>
-        ${f.date_sold?'Sold '+f.date_sold:''} ${f.payment_method?'· '+f.payment_method:''}<br>
-        Sale: <strong style="color:var(--fire)">$${amt.toLocaleString()}</strong>
-        ${f.hours_bid?' · '+f.hours_bid+' hours bid':''}
-        ${f.star_package?' · '+f.star_package+' Star':''}
-      </div>
-    </div>
-
-    <div class="intel" style="border-color:var(--voltbd)">
-      <div class="intel-h"><div class="intel-icon" style="background:var(--mintbg);color:var(--mint)">${svgIcon('wrench')}</div><div class="intel-title">Work Scope & Equipment</div></div>
-      <div class="intel-body">
-        ${f.work_description||f.work_type?`<strong>Description:</strong> ${esc(f.work_description||f.work_type)}<br>`:''}<br>
-        ${f.main_equipment_material||f.equipment?`<strong>Equipment:</strong> ${esc(f.main_equipment_material||f.equipment)}<br>`:''}
-        ${f.special_tools?`<strong>Special Tools:</strong> ${esc(f.special_tools)}<br>`:''}
-        ${f.promises?`<br><strong style="color:var(--amber)">⚠ Customer Expectations:</strong> ${esc(f.promises)}`:''}
-      </div>
-    </div>
-
-    <div class="intel" style="border-color:var(--mintbd)">
-      <div class="intel-h"><div class="intel-icon" style="background:var(--grapebg);color:var(--grape)">${svgIcon('clipboard')}</div><div class="intel-title">AI Analysis</div></div>
-      <div class="intel-body">
-        <div style="padding:16px;background:var(--s3);border-radius:8px;border:1px solid var(--b2);color:var(--t2);text-align:center">
-          ${svgIcon('search')}<br><br>
-          <strong style="color:var(--t1)">Full customer history analysis will be generated here</strong><br>
-          Previous jobs, open estimates, Slack channel history, recall records, equipment age map, and AI-identified opportunities.<br><br>
-          <span style="font-family:var(--mono);font-size:10px;color:var(--ice)">Powered by Sonnet 4.6 · Auto-generated at dispatch</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="g2">
-      <div class="c"><div class="ch"><h3>Previous Jobs</h3><div class="tg" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">Loading...</div></div>
-        <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--voltbg);color:var(--volt)">${svgIcon('flag')}</div><div class="empty-title">Job history loads at dispatch</div><div class="empty-desc">All prior jobs at this location will appear here with dates, amounts, techs, and outcomes.</div></div></div>
-      </div>
-      <div class="c"><div class="ch"><h3>Open Estimates</h3></div>
-        <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--amberbg);color:var(--amber)">${svgIcon('dollar')}</div><div class="empty-title">Unsold estimates</div><div class="empty-desc">Any open estimates for this customer with dollar amounts and relevance flags.</div></div></div>
-      </div>
     </div>`;
+
+  // Hero stats
+  h += `<div class="hero" style="grid-template-columns:repeat(5,1fr)">
+    <div class="st sf"><div class="num">${stats.total_jobs||0}</div><div class="lbl">Total Jobs</div></div>
+    <div class="st sv"><div class="num">${stats.install_jobs||0}</div><div class="lbl">Installs</div></div>
+    <div class="st sm"><div class="num">$${(stats.total_invoiced||0).toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Lifetime Invoiced</div></div>
+    <div class="st sg"><div class="num">${stats.open_estimates||0}</div><div class="lbl">Open Estimates</div></div>
+    <div class="st" style="background:var(--amberbg);border:1px solid var(--amberbd)"><div class="num" style="color:var(--amber)">${stats.recall_count||0}</div><div class="lbl" style="color:var(--amber)">Recalls</div></div>
+  </div>`;
+
+  // Customer profile
+  h += `<div class="intel" style="border-color:var(--icebd)">
+    <div class="intel-h"><div class="intel-icon" style="background:var(--voltbg);color:var(--volt)">${svgIcon('flag')}</div><div class="intel-title">Customer Profile</div></div>
+    <div class="intel-body">
+      <strong>${d.customer_name||'Unknown Customer'}</strong><br>
+      ${addr ? addr + '<br>' : ''}
+      Customer since: <strong>${sinceDate}</strong> · ${stats.invoice_count||0} invoices<br>
+      Today's job: <strong style="color:var(--fire)">$${amt.toLocaleString()}</strong> · ${d.business_unit||''} · ${f.payment_method||''}
+    </div>
+  </div>`;
+
+  // Work scope
+  h += `<div class="intel" style="border-color:var(--voltbd)">
+    <div class="intel-h"><div class="intel-icon" style="background:var(--mintbg);color:var(--mint)">${svgIcon('wrench')}</div><div class="intel-title">Current Work Scope</div></div>
+    <div class="intel-body">
+      ${f.work_description||f.work_type?`<strong>Description:</strong> ${esc(f.work_description||f.work_type)}<br>`:''}
+      ${f.main_equipment_material||f.equipment?`<strong>Equipment:</strong> ${esc(f.main_equipment_material||f.equipment)}<br>`:''}
+      ${f.special_tools?`<strong>Special Tools:</strong> ${esc(f.special_tools)}<br>`:''}
+      ${f.promises?`<br><strong style="color:var(--amber)">⚠ Promises Made:</strong> ${esc(f.promises)}`:''}
+    </div>
+  </div>`;
+
+  // Prior Jobs table
+  h += `<div class="c full"><div class="ch"><h3>Previous Jobs</h3><div class="tg" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">${jobs.length} jobs</div></div>`;
+  if (jobs.length) {
+    h += '<div class="cb" style="padding:0"><table class="mt"><thead><tr><th>Job #</th><th>Type</th><th>Status</th><th>Amount</th><th>Date</th></tr></thead><tbody>';
+    jobs.forEach(j => {
+      const jt = JOB_TYPES[j.job_type] || j.track_type || '—';
+      const dt = j.created_at ? new Date(j.created_at).toLocaleDateString() : '—';
+      const amtStr = j.sold_amount ? '$' + parseFloat(j.sold_amount).toLocaleString() : '—';
+      const isThisJob = j.st_job_id === d.st_job_id;
+      h += `<tr${isThisJob?' style="background:var(--voltbg)"':''}>
+        <td>${j.st_job_number||'—'}</td>
+        <td>${esc(jt)}</td>
+        <td><span class="chip ${j.status==='completed'?'c-ok':'c-info'}">${j.status||'—'}</span></td>
+        <td>${amtStr}</td><td>${dt}</td></tr>`;
+    });
+    h += '</tbody></table></div>';
+  } else {
+    h += '<div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--voltbg);color:var(--volt)">' + svgIcon('flag') + '</div><div class="empty-title">No prior jobs found</div><div class="empty-desc">New customer or name mismatch.</div></div></div>';
+  }
+  h += '</div>';
+
+  // Open Estimates
+  if (ests.length) {
+    h += `<div class="c full"><div class="ch"><h3>Open Estimates</h3><div class="tg" style="background:var(--amberbg);border:1px solid var(--amberbd);color:var(--amber)">${ests.length} open</div></div>
+      <div class="cb" style="padding:0"><table class="mt"><thead><tr><th>Estimate</th><th>Status</th><th>Amount</th><th>Date</th></tr></thead><tbody>`;
+    ests.forEach(e => {
+      const dt = e.created_on ? new Date(e.created_on).toLocaleDateString() : '—';
+      h += `<tr><td>${esc(e.estimate_name||e.st_estimate_id||'—')}</td><td><span class="chip c-warn">${e.status_name||'—'}</span></td><td>$${(parseFloat(e.total)||0).toLocaleString()}</td><td>${dt}</td></tr>`;
+    });
+    h += '</tbody></table></div></div>';
+  }
+
+  return h;
 }
 
 // ═══════════════════════════════════════════════
@@ -764,31 +841,65 @@ function renderFinancials(){
   const f=FORM,d=DATA;
   const amt=parseFloat(f.package_amount||d.sold_amount||0);
   const deposit40=amt*0.4;
-  return`
+  const fin = FINANCIAL_DATA || {};
+  const invoices = fin.invoices || [];
+  const payments = fin.payments || [];
+  const totals = fin.totals || { invoiced: 0, paid: 0, outstanding: 0 };
+
+  let h = `
     <div class="tab-hdr">
       <div class="tab-icon" style="background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)">${svgIcon('chart')}</div>
       <div class="tab-info"><div class="tab-title">Financials</div><div class="tab-desc">Deposits · Financing · Material costs · Profitability</div></div>
     </div>
     <div class="hero">
       <div class="st sf"><div class="ai ai-ok"></div><div class="num">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Total Sale</div></div>
-      <div class="st sv"><div class="ai ${f.forty_pct_deposit?'ai-ok':'ai-fail'}"></div><div class="num" style="color:${f.forty_pct_deposit?'var(--volt)':'var(--fire)'}">$${deposit40.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">40% Deposit Due</div></div>
-      <div class="st sm"><div class="ai ai-wait"></div><div class="num">$0</div><div class="lbl">Material Spend</div></div>
+      <div class="st sv"><div class="ai ${f.forty_pct_deposit?'ai-ok':'ai-fail'}"></div><div class="num" style="color:${totals.paid>=deposit40?'var(--mint)':'var(--fire)'}">$${totals.paid.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Paid</div></div>
+      <div class="st sm"><div class="ai ${totals.outstanding<=0?'ai-ok':'ai-warn'}"></div><div class="num">$${totals.outstanding.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Outstanding</div></div>
       <div class="st sg"><div class="ai ai-ok"></div><div class="num" style="font-size:18px">${f.financing_company||f.payment_method||'—'}</div><div class="lbl">Payment Method</div></div>
-    </div>
-    <div class="g2">
-      <div class="c"><div class="ch"><h3>Deposit Tracking</h3></div><div class="cb">
-        ${vr(f.forty_pct_deposit?'ai-ok':'ai-fail','40% Required','$'+deposit40.toFixed(0))}
-        ${vr('ai-wait','Collected','Pending verification')}
-        ${vr('ai-wait','Receipt Photo','Not yet posted')}
-      </div></div>
-      <div class="c"><div class="ch"><h3>Financing Status</h3></div><div class="cb">
-        ${f.payment_method==='Financing'?`
-          ${vr('ai-ok','Lender',f.financing_company||'—')}
-          ${vr('ai-wait','Application','Monitoring...')}
-          ${vr('ai-wait','Funded','Pending')}
-        `:`<div style="color:var(--t3);font-size:12px;padding:8px 0">Not a financing job — ${f.payment_method||'payment method TBD'}</div>`}
-      </div></div>
     </div>`;
+
+  // Invoices
+  h += `<div class="c full"><div class="ch"><h3>Invoices</h3><div class="tg" style="background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)">${invoices.length}</div></div>`;
+  if (invoices.length) {
+    h += '<div class="cb" style="padding:0"><table class="mt"><thead><tr><th>Invoice</th><th>Date</th><th>Subtotal</th><th>Tax</th><th>Total</th><th>Balance</th></tr></thead><tbody>';
+    invoices.forEach(i => {
+      const dt = i.invoice_date ? new Date(i.invoice_date).toLocaleDateString() : '—';
+      h += `<tr><td>${i.st_invoice_id||'—'}</td><td>${dt}</td><td>$${(parseFloat(i.sub_total)||0).toFixed(2)}</td><td>$${(parseFloat(i.sales_tax)||0).toFixed(2)}</td><td>$${(parseFloat(i.total)||0).toFixed(2)}</td><td style="color:${parseFloat(i.balance)>0?'var(--fire)':'var(--mint)'}">$${(parseFloat(i.balance)||0).toFixed(2)}</td></tr>`;
+    });
+    h += '</tbody></table></div>';
+  } else {
+    h += '<div class="cb" style="color:var(--t3);font-size:12px">No invoices found for this job.</div>';
+  }
+  h += '</div>';
+
+  // Payments
+  h += `<div class="c full"><div class="ch"><h3>Payments</h3><div class="tg" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">${payments.length}</div></div>`;
+  if (payments.length) {
+    h += '<div class="cb" style="padding:0"><table class="mt"><thead><tr><th>Payment</th><th>Type</th><th>Amount</th><th>Date</th><th>Memo</th></tr></thead><tbody>';
+    payments.forEach(p => {
+      const dt = p.payment_date ? new Date(p.payment_date).toLocaleDateString() : '—';
+      h += `<tr><td>${p.st_payment_id||'—'}</td><td>${esc(p.payment_type||'—')}</td><td style="color:var(--mint)">$${(parseFloat(p.total)||0).toFixed(2)}</td><td>${dt}</td><td>${esc(p.memo||'—')}</td></tr>`;
+    });
+    h += '</tbody></table></div>';
+  } else {
+    h += '<div class="cb" style="color:var(--t3);font-size:12px">No payments linked to this job yet.</div>';
+  }
+  h += '</div>';
+
+  // Deposit and Financing sections
+  h += `<div class="g2">
+    <div class="c"><div class="ch"><h3>Deposit Tracking</h3></div><div class="cb">
+      ${vr(f.forty_pct_deposit?'ai-ok':'ai-fail','40% Required','$'+deposit40.toFixed(0))}
+      ${vr(totals.paid>=deposit40?'ai-ok':'ai-fail','Collected','$'+totals.paid.toFixed(0),totals.paid>=deposit40?'color:var(--mint)':'color:var(--fire)')}
+    </div></div>
+    <div class="c"><div class="ch"><h3>Financing Status</h3></div><div class="cb">
+      ${f.payment_method==='Financing'?
+        vr('ai-ok','Lender',f.financing_company||'—')+vr('ai-wait','Application','Monitoring...')+vr('ai-wait','Funded','Pending')
+        :'<div style="color:var(--t3);font-size:12px;padding:8px 0">Not a financing job — '+(f.payment_method||'TBD')+'</div>'}
+    </div></div>
+  </div>`;
+
+  return h;
 }
 
 // ═══════════════════════════════════════════════
