@@ -48,6 +48,9 @@ function supabaseQuery(sql) {
   });
 }
 
+// Safe string escape for SQL
+function esc(s) { return (s || '').replace(/'/g, "''"); }
+
 app.use('/form', express.static(path.join(__dirname, 'public', 'form')));
 app.use('/materials', express.static(path.join(__dirname, 'public', 'materials')));
 
@@ -55,8 +58,12 @@ app.get('/health', (req, res) => res.json({ status: 'ok', service: 'spartan-sale
 
 app.get('/', (req, res) => {
   if (req.query.id) return res.redirect(`/form?id=${req.query.id}`);
-  res.json({ service: 'Spartan Sales & Materials', routes: ['/form?id=N', '/materials?id=N'] });
+  res.json({ service: 'Spartan Job Tracker', routes: ['/form?id=N', '/materials?id=N'] });
 });
+
+// ═══════════════════════════════════════
+// ORIGINAL ENDPOINTS (preserved)
+// ═══════════════════════════════════════
 
 app.get('/api/prefill/:id', async (req, res) => {
   try {
@@ -115,7 +122,184 @@ app.get('/api/catalog/search', async (req, res) => {
   } catch (err) { console.error('Search error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// ═══════════════════════════════════════
+// NEW: CUSTOMER INTEL API
+// ═══════════════════════════════════════
+
+app.get('/api/intel/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+
+    // Get the form record to find customer name and st_job_id
+    const form = await supabaseQuery(
+      `SELECT st_job_id, customer_name, job_number, sold_amount, business_unit, slack_channel_id
+       FROM spartan_ops.auto_sales_forms WHERE id = ${id}`
+    );
+    if (!form || !form.length) return res.status(404).json({ error: 'Form not found' });
+    const f = form[0];
+    const custName = esc(f.customer_name || '');
+
+    // Parallel queries for customer data
+    const [priorJobs, estimates, invoiceTotals, customerInfo] = await Promise.all([
+      // All jobs for this customer
+      supabaseQuery(
+        `SELECT st_job_id, st_job_number, customer_address, status, sold_amount, track_type,
+                job_type, scope_summary, selling_tech_name, service_tech_name,
+                created_at::text, closed_at::text, is_recall
+         FROM spartan_ops.jobs
+         WHERE customer_name ILIKE '%${custName}%'
+         ORDER BY created_at DESC LIMIT 25`
+      ).catch(() => []),
+
+      // Open estimates for this customer
+      supabaseQuery(
+        `SELECT e.st_estimate_id, e.status, e.total, e.created_on::text, e.name
+         FROM spartan_ops.st_estimates e
+         WHERE e.customer_name ILIKE '%${custName}%'
+         AND e.status NOT IN ('Sold', 'Dismissed')
+         ORDER BY e.created_on DESC LIMIT 15`
+      ).catch(() => []),
+
+      // Total invoiced amount for this customer
+      supabaseQuery(
+        `SELECT count(*) as invoice_count, coalesce(sum(i.total), 0) as total_invoiced
+         FROM spartan_ops.st_invoices i
+         WHERE i.customer_name ILIKE '%${custName}%'`
+      ).catch(() => [{ invoice_count: 0, total_invoiced: 0 }]),
+
+      // Customer record from st_customers
+      supabaseQuery(
+        `SELECT st_customer_id, name, address_street, address_city, address_state, address_zip,
+                email, phone, created_on::text
+         FROM spartan_ops.st_customers
+         WHERE name ILIKE '%${custName}%'
+         LIMIT 1`
+      ).catch(() => [])
+    ]);
+
+    // Compute stats
+    const jobCount = (priorJobs || []).length;
+    const installCount = (priorJobs || []).filter(j => j.track_type === 'install').length;
+    const serviceCount = (priorJobs || []).filter(j => j.track_type === 'service').length;
+    const recallCount = (priorJobs || []).filter(j => j.is_recall === true).length;
+    const totalSold = (priorJobs || []).reduce((sum, j) => sum + (parseFloat(j.sold_amount) || 0), 0);
+    const inv = (invoiceTotals && invoiceTotals[0]) || { invoice_count: 0, total_invoiced: 0 };
+    const cust = (customerInfo && customerInfo[0]) || null;
+    const openEstCount = (estimates || []).length;
+    const openEstTotal = (estimates || []).reduce((sum, e) => sum + (parseFloat(e.total) || 0), 0);
+
+    res.json({
+      customer: cust,
+      stats: {
+        total_jobs: jobCount,
+        install_jobs: installCount,
+        service_jobs: serviceCount,
+        recall_count: recallCount,
+        total_sold: totalSold,
+        total_invoiced: parseFloat(inv.total_invoiced) || 0,
+        invoice_count: parseInt(inv.invoice_count) || 0,
+        open_estimates: openEstCount,
+        open_estimate_total: openEstTotal,
+        customer_since: cust ? cust.created_on : null
+      },
+      prior_jobs: priorJobs || [],
+      open_estimates: estimates || []
+    });
+  } catch (err) { console.error('Intel error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ═══════════════════════════════════════
+// NEW: VERIFICATIONS API
+// ═══════════════════════════════════════
+
+app.get('/api/verifications/:stJobId', async (req, res) => {
+  try {
+    const stJobId = esc(req.params.stJobId);
+
+    const rows = await supabaseQuery(
+      `SELECT jv.verification_code, jv.verification_name, jv.phase, jv.stage, jv.result,
+              jv.is_hard_gate, jv.ai_confidence, jv.ai_reasoning, jv.completed_at::text
+       FROM spartan_ops.job_verifications jv
+       JOIN spartan_ops.jobs j ON j.id = jv.job_id
+       WHERE j.st_job_id = '${stJobId}'
+       ORDER BY jv.verification_code`
+    );
+
+    // Compute score
+    const checks = rows || [];
+    const passed = checks.filter(c => c.result === 'pass').length;
+    const failed = checks.filter(c => c.result === 'fail').length;
+    const skipped = checks.filter(c => c.result === 'skip').length;
+    const pending = checks.filter(c => c.result === 'pending' || !c.result).length;
+    const total = checks.length;
+    const scored = total - pending - skipped;
+    const score = scored > 0 ? Math.round(passed / scored * 100) : 0;
+
+    res.json({
+      checks,
+      score: { passed, failed, skipped, pending, total, score }
+    });
+  } catch (err) { console.error('Verifications error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ═══════════════════════════════════════
+// NEW: FINANCIALS API
+// ═══════════════════════════════════════
+
+app.get('/api/financials/:stJobId', async (req, res) => {
+  try {
+    const stJobId = esc(req.params.stJobId);
+
+    const [invoices, payments] = await Promise.all([
+      supabaseQuery(
+        `SELECT st_invoice_id, number, status, subtotal, tax, total, created_on::text
+         FROM spartan_ops.st_invoices
+         WHERE st_job_id = '${stJobId}'::bigint
+         ORDER BY created_on DESC`
+      ).catch(() => []),
+
+      supabaseQuery(
+        `SELECT id, total, type_name, memo, created_on::text
+         FROM spartan_ops.st_payments
+         WHERE st_job_id = '${stJobId}'
+         ORDER BY created_on DESC`
+      ).catch(() => [])
+    ]);
+
+    const invoiceTotal = (invoices || []).reduce((sum, i) => sum + (parseFloat(i.total) || 0), 0);
+    const paymentTotal = (payments || []).reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
+
+    res.json({
+      invoices: invoices || [],
+      payments: payments || [],
+      totals: {
+        invoiced: invoiceTotal,
+        paid: paymentTotal,
+        outstanding: invoiceTotal - paymentTotal
+      }
+    });
+  } catch (err) { console.error('Financials error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ═══════════════════════════════════════
+// NEW: JOB TYPE LOOKUP API
+// ═══════════════════════════════════════
+
+app.get('/api/jobtypes', async (req, res) => {
+  try {
+    const rows = await supabaseQuery(
+      `SELECT st_job_type_id::text, name FROM spartan_ops.st_job_types ORDER BY name`
+    );
+    res.json(rows || []);
+  } catch (err) { console.error('JobTypes error:', err); res.status(500).json({ error: 'Server error' }); }
+});
+
+// ═══════════════════════════════════════
+// STATIC FILE ROUTES (must be last)
+// ═══════════════════════════════════════
+
 app.get('/form', (req, res) => res.sendFile(path.join(__dirname, 'public', 'form', 'index.html')));
 app.get('/materials', (req, res) => res.sendFile(path.join(__dirname, 'public', 'materials', 'index.html')));
 
-app.listen(PORT, '0.0.0.0', () => console.log(`Spartan Sales + Materials on port ${PORT}`));
+app.listen(PORT, '0.0.0.0', () => console.log(`Spartan Job Tracker on port ${PORT}`));
