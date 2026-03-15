@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0">
+<title>Material List — Spartan Plumbing</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,'Segoe UI',Roboto,sans-serif;background:#f5f4f1;color:#1a1a1a;-webkit-font-smoothing:antialiased}
+.wrap{max-width:640px;margin:0 auto;background:#faf9f7;min-height:100vh;box-shadow:0 0 40px rgba(0,0,0,.06)}
+.hdr{background:linear-gradient(135deg,#1a1a1a,#2d2926);padding:20px 16px 16px;color:#fff}
+.hdr-top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.logo{width:38px;height:38px;border-radius:9px;background:#b45309;display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:800}
+.hdr-title{font-size:17px;font-weight:700;letter-spacing:-.01em}
+.hdr-sub{font-size:12px;color:#a09a94}
+.info{background:rgba(255,255,255,.08);border-radius:12px;padding:12px 14px;display:grid;grid-template-columns:1fr 1fr;gap:8px 16px;font-size:12px}
+.info .lbl{color:#a09a94;font-size:10px;text-transform:uppercase;letter-spacing:.07em;margin-bottom:1px}
+.info .val{font-weight:600}
+.info .span2{grid-column:1/-1}
+.info .muted{color:#d0cdc8;font-weight:500}
+.body{padding:12px}
+.budget{background:#fff;border-radius:12px;border:1px solid #e8e5e0;padding:12px 14px;margin-bottom:10px}
+.budget-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:12px}
+.budget-top .lbl{font-weight:600}
+.budget-top .pct{font-family:'SF Mono',Consolas,monospace;font-weight:700}
+.bar{height:8px;background:#f0eeeb;border-radius:99px;overflow:hidden;position:relative}
+.bar-fill{height:100%;border-radius:99px;transition:width .6s}
+.bar-mark{position:absolute;top:0;bottom:0;width:2px;background:#b45309;opacity:.55}
+.bar-legend{display:flex;justify-content:space-between;margin-top:6px;font-size:11px;color:#999;font-family:'SF Mono',Consolas,monospace}
+.hint{padding:8px 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:8px;display:flex;align-items:center;gap:8px;font-size:12px;color:#b45309;font-weight:600;margin-bottom:14px}
+.sec-hdr{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:10px;margin-bottom:6px}
+.sec-hdr .left{display:flex;align-items:center;gap:8px}
+.sec-hdr .stitle{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.sec-hdr .scount{font-size:11px;color:#999;font-family:'SF Mono',Consolas,monospace}
+.sec-hdr .stotal{font-size:13px;font-weight:700;font-family:'SF Mono',Consolas,monospace}
+.section{margin-bottom:22px}
+.row{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid #f0eeeb}
+.row:last-child{border-bottom:none}
+.thumb{position:relative;width:52px;height:52px;border-radius:8px;border:1px solid #e0ddd8;background:#fff;display:flex;align-items:center;justify-content:center;overflow:hidden;cursor:pointer;flex-shrink:0;transition:all .15s}
+.thumb:hover,.thumb:active{border-color:#b45309;box-shadow:0 0 0 1px #b45309}
+.thumb img{width:100%;height:100%;object-fit:contain;padding:2px}
+.thumb .zoom{position:absolute;bottom:0;right:0;background:rgba(0,0,0,.5);border-radius:6px 0 6px 0;padding:2px 4px;display:flex;align-items:center}
+.item-info{flex:1;min-width:0}
+.item-info .name{font-size:13px;font-weight:600;line-height:1.35;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.item-info .inum{font-size:11px;color:#999;font-family:'SF Mono',Consolas,monospace;margin-top:2px}
+.qty{font-size:13px;font-weight:700;width:32px;text-align:center}
+.ltotal{font-size:13px;font-weight:700;font-family:'SF Mono',Consolas,monospace;width:76px;text-align:right}
+.grand{background:#1a1a1a;border-radius:12px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;margin-top:16px}
+.grand .glbl{color:#a09a94;font-size:13px;font-weight:600}
+.grand .gval{color:#fff;font-size:20px;font-weight:800;font-family:'SF Mono',Consolas,monospace}
+.foot{margin-top:14px;text-align:center;font-size:11px;color:#a09a94;line-height:1.6;padding-bottom:24px}
+.overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:999;align-items:center;justify-content:center;padding:16px}
+.overlay.show{display:flex}
+.modal{background:#fff;border-radius:14px;padding:18px;max-width:440px;width:100%;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+.modal-img{width:100%;aspect-ratio:1;background:#f8f7f5;border-radius:10px;display:flex;align-items:center;justify-content:center;overflow:hidden;margin-bottom:14px}
+.modal-img img{max-width:88%;max-height:88%;object-fit:contain}
+.modal-name{font-size:17px;font-weight:700;margin-bottom:6px;line-height:1.3}
+.modal-meta{display:flex;gap:14px;align-items:center;font-size:13px;color:#777;font-family:'SF Mono',Consolas,monospace;flex-wrap:wrap}
+.modal-meta .price{font-weight:700;color:#b45309;font-size:15px}
+.modal-close{margin-top:16px;width:100%;padding:12px;background:#1a1a1a;color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit}
+.modal-close:active{background:#333}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <div class="hdr-top">
+      <div class="logo">S</div>
+      <div><div class="hdr-title">Material List</div><div class="hdr-sub">Spartan Plumbing &bull; Lee Supply</div></div>
+    </div>
+    <div class="info">
+      <div><div class="lbl">Job</div><div class="val">J-247891</div></div>
+      <div><div class="lbl">Install date</div><div class="val">Mon, Mar 17 2026</div></div>
+      <div class="span2"><div class="lbl">Customer</div><div class="val">Robert &amp; Lisa Thompson</div></div>
+      <div class="span2"><div class="lbl">Scope</div><div class="val muted">50 GAL gas water heater replacement &mdash; basement install</div></div>
+      <div class="span2"><div class="lbl">Crew</div><div class="val">Nick H (#15) + Isaac Elam (#16)</div></div>
+    </div>
+  </div>
+  <div class="body">
+    <div class="budget">
+      <div class="budget-top"><span class="lbl">Material budget</span><span class="pct" id="bpct"></span></div>
+      <div class="bar"><div class="bar-fill" id="bfill"></div><div class="bar-mark" style="left:72%"></div></div>
+      <div class="bar-legend"><span id="bmat"></span><span style="color:#b45309">18% cap</span><span>$7,500.00</span></div>
+    </div>
+    <div class="hint">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>
+      Tap any product image to zoom in
+    </div>
+    <div id="parts"></div>
+    <div id="tools"></div>
+    <div id="consumables"></div>
+    <div class="grand"><span class="glbl" id="gcount"></span><span class="gval" id="gtotal"></span></div>
+    <div class="foot">AI-generated from job scope + Lee Supply catalog<br>Verify quantities before confirming</div>
+  </div>
+</div>
+
+<div class="overlay" id="lightbox" onclick="closeLB()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-img"><img id="lb-img" src="" alt=""></div>
+    <div class="modal-name" id="lb-name"></div>
+    <div class="modal-meta">
+      <span id="lb-item"></span>
+      <span id="lb-qty"></span>
+      <span class="price" id="lb-price"></span>
+    </div>
+    <button class="modal-close" onclick="closeLB()">Close</button>
+  </div>
+</div>
+
+<script>
+var parts=[
+  {item:"85927",desc:"Bradford White RG250T6N \u2014 50 GAL gas water heater",qty:1,price:949.73,img:"https://applauseplumbing.com/sites/default/files/styles/single_image_project/public/2024-03/WaterHeaterFiftyGallonBradfordWhite.png?itok=S8YkcZRA"},
+  {item:"475332",desc:"Holdrite Quick Stand \u2014 water heater platform",qty:1,price:367.50,img:"https://m.media-amazon.com/images/I/81veq1MVCWL.jpg"},
+  {item:"616959",desc:"Moen 1255 \u2014 31mm cartridge assembly",qty:1,price:29.87,img:"https://shop.moen.com/cdn/shop/files/1255.png?v=1771059297&width=1946"},
+  {item:"512803",desc:"Holdrite QS-U-C thermal expansion tank bracket",qty:1,price:23.91,img:"https://www.aprsupply.com/ASSETS/IMAGES/ITEMS/ZOOM/QS-U-C.png"},
+  {item:"559458",desc:"Vizco 25\" aluminum water heater pan",qty:1,price:20.26,img:"https://s3.amazonaws.com/fam.s3.2/damprod/xLg_Carousel_Retina/10152/Ips_VP25-P_3395509_Main.png"},
+  {item:"13761",desc:"Cash Acme 3/4\" T&P relief valve",qty:1,price:20.09,img:"https://www.statesupply.com/media/catalog/product/cache/ec43d8feb05b625469b6653732bedf75/c/c/cc1700_1.jpg"},
+  {item:"635890",desc:"BMI 1\" CGA gas valve w/ red handle",qty:1,price:18.81,img:"https://images.thdstatic.com/productImages/88756518-6dbe-45f4-a6ae-dcf5fe13c38a/svn/plumbflex-ball-valves-fipr1-5-64_600.jpg"},
+  {item:"6442",desc:"Legend 3/4\" press ball valve",qty:2,price:16.49,img:"https://m.media-amazon.com/images/I/51QL0cCVZuL._AC_UF894,1000_QL80_.jpg"},
+  {item:"635878",desc:"BMI 3/4\" CGA gas valve w/ red handle",qty:1,price:11.92,img:"https://www.gotolee.com/images/content/13505BMI.png"},
+  {item:"6435",desc:"Legend 1/2\" press ball valve",qty:2,price:11.95,img:"https://legendvalve.com/media/images/productlines/legendpress/legend-press-engineered.jpg"},
+  {item:"5126",desc:"3/4\" copper tee (C x C x C)",qty:3,price:2.86,img:"https://www.hailiangstock.com/uploads/cn_goods/1740475902336560.jpg"},
+  {item:"4864",desc:"3/4\" copper 90 elbow short turn",qty:4,price:1.56,img:"https://www.hailiang.us/upfiles/202107259907579.jpg"},
+  {item:"4852",desc:"1/2\" copper 90 elbow short turn",qty:4,price:0.70,img:"https://www.hailiang.us/upfiles/202107259907579.jpg"},
+  {item:"538091",desc:"Holdrite 1-1/2\" J-hook pipe hanger",qty:6,price:1.19,img:"https://lowlaundry.com/media/catalog/product/cache/1/image/598x598/602f0fa2c1f0d1ba5e241f914e856ff9/P/J/PJHOOK150DWV.jpg"},
+  {item:"25773",desc:"Lee 4000 wax ring",qty:1,price:1.41,img:"https://www.gotolee.com/images/content/0400012.jpg"}
+];
+var tools=[
+  {item:"88071",desc:"Milwaukee 48-16-9605 premium diamond core bit 12\"",qty:1,price:89.99,img:"https://m.media-amazon.com/images/I/61zc8I0FedL._AC_UF894,1000_QL80_.jpg"}
+];
+var consumables=[
+  {item:"654802",desc:"Rectorseal 1 LB regular paste flux",qty:1,price:23.03,img:"https://www.porterpipe.com/ASSETS/IMAGES/ITEMS/ZOOM/IPS_14025.jpg"},
+  {item:"120065",desc:"Oatey No. 5 paste flux \u2014 8 oz",qty:1,price:4.82,img:"https://m.media-amazon.com/images/I/71eGD52XMqL._AC_UF894,1000_QL80_.jpg"},
+  {item:"12424",desc:"3/4\" copper PEX crimp ring",qty:8,price:0.47,img:"https://i.ebayimg.com/images/g/DqkAAOSwnDZUEnFs/s-l400.jpg"},
+  {item:"12417",desc:"1/2\" copper PEX crimp ring",qty:8,price:0.45,img:"https://m.media-amazon.com/images/I/51jhLMfPPFL._AC_UF1000,1000_QL80_.jpg"},
+  {item:"676324",desc:"Superior solar salt 40 LB",qty:1,price:8.50,img:"https://superiorindy.com/wp-content/uploads/2025/02/Solar-Salt-nb-1024x1024.png"}
+];
+function fmt(n){return "$"+n.toFixed(2)}
+function total(a){var s=0;a.forEach(function(i){s+=i.qty*i.price});return s}
+var allItems=parts.concat(tools).concat(consumables);
+var gt=total(allItems),rev=7500,pct=(gt/rev*100).toFixed(1),ok=parseFloat(pct)<18;
+document.getElementById("bpct").textContent=pct+"% of revenue "+(ok?"\u2713":"\u26A0\uFE0F");
+document.getElementById("bpct").style.color=ok?"#059669":"#dc2626";
+document.getElementById("bfill").style.width=Math.min(parseFloat(pct)/25*100,100)+"%";
+document.getElementById("bfill").style.background=ok?"linear-gradient(90deg,#059669,#10b981)":"linear-gradient(90deg,#dc2626,#ef4444)";
+document.getElementById("bmat").textContent=fmt(gt)+" materials";
+var ct=0;allItems.forEach(function(i){ct+=i.qty});
+document.getElementById("gcount").textContent="Total \u2014 "+ct+" items";
+document.getElementById("gtotal").textContent=fmt(gt);
+var zoomSvg='<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+window._items={};
+allItems.forEach(function(i){window._items[i.item]=i});
+function renderRow(item,container){
+  var lt=item.qty*item.price;
+  var row=document.createElement("div");row.className="row";
+  row.innerHTML='<div class="thumb" data-idx="'+item.item+'"><img src="'+item.img+'" alt="'+item.desc.replace(/"/g,"&quot;")+'" onerror="this.parentElement.innerHTML=\'<div style=padding:12px;color:#ccc;font-size:11px>No img</div>\'"><div class="zoom">'+zoomSvg+'</div></div><div class="item-info"><div class="name">'+item.desc+'</div><div class="inum">#'+item.item+'</div></div><div class="qty">x'+item.qty+'</div><div class="ltotal">'+fmt(lt)+'</div>';
+  row.querySelector("[data-idx]").addEventListener("click",function(){openLB(item)});
+  container.appendChild(row);
+}
+function renderSection(id,title,icon,items,color){
+  if(!items.length)return;
+  var el=document.getElementById(id);
+  var sec=document.createElement("div");sec.className="section";
+  var t=total(items);
+  var hdr=document.createElement("div");hdr.className="sec-hdr";
+  hdr.style.background=color+"14";hdr.style.borderLeft="3px solid "+color;
+  hdr.innerHTML='<div class="left"><span style="font-size:15px">'+icon+'</span><span class="stitle">'+title+'</span><span class="scount">'+items.length+' items</span></div><span class="stotal" style="color:'+color+'">'+fmt(t)+'</span>';
+  sec.appendChild(hdr);
+  items.forEach(function(i){renderRow(i,sec)});
+  el.appendChild(sec);
+}
+renderSection("parts","Parts","\uD83D\uDD27",parts,"#b45309");
+renderSection("tools","Tools","\uD83D\uDEE0\uFE0F",tools,"#6366f1");
+renderSection("consumables","Consumables","\uD83E\uDDF4",consumables,"#6b7280");
+function openLB(item){
+  document.getElementById("lb-img").src=item.img;
+  document.getElementById("lb-name").textContent=item.desc;
+  document.getElementById("lb-item").textContent="Lee Supply #"+item.item;
+  document.getElementById("lb-qty").textContent="x"+item.qty;
+  document.getElementById("lb-price").textContent=fmt(item.qty*item.price);
+  document.getElementById("lightbox").classList.add("show");
+  document.body.style.overflow="hidden";
+}
+function closeLB(){
+  document.getElementById("lightbox").classList.remove("show");
+  document.body.style.overflow="";
+}
+</script>
+</div>
+</body>
+</html>
