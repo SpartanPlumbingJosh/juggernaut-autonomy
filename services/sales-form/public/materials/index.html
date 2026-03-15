@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spartan — Material List</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0a0a0a;--card:#141414;--border:#2a2a2a;--red:#c41230;--green:#22c55e;--yellow:#eab308;--orange:#f97316;--text:#e5e5e5;--text-dim:#888;--accent:#c41230;--font:'Segoe UI',system-ui,sans-serif}
+body{background:var(--bg);color:var(--text);font-family:var(--font);line-height:1.5;padding:16px;max-width:960px;margin:0 auto}
+h1{color:var(--red);font-size:28px;text-align:center;margin:16px 0 4px;letter-spacing:1px;text-transform:uppercase}
+.subtitle{text-align:center;color:var(--text-dim);margin-bottom:8px;font-size:14px}
+.job-header{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px}
+.job-header .info{display:flex;gap:24px;flex-wrap:wrap}
+.job-header .info div{font-size:13px}
+.job-header .info div span{color:var(--text-dim);display:block;font-size:11px;text-transform:uppercase;letter-spacing:0.3px}
+.budget-bar{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:16px}
+.budget-track{height:28px;background:#1a1a1a;border-radius:6px;position:relative;overflow:hidden;margin:8px 0}
+.budget-fill{height:100%;border-radius:6px;transition:width .5s}
+.budget-fill.ok{background:linear-gradient(90deg,var(--green),#16a34a)}
+.budget-fill.warn{background:linear-gradient(90deg,var(--orange),#ea580c)}
+.budget-fill.over{background:linear-gradient(90deg,var(--red),#991b1b)}
+.budget-target{position:absolute;top:0;height:100%;width:2px;background:#fff;opacity:0.6}
+.budget-stats{display:flex;justify-content:space-between;font-size:13px;color:var(--text-dim)}
+.budget-pct{font-size:32px;font-weight:700;text-align:center}
+.section{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:20px;margin-bottom:16px}
+.section-title{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.section-title h2{color:var(--red);font-size:16px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px}
+.section-title .count{background:#1a1a1a;color:var(--text-dim);padding:2px 10px;border-radius:12px;font-size:12px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:11px;color:var(--text-dim);padding:8px;border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:0.3px}
+td{padding:10px 8px;border-bottom:1px solid #1a1a1a;font-size:13px}
+tr:hover td{background:#1a1a1a}
+td.cost{text-align:right;font-family:'SF Mono',monospace;font-size:13px}
+td.qty{text-align:center;font-weight:600}
+td.lee{color:var(--text-dim);font-size:12px}
+.search-box{margin-bottom:16px}
+.search-box input{width:100%;background:#1a1a1a;border:1px solid var(--border);border-radius:8px;padding:12px 16px;color:var(--text);font-size:14px;font-family:var(--font)}
+.search-box input:focus{outline:none;border-color:var(--red)}
+.search-box input::placeholder{color:#555}
+.search-results{background:#111;border:1px solid var(--border);border-radius:8px;max-height:250px;overflow-y:auto;display:none}
+.search-results.visible{display:block}
+.search-result{padding:10px 14px;cursor:pointer;font-size:13px;border-bottom:1px solid #1a1a1a;display:flex;justify-content:space-between}
+.search-result:hover{background:#1a1a1a}
+.search-result .price{color:var(--green);font-family:monospace}
+.empty-state{text-align:center;padding:40px;color:var(--text-dim);font-size:14px}
+.loading{text-align:center;padding:40px;color:var(--text-dim)}
+.btn{padding:10px 20px;border:none;border-radius:6px;font-size:14px;font-weight:600;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;transition:all .2s}
+.btn-primary{background:var(--red);color:#fff}
+.btn-primary:hover{background:#d91538}
+.btn-secondary{background:#1a1a1a;color:var(--text);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:#555}
+.actions{display:flex;gap:8px;justify-content:center;margin-top:16px}
+.total-row{font-weight:700;background:#0a0a0a}
+.total-row td{border-top:2px solid var(--border);padding-top:12px}
+.hidden{display:none}
+@media(max-width:600px){.job-header .info{gap:12px}th,td{padding:6px 4px;font-size:12px}.budget-pct{font-size:24px}h1{font-size:22px}}
+</style>
+</head>
+<body>
+
+<h1>📦 Material List — Lee Supply</h1>
+<p class="subtitle" id="subtitle">Loading...</p>
+
+<div id="loadingState" class="loading">Loading material list...</div>
+
+<div id="content" class="hidden">
+
+<!-- Job Header -->
+<div class="job-header" id="jobHeader"></div>
+
+<!-- Budget Bar -->
+<div class="budget-bar" id="budgetBar"></div>
+
+<!-- Search Lee Catalog -->
+<div class="section">
+  <div class="section-title"><h2>🔍 Search Lee Supply Catalog</h2></div>
+  <div class="search-box">
+    <input type="text" id="catalogSearch" placeholder="Search by item name, code, or Lee number..." oninput="searchCatalog(this.value)">
+  </div>
+  <div class="search-results" id="searchResults"></div>
+</div>
+
+<!-- Parts -->
+<div class="section" id="partsSection">
+  <div class="section-title"><h2>🔧 Parts</h2><span class="count" id="partsCount">0</span></div>
+  <div id="partsTable"></div>
+</div>
+
+<!-- Tools -->
+<div class="section" id="toolsSection">
+  <div class="section-title"><h2>🛠️ Tools</h2><span class="count" id="toolsCount">0</span></div>
+  <div id="toolsTable"></div>
+</div>
+
+<!-- Consumables -->
+<div class="section" id="consumablesSection">
+  <div class="section-title"><h2>📎 Consumables</h2><span class="count" id="consumablesCount">0</span></div>
+  <div id="consumablesTable"></div>
+</div>
+
+<!-- Actions -->
+<div class="actions">
+  <button class="btn btn-primary" onclick="window.print()">🖨️ Print List</button>
+</div>
+
+</div>
+
+<script>
+let materialsData = null;
+let searchTimeout = null;
+
+async function loadMaterials() {
+  const params = new URLSearchParams(window.location.search);
+  const id = params.get('id');
+  if (!id) {
+    document.getElementById('loadingState').textContent = 'No form ID provided. Use ?id=N';
+    return;
+  }
+
+  try {
+    const resp = await fetch('/api/materials/' + id);
+    if (!resp.ok) throw new Error('Not found');
+    materialsData = await resp.json();
+
+    document.getElementById('subtitle').textContent =
+      `${materialsData.customer_name || 'Unknown'} — Job #${materialsData.job_number || '?'}`;
+
+    // Job header
+    const header = document.getElementById('jobHeader');
+    header.innerHTML = `
+      <div class="info">
+        <div><span>Customer</span>${materialsData.customer_name || '—'}</div>
+        <div><span>Job #</span>${materialsData.job_number || '—'}</div>
+        <div><span>Business Unit</span>${materialsData.business_unit || '—'}</div>
+        <div><span>Sale Amount</span>$${parseFloat(materialsData.sold_amount || 0).toFixed(2)}</div>
+      </div>
+    `;
+
+    const ml = materialsData.material_list_json;
+    if (!ml) {
+      document.getElementById('loadingState').textContent = 'No material list generated yet.';
+      return;
+    }
+
+    // Render sections
+    renderTable('parts', ml.parts || [], true);
+    renderTable('tools', ml.tools || [], false);
+    renderTable('consumables', ml.consumables || [], true);
+
+    // Budget bar
+    renderBudget(ml, parseFloat(materialsData.sold_amount) || 0);
+
+    document.getElementById('loadingState').classList.add('hidden');
+    document.getElementById('content').classList.remove('hidden');
+  } catch (e) {
+    console.error(e);
+    document.getElementById('loadingState').textContent = 'Error loading material list.';
+  }
+}
+
+function renderTable(category, items, showCost) {
+  const container = document.getElementById(category + 'Table');
+  const countEl = document.getElementById(category + 'Count');
+  countEl.textContent = items.length;
+
+  if (!items.length) {
+    container.innerHTML = '<div class="empty-state">No items</div>';
+    return;
+  }
+
+  let totalCost = 0;
+  let html = '<table><thead><tr><th style="width:50px">Qty</th><th>Item</th><th style="width:80px">Lee #</th>';
+  if (showCost) html += '<th style="width:90px;text-align:right">Est. Cost</th>';
+  html += '</tr></thead><tbody>';
+
+  items.forEach(item => {
+    const lineCost = (item.est_cost || 0) * (item.qty || 1);
+    totalCost += lineCost;
+    html += `<tr>
+      <td class="qty">${item.qty || 1}</td>
+      <td>${item.item || item.name || ''}</td>
+      <td class="lee">${item.lee_number || '—'}</td>`;
+    if (showCost) html += `<td class="cost">$${lineCost.toFixed(2)}</td>`;
+    html += '</tr>';
+  });
+
+  if (showCost && items.length > 1) {
+    html += `<tr class="total-row"><td></td><td>Total</td><td></td><td class="cost">$${totalCost.toFixed(2)}</td></tr>`;
+  }
+
+  html += '</tbody></table>';
+  container.innerHTML = html;
+}
+
+function renderBudget(ml, saleAmount) {
+  const bar = document.getElementById('budgetBar');
+  let totalCost = 0;
+  ['parts','consumables'].forEach(cat => {
+    (ml[cat] || []).forEach(item => { totalCost += (item.est_cost || 0) * (item.qty || 1); });
+  });
+
+  const pct = saleAmount > 0 ? (totalCost / saleAmount * 100) : 0;
+  const budgetMax = saleAmount * 0.25; // show bar up to 25%
+  const fillPct = Math.min(100, (totalCost / budgetMax) * 100);
+  const targetPct = (saleAmount * 0.18 / budgetMax) * 100;
+
+  let fillClass = 'ok';
+  let color = 'var(--green)';
+  if (pct > 18) { fillClass = 'over'; color = 'var(--red)'; }
+  else if (pct > 14) { fillClass = 'warn'; color = 'var(--orange)'; }
+
+  bar.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:4px">
+      <div style="font-size:12px;color:var(--text-dim);text-transform:uppercase">Material Budget</div>
+      <div class="budget-pct" style="color:${color}">${pct.toFixed(1)}%</div>
+    </div>
+    <div class="budget-track">
+      <div class="budget-fill ${fillClass}" style="width:${fillPct}%"></div>
+      <div class="budget-target" style="left:${targetPct}%"></div>
+    </div>
+    <div class="budget-stats">
+      <span>$${totalCost.toFixed(2)} spent</span>
+      <span style="opacity:0.4">18% target →</span>
+      <span>$${(saleAmount * 0.18).toFixed(2)} max</span>
+      <span>$${saleAmount.toFixed(2)} revenue</span>
+    </div>
+  `;
+}
+
+async function searchCatalog(query) {
+  clearTimeout(searchTimeout);
+  const results = document.getElementById('searchResults');
+  if (query.length < 2) { results.classList.remove('visible'); return; }
+
+  searchTimeout = setTimeout(async () => {
+    try {
+      const resp = await fetch('/api/catalog/search?q=' + encodeURIComponent(query));
+      const items = await resp.json();
+
+      if (!items.length) {
+        results.innerHTML = '<div class="search-result" style="color:var(--text-dim)">No matches found</div>';
+      } else {
+        results.innerHTML = items.map(item =>
+          `<div class="search-result" onclick="alert('Add-to-list coming soon: ${(item.description || '').replace(/'/g,'')}')">
+            <span>${item.description || item.item_code} <span style="color:var(--text-dim);font-size:11px">(Lee #${item.lee_number || '?'})</span></span>
+            <span class="price">$${parseFloat(item.spartan_price || 0).toFixed(2)}</span>
+          </div>`
+        ).join('');
+      }
+      results.classList.add('visible');
+    } catch (e) { console.error(e); }
+  }, 300);
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-box') && !e.target.closest('.search-results')) {
+    document.getElementById('searchResults').classList.remove('visible');
+  }
+});
+
+loadMaterials();
+</script>
+</body>
+</html>
