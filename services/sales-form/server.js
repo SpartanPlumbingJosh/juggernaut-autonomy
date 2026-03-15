@@ -8,7 +8,6 @@ app.use(cors());
 app.use(express.json({ limit: '5mb' }));
 
 const PORT = process.env.PORT || 3000;
-
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kong.thejuggernaut.org/rest/v1';
 const SUPABASE_KEY = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
 const CF_ID = process.env.CF_ACCESS_CLIENT_ID || 'd9d91ed78bf6b41408577f15d0bc629f.access';
@@ -21,13 +20,10 @@ function supabaseQuery(sql) {
     const opts = {
       hostname: url.hostname, path: url.pathname, method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'apikey': SUPABASE_KEY,
+        'Content-Type': 'application/json', 'apikey': SUPABASE_KEY,
         'Authorization': `Bearer ${SUPABASE_KEY}`,
-        'Content-Profile': 'knowledge_lake',
-        'Accept-Profile': 'knowledge_lake',
-        'CF-Access-Client-Id': CF_ID,
-        'CF-Access-Client-Secret': CF_SECRET,
+        'Content-Profile': 'knowledge_lake', 'Accept-Profile': 'knowledge_lake',
+        'CF-Access-Client-Id': CF_ID, 'CF-Access-Client-Secret': CF_SECRET,
         'Content-Length': Buffer.byteLength(body)
       }
     };
@@ -48,23 +44,17 @@ function supabaseQuery(sql) {
   });
 }
 
-// Safe string escape for SQL
-function esc(s) { return (s || '').replace(/'/g, "''"); }
+function sqlEsc(s) { return (s || '').replace(/'/g, "''"); }
 
 app.use('/form', express.static(path.join(__dirname, 'public', 'form')));
 app.use('/materials', express.static(path.join(__dirname, 'public', 'materials')));
-
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'spartan-sales-form' }));
-
 app.get('/', (req, res) => {
   if (req.query.id) return res.redirect(`/form?id=${req.query.id}`);
   res.json({ service: 'Spartan Job Tracker', routes: ['/form?id=N', '/materials?id=N'] });
 });
 
-// ═══════════════════════════════════════
-// ORIGINAL ENDPOINTS (preserved)
-// ═══════════════════════════════════════
-
+// === ORIGINAL: Prefill ===
 app.get('/api/prefill/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -79,13 +69,12 @@ app.get('/api/prefill/:id', async (req, res) => {
     if (!rows || !rows.length) return res.status(404).json({ error: 'Not found' });
     const row = rows[0];
     let formFields = row.form_data || null;
-    if (!formFields && row.sales_form_text) {
-      try { formFields = JSON.parse(row.sales_form_text); } catch (e) {}
-    }
+    if (!formFields && row.sales_form_text) { try { formFields = JSON.parse(row.sales_form_text); } catch(e){} }
     res.json({ ...row, form_fields: formFields });
   } catch (err) { console.error('Prefill error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// === ORIGINAL: Submit ===
 app.post('/api/submit', async (req, res) => {
   try {
     const { id, confirmed_data, confirmed_by } = req.body;
@@ -99,6 +88,7 @@ app.post('/api/submit', async (req, res) => {
   } catch (err) { console.error('Submit error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
+// === ORIGINAL: Materials + Catalog ===
 app.get('/api/materials/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
@@ -108,7 +98,7 @@ app.get('/api/materials/:id', async (req, res) => {
     );
     if (!rows || !rows.length) return res.status(404).json({ error: 'Not found' });
     res.json(rows[0]);
-  } catch (err) { console.error('Materials error:', err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
 app.get('/api/catalog/search', async (req, res) => {
@@ -119,11 +109,15 @@ app.get('/api/catalog/search', async (req, res) => {
       `SELECT item_code, description, spartan_price, lee_number, category, is_active FROM spartan_ops.lee_supply_catalog WHERE is_active = true AND (description ILIKE '%${q}%' OR item_code ILIKE '%${q}%' OR lee_number ILIKE '%${q}%') ORDER BY description LIMIT 20`
     );
     res.json(rows || []);
-  } catch (err) { console.error('Search error:', err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
 // ═══════════════════════════════════════
-// NEW: CUSTOMER INTEL API
+// NEW: Customer Intel
+// jobs: st_job_id, st_job_number, customer_name, customer_address, status, sold_amount, track_type, job_type, scope_summary, selling_tech_name, service_tech_name, is_recall, created_at, closed_at
+// st_customers: st_customer_id, name, address_street/city/state/zip, created_at
+// st_estimates: st_estimate_id, estimate_name, status_name, subtotal, tax, created_on, summary, st_job_id
+// st_invoices: st_invoice_id, st_job_id(BIGINT), customer_name, total, sub_total, sales_tax, invoice_date, balance
 // ═══════════════════════════════════════
 
 app.get('/api/intel/:id', async (req, res) => {
@@ -131,92 +125,72 @@ app.get('/api/intel/:id', async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
 
-    // Get the form record to find customer name and st_job_id
     const form = await supabaseQuery(
-      `SELECT st_job_id, customer_name, job_number, sold_amount, business_unit, slack_channel_id
-       FROM spartan_ops.auto_sales_forms WHERE id = ${id}`
+      `SELECT st_job_id, customer_name, job_number FROM spartan_ops.auto_sales_forms WHERE id = ${id}`
     );
-    if (!form || !form.length) return res.status(404).json({ error: 'Form not found' });
-    const f = form[0];
-    const custName = esc(f.customer_name || '');
+    if (!form || !form.length) return res.status(404).json({ error: 'Not found' });
+    const custName = sqlEsc((form[0].customer_name || '').trim());
 
-    // Parallel queries for customer data
     const [priorJobs, estimates, invoiceTotals, customerInfo] = await Promise.all([
-      // All jobs for this customer
       supabaseQuery(
         `SELECT st_job_id, st_job_number, customer_address, status, sold_amount, track_type,
                 job_type, scope_summary, selling_tech_name, service_tech_name,
                 created_at::text, closed_at::text, is_recall
-         FROM spartan_ops.jobs
-         WHERE customer_name ILIKE '%${custName}%'
+         FROM spartan_ops.jobs WHERE customer_name ILIKE '%${custName}%'
          ORDER BY created_at DESC LIMIT 25`
       ).catch(() => []),
 
-      // Open estimates for this customer
       supabaseQuery(
-        `SELECT e.st_estimate_id, e.status, e.total, e.created_on::text, e.name
+        `SELECT e.st_estimate_id, e.status_name, e.subtotal, e.tax,
+                (coalesce(e.subtotal,0) + coalesce(e.tax,0)) as total,
+                e.created_on::text, e.estimate_name, e.summary
          FROM spartan_ops.st_estimates e
-         WHERE e.customer_name ILIKE '%${custName}%'
-         AND e.status NOT IN ('Sold', 'Dismissed')
+         JOIN spartan_ops.jobs j ON j.st_job_id = e.st_job_id::text
+         WHERE j.customer_name ILIKE '%${custName}%'
+           AND e.status_name NOT IN ('Sold', 'Dismissed')
          ORDER BY e.created_on DESC LIMIT 15`
       ).catch(() => []),
 
-      // Total invoiced amount for this customer
       supabaseQuery(
-        `SELECT count(*) as invoice_count, coalesce(sum(i.total), 0) as total_invoiced
-         FROM spartan_ops.st_invoices i
-         WHERE i.customer_name ILIKE '%${custName}%'`
-      ).catch(() => [{ invoice_count: 0, total_invoiced: 0 }]),
+        `SELECT count(*) as cnt, coalesce(sum(total), 0) as amt
+         FROM spartan_ops.st_invoices WHERE customer_name ILIKE '%${custName}%'`
+      ).catch(() => [{ cnt: 0, amt: 0 }]),
 
-      // Customer record from st_customers
       supabaseQuery(
-        `SELECT st_customer_id, name, address_street, address_city, address_state, address_zip,
-                email, phone, created_on::text
-         FROM spartan_ops.st_customers
-         WHERE name ILIKE '%${custName}%'
-         LIMIT 1`
+        `SELECT st_customer_id, name, address_street, address_city, address_state, address_zip, created_at::text as customer_since
+         FROM spartan_ops.st_customers WHERE name ILIKE '%${custName}%' LIMIT 1`
       ).catch(() => [])
     ]);
 
-    // Compute stats
-    const jobCount = (priorJobs || []).length;
-    const installCount = (priorJobs || []).filter(j => j.track_type === 'install').length;
-    const serviceCount = (priorJobs || []).filter(j => j.track_type === 'service').length;
-    const recallCount = (priorJobs || []).filter(j => j.is_recall === true).length;
-    const totalSold = (priorJobs || []).reduce((sum, j) => sum + (parseFloat(j.sold_amount) || 0), 0);
-    const inv = (invoiceTotals && invoiceTotals[0]) || { invoice_count: 0, total_invoiced: 0 };
+    const jobs = priorJobs || [];
+    const inv = (invoiceTotals && invoiceTotals[0]) || { cnt: 0, amt: 0 };
     const cust = (customerInfo && customerInfo[0]) || null;
-    const openEstCount = (estimates || []).length;
-    const openEstTotal = (estimates || []).reduce((sum, e) => sum + (parseFloat(e.total) || 0), 0);
+    const ests = estimates || [];
 
     res.json({
       customer: cust,
       stats: {
-        total_jobs: jobCount,
-        install_jobs: installCount,
-        service_jobs: serviceCount,
-        recall_count: recallCount,
-        total_sold: totalSold,
-        total_invoiced: parseFloat(inv.total_invoiced) || 0,
-        invoice_count: parseInt(inv.invoice_count) || 0,
-        open_estimates: openEstCount,
-        open_estimate_total: openEstTotal,
-        customer_since: cust ? cust.created_on : null
+        total_jobs: jobs.length,
+        install_jobs: jobs.filter(j => j.track_type === 'install').length,
+        service_jobs: jobs.filter(j => j.track_type === 'service').length,
+        recall_count: jobs.filter(j => j.is_recall).length,
+        total_sold: jobs.reduce((s, j) => s + (parseFloat(j.sold_amount) || 0), 0),
+        total_invoiced: parseFloat(inv.amt) || 0,
+        invoice_count: parseInt(inv.cnt) || 0,
+        open_estimates: ests.length,
+        open_estimate_total: ests.reduce((s, e) => s + (parseFloat(e.total) || 0), 0),
+        customer_since: cust ? cust.customer_since : null
       },
-      prior_jobs: priorJobs || [],
-      open_estimates: estimates || []
+      prior_jobs: jobs,
+      open_estimates: ests
     });
   } catch (err) { console.error('Intel error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// ═══════════════════════════════════════
-// NEW: VERIFICATIONS API
-// ═══════════════════════════════════════
-
+// === NEW: Verifications ===
 app.get('/api/verifications/:stJobId', async (req, res) => {
   try {
-    const stJobId = esc(req.params.stJobId);
-
+    const stJobId = sqlEsc(req.params.stJobId);
     const rows = await supabaseQuery(
       `SELECT jv.verification_code, jv.verification_name, jv.phase, jv.stage, jv.result,
               jv.is_hard_gate, jv.ai_confidence, jv.ai_reasoning, jv.completed_at::text
@@ -225,81 +199,55 @@ app.get('/api/verifications/:stJobId', async (req, res) => {
        WHERE j.st_job_id = '${stJobId}'
        ORDER BY jv.verification_code`
     );
-
-    // Compute score
     const checks = rows || [];
     const passed = checks.filter(c => c.result === 'pass').length;
     const failed = checks.filter(c => c.result === 'fail').length;
     const skipped = checks.filter(c => c.result === 'skip').length;
-    const pending = checks.filter(c => c.result === 'pending' || !c.result).length;
-    const total = checks.length;
-    const scored = total - pending - skipped;
-    const score = scored > 0 ? Math.round(passed / scored * 100) : 0;
-
+    const pending = checks.filter(c => !c.result || c.result === 'pending').length;
+    const scored = checks.length - pending - skipped;
     res.json({
       checks,
-      score: { passed, failed, skipped, pending, total, score }
+      score: { passed, failed, skipped, pending, total: checks.length, score: scored > 0 ? Math.round(passed / scored * 100) : 0 }
     });
   } catch (err) { console.error('Verifications error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// ═══════════════════════════════════════
-// NEW: FINANCIALS API
-// ═══════════════════════════════════════
-
+// === NEW: Financials ===
 app.get('/api/financials/:stJobId', async (req, res) => {
   try {
-    const stJobId = esc(req.params.stJobId);
-
+    const stJobId = sqlEsc(req.params.stJobId);
     const [invoices, payments] = await Promise.all([
       supabaseQuery(
-        `SELECT st_invoice_id, number, status, subtotal, tax, total, created_on::text
-         FROM spartan_ops.st_invoices
-         WHERE st_job_id = '${stJobId}'::bigint
-         ORDER BY created_on DESC`
+        `SELECT st_invoice_id, summary, invoice_date::text, sub_total, sales_tax, total, balance
+         FROM spartan_ops.st_invoices WHERE st_job_id = '${stJobId}'::bigint
+         ORDER BY invoice_date DESC`
       ).catch(() => []),
-
       supabaseQuery(
-        `SELECT id, total, type_name, memo, created_on::text
-         FROM spartan_ops.st_payments
-         WHERE st_job_id = '${stJobId}'
-         ORDER BY created_on DESC`
+        `SELECT p.st_payment_id, p.total, p.payment_type, p.memo, p.payment_date::text
+         FROM spartan_ops.st_payments p
+         JOIN spartan_ops.st_invoices i ON p.applied_to::text LIKE '%' || i.st_invoice_id::text || '%'
+         WHERE i.st_job_id = '${stJobId}'::bigint
+         ORDER BY p.payment_date DESC LIMIT 20`
       ).catch(() => [])
     ]);
-
-    const invoiceTotal = (invoices || []).reduce((sum, i) => sum + (parseFloat(i.total) || 0), 0);
-    const paymentTotal = (payments || []).reduce((sum, p) => sum + (parseFloat(p.total) || 0), 0);
-
+    const invTotal = (invoices || []).reduce((s, i) => s + (parseFloat(i.total) || 0), 0);
+    const payTotal = (payments || []).reduce((s, p) => s + (parseFloat(p.total) || 0), 0);
     res.json({
-      invoices: invoices || [],
-      payments: payments || [],
-      totals: {
-        invoiced: invoiceTotal,
-        paid: paymentTotal,
-        outstanding: invoiceTotal - paymentTotal
-      }
+      invoices: invoices || [], payments: payments || [],
+      totals: { invoiced: invTotal, paid: payTotal, outstanding: invTotal - payTotal }
     });
   } catch (err) { console.error('Financials error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// ═══════════════════════════════════════
-// NEW: JOB TYPE LOOKUP API
-// ═══════════════════════════════════════
-
+// === Job Types Lookup ===
 app.get('/api/jobtypes', async (req, res) => {
   try {
-    const rows = await supabaseQuery(
-      `SELECT st_job_type_id::text, name FROM spartan_ops.st_job_types ORDER BY name`
-    );
+    const rows = await supabaseQuery(`SELECT st_job_type_id::text, name FROM spartan_ops.st_job_types ORDER BY name`);
     res.json(rows || []);
-  } catch (err) { console.error('JobTypes error:', err); res.status(500).json({ error: 'Server error' }); }
+  } catch (err) { res.status(500).json({ error: 'Server error' }); }
 });
 
-// ═══════════════════════════════════════
-// STATIC FILE ROUTES (must be last)
-// ═══════════════════════════════════════
-
+// Static file routes (last)
 app.get('/form', (req, res) => res.sendFile(path.join(__dirname, 'public', 'form', 'index.html')));
 app.get('/materials', (req, res) => res.sendFile(path.join(__dirname, 'public', 'materials', 'index.html')));
-
 app.listen(PORT, '0.0.0.0', () => console.log(`Spartan Job Tracker on port ${PORT}`));
