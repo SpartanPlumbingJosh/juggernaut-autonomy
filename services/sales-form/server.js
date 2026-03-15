@@ -106,7 +106,7 @@ app.get('/api/catalog/search', async (req, res) => {
     const q = (req.query.q || '').replace(/'/g, "''").trim();
     if (!q) return res.json([]);
     const rows = await supabaseQuery(
-      `SELECT item_code, description, spartan_price, lee_number, category, is_active FROM spartan_ops.lee_supply_catalog WHERE is_active = true AND (description ILIKE '%${q}%' OR item_code ILIKE '%${q}%' OR lee_number ILIKE '%${q}%') ORDER BY description LIMIT 20`
+      `SELECT item_number, description, spartan_price, category, is_active FROM spartan_ops.lee_supply_catalog WHERE is_active = true AND (description ILIKE '%${q}%' OR item_number ILIKE '%${q}%') ORDER BY description LIMIT 20`
     );
     res.json(rows || []);
   } catch (err) { res.status(500).json({ error: 'Server error' }); }
