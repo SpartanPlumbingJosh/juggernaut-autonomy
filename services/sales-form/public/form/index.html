@@ -1,1 +1,957 @@
-PLACEHOLDER_FOR_LARGE_FILE
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Job Tracker — Spartan Plumbing</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#050609;--s1:#0a0c13;--s2:#0e1019;--s3:#131620;--s4:#181c28;--s5:#1e2233;
+  --b1:rgba(255,255,255,.03);--b2:rgba(255,255,255,.06);--b3:rgba(255,255,255,.1);
+  --t1:#f0f2f8;--t2:#7e85a0;--t3:#4a5068;--t4:#2d3248;
+  --fire:#ff2d46;--fire2:#ff5c70;--firebg:rgba(255,45,70,.07);--firebd:rgba(255,45,70,.18);--fireg:rgba(255,45,70,.4);
+  --volt:#2d7aff;--volt2:#5c9aff;--voltbg:rgba(45,122,255,.07);--voltbd:rgba(45,122,255,.18);--voltg:rgba(45,122,255,.35);
+  --mint:#00e87b;--mint2:#44ffaa;--mintbg:rgba(0,232,123,.06);--mintbd:rgba(0,232,123,.16);--mintg:rgba(0,232,123,.3);
+  --grape:#9945ff;--grapebg:rgba(153,69,255,.07);--grapebd:rgba(153,69,255,.16);--grapeg:rgba(153,69,255,.3);
+  --amber:#ffa726;--amberbg:rgba(255,167,38,.06);--amberbd:rgba(255,167,38,.16);
+  --ice:#00d4ff;--icebg:rgba(0,212,255,.05);--icebd:rgba(0,212,255,.14);
+  --hot:#ff4ecd;--hotbg:rgba(255,78,205,.06);--hotbd:rgba(255,78,205,.16);
+  --sans:'Outfit',system-ui,sans-serif;--mono:'JetBrains Mono',monospace;--disp:'Space Grotesk',sans-serif;
+}
+html{font-size:14px;scroll-behavior:smooth}
+body{background:var(--bg);color:var(--t1);font-family:var(--sans);-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background:
+  radial-gradient(ellipse 55% 30% at 10% -8%,rgba(255,45,70,.07),transparent 50%),
+  radial-gradient(ellipse 40% 25% at 90% 0%,rgba(45,122,255,.06),transparent 45%),
+  radial-gradient(ellipse 35% 20% at 50% -5%,rgba(153,69,255,.04),transparent 40%),
+  radial-gradient(ellipse 50% 50% at 50% 100%,rgba(0,232,123,.02),transparent 40%);
+  pointer-events:none;z-index:0}
+::selection{background:var(--fire);color:#fff}
+.shell{display:grid;grid-template-columns:56px 1fr 330px;min-height:100vh}
+
+/* RAIL */
+.rail{background:var(--s1);border-right:1px solid var(--b1);position:fixed;top:0;left:0;bottom:0;width:56px;z-index:20;display:flex;flex-direction:column;align-items:center;padding:12px 0;overflow-y:auto;scrollbar-width:none}
+.rail::-webkit-scrollbar{display:none}
+.rail-logo{width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-family:var(--disp);font-weight:900;font-size:17px;color:#fff;margin-bottom:16px;background:var(--fire);position:relative;box-shadow:0 0 24px var(--fireg),0 0 48px rgba(255,45,70,.12);flex-shrink:0}
+.rail-logo::before{content:'';position:absolute;inset:-3px;border-radius:13px;background:conic-gradient(from 180deg,var(--fire),var(--grape),var(--volt),var(--fire));opacity:.3;filter:blur(6px);z-index:-1;animation:logospin 8s linear infinite}
+@keyframes logospin{to{transform:rotate(360deg)}}
+.ri{width:36px;height:36px;border-radius:9px;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:all .15s;color:var(--t3);margin-bottom:2px;flex-shrink:0;position:relative}
+.ri:hover{background:rgba(255,255,255,.03);color:var(--t2)}
+.ri.on{background:var(--firebg);color:var(--fire);box-shadow:inset 0 0 0 1px var(--firebd)}
+.ri svg{width:17px;height:17px}
+.ri .tip{position:absolute;left:48px;background:var(--s4);color:var(--t1);padding:5px 10px;border-radius:6px;font-size:10px;font-weight:600;letter-spacing:.5px;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s;z-index:30;border:1px solid var(--b2)}
+.ri:hover .tip{opacity:1}
+.rsep{width:20px;height:1px;background:var(--b1);margin:4px 0;flex-shrink:0}
+.rtab-num{position:absolute;top:2px;right:2px;width:14px;height:14px;border-radius:50%;background:var(--fire);color:#fff;font-size:7px;font-weight:800;display:flex;align-items:center;justify-content:center;font-family:var(--mono)}
+
+/* MAIN */
+.main{grid-column:2;padding:18px 22px 80px;position:relative;z-index:1;margin-left:56px}
+
+/* TOP HEADER */
+.top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:18px}
+.top-l .crumb{font-family:var(--mono);font-size:10px;color:var(--t4);margin-bottom:5px;letter-spacing:.3px}
+.top-l .crumb a{color:var(--t3);text-decoration:none}.top-l .crumb a:hover{color:var(--fire)}
+.top-l h1{font-family:var(--disp);font-size:24px;font-weight:800;letter-spacing:-.5px;line-height:1.1}
+.top-l h1 .n{color:var(--fire)}
+.top-l .sub{font-size:11.5px;color:var(--t2);margin-top:4px}
+.pills{display:flex;gap:6px}
+.pill{padding:4px 11px;border-radius:8px;font-size:10px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;gap:5px}
+.pill::before{content:'';width:5px;height:5px;border-radius:50%}
+.p-sold{background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)}.p-sold::before{background:var(--mint);box-shadow:0 0 6px var(--mintg)}
+.p-inst{background:var(--grapebg);border:1px solid var(--grapebd);color:var(--grape)}.p-inst::before{background:var(--grape);box-shadow:0 0 6px var(--grapeg)}
+.p-svc{background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)}.p-svc::before{background:var(--volt);box-shadow:0 0 6px var(--voltg)}
+
+/* TAB HEADER */
+.tab-hdr{display:flex;align-items:center;gap:12px;margin-bottom:18px;padding-bottom:14px;border-bottom:1px solid var(--b1)}
+.tab-hdr .tab-icon{width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.tab-hdr .tab-icon svg{width:20px;height:20px}
+.tab-hdr .tab-info{flex:1}
+.tab-hdr .tab-title{font-family:var(--disp);font-size:18px;font-weight:700;letter-spacing:-.3px}
+.tab-hdr .tab-desc{font-size:11px;color:var(--t2);margin-top:2px}
+.tab-hdr .tab-badge{font-family:var(--mono);font-size:10px;font-weight:600;padding:4px 10px;border-radius:7px}
+
+/* AI SUMMARY */
+.ai-sum{background:linear-gradient(135deg,rgba(0,232,123,.06),rgba(0,212,255,.04));border:1px solid var(--mintbd);border-radius:12px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:16px}
+.ai-ring{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;position:relative;flex-shrink:0}
+.ai-ring .pct{font-family:var(--mono);font-size:16px;font-weight:700;position:relative;z-index:1}
+.ai-stats{flex:1;display:flex;gap:16px}
+.ai-s{text-align:center}
+.ai-s .n{font-family:var(--mono);font-size:20px;font-weight:700}
+.ai-s .l{font-size:9px;font-weight:600;letter-spacing:.8px;text-transform:uppercase;margin-top:2px}
+
+/* HERO STAT CARDS */
+.hero{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px}
+.st{border-radius:12px;padding:16px;position:relative;overflow:hidden}
+.st::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.st .num{font-family:var(--mono);font-size:26px;font-weight:700;letter-spacing:-1px;line-height:1;margin-bottom:4px}
+.st .lbl{font-size:10px;font-weight:600;letter-spacing:1px;text-transform:uppercase}
+.st .ai{position:absolute;top:10px;right:10px;width:8px;height:8px;border-radius:50%}
+.ai-ok{background:var(--mint);box-shadow:0 0 6px var(--mintg)}
+.ai-warn{background:var(--amber);box-shadow:0 0 6px rgba(255,167,38,.4)}
+.ai-fail{background:var(--fire);box-shadow:0 0 6px var(--fireg)}
+.ai-wait{background:var(--t3)}
+.sf{background:linear-gradient(150deg,rgba(255,45,70,.14),rgba(255,45,70,.02) 70%);border:1px solid var(--firebd)}.sf::before{background:linear-gradient(90deg,var(--fire),transparent)}.sf .num{color:var(--fire)}.sf .lbl{color:var(--fire2)}
+.sv{background:linear-gradient(150deg,rgba(45,122,255,.14),rgba(45,122,255,.02) 70%);border:1px solid var(--voltbd)}.sv::before{background:linear-gradient(90deg,var(--volt),transparent)}.sv .num{color:var(--volt)}.sv .lbl{color:var(--volt2)}
+.sm{background:linear-gradient(150deg,rgba(0,232,123,.12),rgba(0,232,123,.02) 70%);border:1px solid var(--mintbd)}.sm::before{background:linear-gradient(90deg,var(--mint),transparent)}.sm .num{color:var(--mint)}.sm .lbl{color:var(--mint2)}
+.sg{background:linear-gradient(150deg,rgba(153,69,255,.14),rgba(153,69,255,.02) 70%);border:1px solid var(--grapebd)}.sg::before{background:linear-gradient(90deg,var(--grape),transparent)}.sg .num{color:var(--grape)}.sg .lbl{color:var(--grape)}
+
+/* PIPELINE */
+.pipe-wrap{background:var(--s2);border:1px solid var(--b1);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+.pipe-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+.pipe-top h2{font-family:var(--disp);font-size:12px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:var(--t2)}
+.pipe-top .step{font-family:var(--mono);font-size:11px;font-weight:600;color:var(--volt)}
+.pipe{display:grid;grid-template-columns:repeat(6,1fr);gap:5px}
+.pn{text-align:center}
+.pb{height:7px;border-radius:4px;margin-bottom:6px;overflow:hidden;position:relative}
+.pb.done{background:var(--mint);box-shadow:0 0 8px var(--mintg)}
+.pb.now{background:linear-gradient(90deg,var(--volt),var(--ice));box-shadow:0 0 12px var(--voltg);animation:ppulse 2s ease-in-out infinite}
+@keyframes ppulse{0%,100%{box-shadow:0 0 8px var(--voltg)}50%{box-shadow:0 0 20px var(--voltg)}}
+.pb.now::after{content:'';position:absolute;top:0;left:0;height:100%;width:35%;background:linear-gradient(90deg,transparent,rgba(255,255,255,.25),transparent);animation:shim 2s infinite}
+@keyframes shim{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}
+.pb.w{background:var(--t4)}
+.pt{font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+.pn.done .pt{color:var(--mint)}.pn.now .pt{color:var(--volt)}.pn.w .pt{color:var(--t4)}
+
+/* CARDS */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:12px}
+.full{margin-bottom:12px}
+.c{background:var(--s2);border:1px solid var(--b1);border-radius:12px;overflow:hidden}
+.ch{padding:12px 16px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center}
+.ch h3{font-family:var(--disp);font-size:10.5px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--t2)}
+.ch .tg{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 8px;border-radius:6px}
+.cb{padding:14px 16px}
+
+/* VERIFIED ROWS */
+.vr{display:flex;align-items:center;padding:7px 0;border-bottom:1px solid var(--b1);font-size:12px;gap:8px}
+.vr:last-child{border-bottom:none}
+.vr .ai-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.vr .k{flex:1;color:var(--t2)}.vr .v{font-weight:600;text-align:right}
+
+/* CHIPS */
+.chip{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:7px;font-size:10px;font-weight:700;letter-spacing:.3px}
+.c-ok{background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)}
+.c-fail{background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)}
+.c-warn{background:var(--amberbg);border:1px solid var(--amberbd);color:var(--amber)}
+.c-info{background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)}
+.c-grape{background:var(--grapebg);border:1px solid var(--grapebd);color:var(--grape)}
+.c-ice{background:var(--icebg);border:1px solid var(--icebd);color:var(--ice)}
+
+/* SCOPE — WHITE TEXT */
+.slbl{font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3);margin-bottom:4px;display:flex;align-items:center;gap:6px}
+.slbl .ai-dot{width:6px;height:6px;border-radius:50%}
+.stxt{background:var(--s3);border-radius:8px;padding:11px 14px;font-size:12.5px;line-height:1.65;color:var(--t1);position:relative;padding-left:16px;margin-bottom:8px}
+.stxt::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;border-radius:2px}
+.stxt.cv::before{background:var(--volt)}.stxt.cg::before{background:var(--grape)}.stxt.ca::before{background:var(--amber)}.stxt.cm::before{background:var(--mint)}.stxt.cf::before{background:var(--fire)}.stxt.ci::before{background:var(--ice)}.stxt.ch2::before{background:var(--hot)}
+
+/* MATERIAL TABLE */
+.mt{width:100%;border-collapse:collapse}
+.mt th{text-align:left;font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3);padding:7px 8px;border-bottom:1px solid var(--b2)}.mt th:first-child{text-align:center;width:38px}.mt th:last-child{text-align:right}
+.mt td{padding:7px 8px;font-size:11.5px;border-bottom:1px solid var(--b1)}
+.mt td:first-child{font-family:var(--mono);font-weight:600;text-align:center;color:var(--ice)}
+.mt td:nth-child(3){font-family:var(--mono);font-size:10px;color:var(--t3)}
+.mt td:last-child{text-align:right;font-family:var(--mono);font-size:10.5px;color:var(--t2)}
+.mt tr:hover td{background:rgba(255,255,255,.015)}
+.mlbl{font-size:9.5px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:var(--t3);margin-bottom:6px;margin-top:14px;display:flex;align-items:center;gap:6px}
+.mlbl:first-child{margin-top:0}
+.mlbl .ai-dot{width:6px;height:6px;border-radius:50%}
+
+/* BUDGET */
+.bpct{display:flex;align-items:center;justify-content:space-between;background:var(--s3);border-radius:10px;padding:14px 18px;margin-bottom:14px;border:1px solid var(--b1)}
+.bpct-left{display:flex;align-items:center;gap:12px}
+.bpct-num{font-family:var(--mono);font-size:42px;font-weight:700;letter-spacing:-2px;line-height:1}
+.bpct-info{font-size:11px;color:var(--t2);line-height:1.5}
+.bpct-info strong{color:var(--t1)}
+.bpct-bar{width:120px}
+.bpct-track{height:6px;border-radius:3px;background:rgba(255,255,255,.04);margin-bottom:4px}
+.bpct-fill{height:100%;border-radius:3px}
+.bpct-sub{font-family:var(--mono);font-size:9px;color:var(--t3);text-align:right}
+
+/* ACTIVITY PANEL */
+.panel{grid-column:3;background:var(--s1);border-left:1px solid var(--b1);position:fixed;top:0;right:0;bottom:0;width:330px;display:flex;flex-direction:column;z-index:10}
+.panel-h{padding:16px 18px;border-bottom:1px solid var(--b1);display:flex;justify-content:space-between;align-items:center}
+.panel-h h2{font-family:var(--disp);font-size:12px;font-weight:700;letter-spacing:1.8px;text-transform:uppercase;color:var(--t1)}
+.live{display:flex;align-items:center;gap:5px;font-size:10px;font-weight:700;color:var(--mint);text-transform:uppercase;letter-spacing:1px}
+.live::before{content:'';width:6px;height:6px;border-radius:50%;background:var(--mint);box-shadow:0 0 8px var(--mintg);animation:blink 1.5s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+.panel-f{flex:1;overflow-y:auto;padding:10px 14px}
+.act{display:flex;gap:10px;padding:10px 0;border-bottom:1px solid var(--b1)}.act:last-child{border-bottom:none}
+.act-d{width:9px;height:9px;border-radius:50%;margin-top:4px;flex-shrink:0;position:relative}
+.act-d::after{content:'';position:absolute;top:13px;left:3.5px;width:2px;bottom:-14px;background:var(--b1)}.act:last-child .act-d::after{display:none}
+.act-d.fire{background:var(--fire);box-shadow:0 0 7px var(--fireg)}
+.act-d.volt{background:var(--volt);box-shadow:0 0 7px var(--voltg)}
+.act-d.mint{background:var(--mint);box-shadow:0 0 7px var(--mintg)}
+.act-d.grape{background:var(--grape);box-shadow:0 0 7px var(--grapeg)}
+.act-d.amber{background:var(--amber);box-shadow:0 0 5px rgba(255,167,38,.3)}
+.act-d.ice{background:var(--ice);box-shadow:0 0 5px rgba(0,212,255,.3)}
+.act-d.hot{background:var(--hot);box-shadow:0 0 5px rgba(255,78,205,.3)}
+.act-b{flex:1;min-width:0}
+.act-t{font-size:12px;font-weight:600;line-height:1.3}
+.act-m{font-family:var(--mono);font-size:9.5px;color:var(--t3);margin-top:2px;display:flex;gap:8px}
+.act-box{margin-top:5px;background:var(--s2);border:1px solid var(--b1);border-radius:6px;padding:7px 9px;font-size:11px;color:var(--t2);line-height:1.45}
+
+/* ACTIONS */
+.actions{display:flex;gap:10px;margin-top:18px}
+.btn{padding:12px 24px;border-radius:10px;font-size:13px;font-weight:700;font-family:var(--sans);cursor:pointer;transition:all .15s;border:none}
+.btn-go{background:linear-gradient(135deg,var(--fire),#ff6b3d);color:#fff;box-shadow:0 4px 20px var(--fireg);flex:1;font-size:14px}
+.btn-go:hover{box-shadow:0 6px 28px var(--fireg);transform:translateY(-1px)}
+.btn-go:disabled{opacity:.3;cursor:not-allowed;transform:none;box-shadow:none}
+.btn-2{background:var(--s3);color:var(--t2);border:1px solid var(--b2)}.btn-2:hover{background:var(--s4)}
+
+/* CHECKLIST */
+.ck{padding:0}
+.ck-item{display:flex;align-items:flex-start;gap:10px;padding:10px 16px;border-bottom:1px solid var(--b1);transition:background .1s}
+.ck-item:hover{background:rgba(255,255,255,.01)}
+.ck-item:last-child{border-bottom:none}
+.ck-num{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--t3);width:22px;text-align:center;margin-top:2px;flex-shrink:0}
+.ck-status{width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:10px}
+.ck-pass{background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)}
+.ck-fail{background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)}
+.ck-pend{background:var(--s3);border:1px solid var(--b2);color:var(--t4)}
+.ck-skip{background:var(--s3);border:1px solid var(--b2);color:var(--t3)}
+.ck-warn{background:var(--amberbg);border:1px solid var(--amberbd);color:var(--amber)}
+.ck-body{flex:1;min-width:0}
+.ck-title{font-size:12px;font-weight:600;line-height:1.3}
+.ck-meta{font-family:var(--mono);font-size:9px;color:var(--t3);margin-top:2px;display:flex;gap:8px}
+.ck-gate{display:inline-block;margin-left:6px;font-size:8px;font-weight:800;letter-spacing:.8px;text-transform:uppercase;padding:1px 5px;border-radius:4px;background:var(--firebd);color:var(--fire)}
+
+/* VERIFICATION GRID */
+.vg{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px}
+.vg-item{background:var(--s3);border:1px solid var(--b1);border-radius:8px;padding:8px 10px;display:flex;align-items:center;gap:6px;font-size:10.5px;transition:all .15s}
+.vg-item:hover{border-color:var(--b2)}
+.vg-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.vg-label{flex:1;color:var(--t2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vg-score{font-family:var(--mono);font-weight:700;font-size:10px}
+
+/* SECTION */
+.sec{margin-bottom:20px}
+.sec-h{font-family:var(--disp);font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;color:var(--t3);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+.sec-h::after{content:'';flex:1;height:1px;background:var(--b1)}
+.sec-h .sec-score{font-family:var(--mono);font-weight:700;padding:2px 8px;border-radius:5px;font-size:10px}
+
+/* INTEL CARDS */
+.intel{background:var(--s2);border:1px solid var(--b1);border-radius:12px;padding:16px;margin-bottom:12px}
+.intel-h{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.intel-h .intel-icon{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center}
+.intel-h .intel-icon svg{width:14px;height:14px}
+.intel-h .intel-title{font-family:var(--disp);font-size:12px;font-weight:700;letter-spacing:.5px}
+.intel-body{font-size:12px;line-height:1.65;color:var(--t2)}
+.intel-body strong{color:var(--t1)}
+
+/* EMPTY STATE */
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center}
+.empty-icon{width:48px;height:48px;border-radius:14px;display:flex;align-items:center;justify-content:center;margin-bottom:12px}
+.empty-icon svg{width:24px;height:24px}
+.empty-title{font-family:var(--disp);font-size:16px;font-weight:700;margin-bottom:6px}
+.empty-desc{font-size:12px;color:var(--t3);max-width:320px;line-height:1.5}
+
+/* QUARTER BAR */
+.qbar{display:flex;align-items:center;gap:0;margin:16px 0 12px;padding:0 16px}
+.qbar-seg{flex:1;text-align:center;padding:6px 0;font-size:9px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;border-bottom:3px solid var(--t4);color:var(--t4);transition:all .2s}
+.qbar-seg.active{border-color:var(--volt);color:var(--volt)}
+.qbar-seg.done{border-color:var(--mint);color:var(--mint)}
+
+/* KPI CARD */
+.kpi{display:flex;align-items:center;gap:10px;background:var(--s3);border:1px solid var(--b1);border-radius:10px;padding:12px 14px}
+.kpi-val{font-family:var(--mono);font-size:24px;font-weight:700;line-height:1}
+.kpi-info{font-size:10px;color:var(--t2)}
+.kpi-info strong{display:block;font-size:11px;color:var(--t1);font-weight:600}
+
+.loading{display:flex;align-items:center;justify-content:center;height:60vh;color:var(--t3);font-size:14px;font-family:var(--mono)}
+.hidden{display:none}
+
+@media(max-width:1100px){.shell{grid-template-columns:56px 1fr}.panel{display:none}}
+@media(max-width:700px){.shell{grid-template-columns:1fr}.rail{display:none}.main{margin-left:0;padding:12px}.hero{grid-template-columns:1fr 1fr}.g2{grid-template-columns:1fr}.g3{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="shell">
+
+<nav class="rail" id="rail"></nav>
+
+<div class="main">
+  <div id="loading" class="loading">Loading job data...</div>
+  <div id="content" class="hidden"></div>
+</div>
+
+<aside class="panel">
+  <div class="panel-h"><h2>Activity</h2><div class="live">Live</div></div>
+  <div class="panel-f" id="activityFeed"></div>
+</aside>
+
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════
+   SPARTAN JOB TRACKER — 12-TAB SYSTEM
+   ═══════════════════════════════════════════════ */
+
+const formId = new URLSearchParams(location.search).get('id');
+let DATA = null, FORM = {}, ML = {}, CHECKS = [];
+let activeTab = 'dashboard';
+
+// ─── TAB DEFINITIONS ───
+const TABS = [
+  { id:'dashboard', icon:'flag', label:'Dashboard', color:'fire' },
+  { id:'intel', icon:'search', label:'Customer Intel', color:'ice', num:'1' },
+  { id:'service', icon:'play', label:'Service Process', color:'volt', num:'2' },
+  { id:'sales', icon:'dollar', label:'Sales Process', color:'fire', num:'3' },
+  { id:'materials', icon:'box', label:'Materials', color:'mint', num:'4' },
+  { id:'permits', icon:'clipboard', label:'Permits', color:'amber', num:'5' },
+  { id:'cards', icon:'creditcard', label:'Purchasing Cards', color:'grape', num:'6' },
+  { id:'install', icon:'wrench', label:'Install', color:'volt', num:'7' },
+  { id:'financials', icon:'chart', label:'Financials', color:'fire', num:'8' },
+  { id:'postinstall', icon:'star', label:'Post-Install', color:'mint', num:'9' },
+  { id:'blockers', icon:'alert', label:'Blockers & Risk', color:'amber', num:'10' },
+  { id:'verify', icon:'shield', label:'Verification', color:'hot', num:'11' },
+  { id:'calls', icon:'phone', label:'Calls & Scripts', color:'ice', num:'12' },
+];
+
+const ICONS = {
+  flag:`<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>`,
+  search:`<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>`,
+  play:`<polygon points="5 3 19 12 5 21 5 3"/>`,
+  dollar:`<line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/>`,
+  box:`<path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>`,
+  clipboard:`<path d="M16 4h2a2 2 0 012 2v14a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h2"/><rect x="8" y="2" width="8" height="4" rx="1"/>`,
+  creditcard:`<rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/>`,
+  wrench:`<path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>`,
+  chart:`<line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>`,
+  star:`<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>`,
+  alert:`<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>`,
+  shield:`<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>`,
+  phone:`<path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.12.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0122 16.92z"/>`,
+};
+
+function svgIcon(name){return `<svg fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round">${ICONS[name]||''}</svg>`}
+
+// ─── RENDER RAIL ───
+function renderRail(){
+  let h = `<div class="rail-logo">S</div>`;
+  TABS.forEach((t,i) => {
+    if(i===1 || i===5 || i===10) h += `<div class="rsep"></div>`;
+    h += `<div class="ri${activeTab===t.id?' on':''}" data-tab="${t.id}" onclick="switchTab('${t.id}')">${svgIcon(t.icon)}<span class="tip">${t.num?t.num+'. ':''}${t.label}</span></div>`;
+  });
+  document.getElementById('rail').innerHTML = h;
+}
+
+function switchTab(id){
+  activeTab = id;
+  renderRail();
+  renderActiveTab();
+}
+
+// ─── LOAD DATA ───
+async function load(){
+  if(!formId){document.getElementById('loading').textContent='No job ID. Use ?id=N';return}
+  try{
+    const d = await (await fetch('/api/prefill/'+formId)).json();
+    if(d.error) throw d.error;
+    DATA = d;
+    FORM = d.form_fields || {};
+    ML = d.material_list_json || {};
+    computeChecks();
+    document.getElementById('content').classList.remove('hidden');
+    document.getElementById('loading').classList.add('hidden');
+    renderRail();
+    renderActiveTab();
+    renderActivityFeed();
+  }catch(e){document.getElementById('loading').textContent='Error: '+e}
+}
+
+// ─── UTILITY ───
+function esc(s){return(s||'').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function $(amt){return typeof amt==='number'?'$'+amt.toLocaleString(undefined,{maximumFractionDigits:0}):'—'}
+function vr(dot,key,val,style){return`<div class="vr"><div class="ai-dot ${dot}"></div><span class="k">${key}</span><span class="v"${style?` style="${style}"`:''}>​${val}</span></div>`}
+
+// ─── COMPUTE VERIFICATION CHECKS ───
+function computeChecks(){
+  CHECKS = [];
+  const f=FORM, d=DATA, ml=ML;
+  const amt = parseFloat(f.package_amount||d.sold_amount||0);
+  const hrs = parseFloat(f.hours_bid||0);
+  const matItems=(ml.parts||[]).length+(ml.tools||[]).length+(ml.consumables||[]).length;
+  const add=(name,pass,failMsg,phase)=>CHECKS.push({name,status:pass===true?'ok':pass===false?'fail':pass==='warn'?'warn':'wait',failMsg,phase:phase||'stage1'});
+  // Stage 1
+  add('3 Day Cancel',f.three_day_cancel===true,null,'stage1');
+  add('40% Deposit',f.forty_pct_deposit===true,'Not collected','stage1');
+  add('Photos in Slack',f.photos_posted===true,null,'stage1');
+  add('Video in Slack',f.video_posted===true,'Not found','stage1');
+  add('Excavation Safety',f.excavating&&!f.oups?'warn':f.excavating?true:null,'OUPS needed','stage1');
+  add('Subcontractor Agreement',f.subcontractor_needed?f.sub_signed:null,null,'stage1');
+  add('Customer Name',!!f.customer_name,null,'stage1');
+  add('Job Number',!!(f.st_job_number||d.job_number),null,'stage1');
+  add('Sale Amount',amt>0,null,'stage1');
+  add('Hours Bid',hrs>0,null,'stage1');
+  add('Payment Method',!!f.payment_method,null,'stage1');
+  add('Work Description',!!(f.work_description||f.work_type),null,'stage1');
+  add('Equipment Listed',!!(f.main_equipment_material||f.equipment),null,'stage1');
+  add('Material List',matItems>0,null,'stage1');
+  // Stage 4 — Install
+  add('Morning Call',null,null,'stage4');
+  add('Morning Call Score',null,null,'stage4');
+  add('Arrival Confirmed',null,null,'stage4');
+  add('Protection Photos',null,null,'stage4');
+  add('Before Photos',null,'Required','stage4');
+  add('During Photos',null,null,'stage4');
+  add('After Photos',null,'AI must approve','stage4');
+  add('Walkthrough Video',null,'Blocks closeout','stage4');
+  add('ST Closeout',null,null,'stage4');
+  // Stage 5 — Post-Install
+  add('Happy Call (24hr)',null,null,'stage5');
+  add('Happy Call Score',null,null,'stage5');
+  add('Missed Opportunity',null,null,'stage5');
+  add('Review Posted',null,null,'stage5');
+  add('Financing Final',null,null,'stage5');
+}
+
+function getScore(){
+  const passed=CHECKS.filter(c=>c.status==='ok').length;
+  const failed=CHECKS.filter(c=>c.status==='fail').length;
+  const warned=CHECKS.filter(c=>c.status==='warn').length;
+  const pending=CHECKS.filter(c=>c.status==='wait').length;
+  const total=CHECKS.length-pending;
+  const score=total>0?Math.round(passed/total*100):0;
+  return{passed,failed,warned,pending,total,score};
+}
+
+// ─── TAB ROUTER ───
+function renderActiveTab(){
+  const el=document.getElementById('content');
+  const renderers={
+    dashboard:renderDashboard, intel:renderIntel, service:renderServiceProcess,
+    sales:renderSalesProcess, materials:renderMaterials, permits:renderPermits,
+    cards:renderPurchasingCards, install:renderInstall, financials:renderFinancials,
+    postinstall:renderPostInstall, blockers:renderBlockers, verify:renderVerifyDash,
+    calls:renderCalls
+  };
+  el.innerHTML=(renderers[activeTab]||renderDashboard)();
+  el.scrollTop=0;
+  document.querySelector('.main').scrollTop=0;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 0: DASHBOARD (existing Page 1)
+// ═══════════════════════════════════════════════
+function renderDashboard(){
+  const f=FORM,d=DATA,ml=ML;
+  const amt=parseFloat(f.package_amount||d.sold_amount||0);
+  const hrs=parseFloat(f.hours_bid||0);
+  const rate=hrs>0?amt/hrs:0;
+  let rateTier='—',rateColor='var(--t3)';
+  if(rate>=1000){rateTier='Excellent';rateColor='var(--mint)'}
+  else if(rate>=750){rateTier='Good';rateColor='var(--volt)'}
+  else if(rate>=500){rateTier='Tight';rateColor='var(--amber)'}
+  else if(rate>0){rateTier='Critical';rateColor='var(--fire)'}
+  let matCost=0;['parts','consumables'].forEach(c=>(ml[c]||[]).forEach(i=>matCost+=(i.est_cost||0)*(i.qty||1)));
+  const matPct=amt>0?(matCost/amt*100).toFixed(1):'—';
+  const matColor=parseFloat(matPct)>18?'var(--fire)':'var(--mint)';
+  const matItems=(ml.parts||[]).length+(ml.tools||[]).length+(ml.consumables||[]).length;
+  const track=(d.track_type||'').toLowerCase();
+  const trackPill=track==='install'?'<div class="pill p-inst">Install</div>':track==='service'?'<div class="pill p-svc">Service</div>':'';
+  const {passed,failed,warned,pending,score}=getScore();
+  const scoreColor=score>=80?'var(--mint)':score>=60?'var(--amber)':'var(--fire)';
+  const okDeg=(passed/CHECKS.length)*360;
+  const failDeg=okDeg+(failed/CHECKS.length)*360;
+  const warnDeg=failDeg+(warned/CHECKS.length)*360;
+  const jobTypeName=(f.job_types&&f.job_types[0])?(f.job_types[0].name||f.job_types[0]):(d.business_unit||'');
+  const stars=f.star_package||'—';
+  const starEmoji=typeof stars==='number'?'⭐'.repeat(stars):(parseInt(stars)?'⭐'.repeat(parseInt(stars)):stars);
+
+  let h=`
+    <div class="top">
+      <div class="top-l">
+        <div class="crumb"><a href="#">Jobs</a> / <a href="#">#${d.job_number||''}</a> / Tracker</div>
+        <h1><span class="n">#${d.job_number||''}</span> ${d.customer_name||''}</h1>
+        <div class="sub">${jobTypeName} · ${d.business_unit||''} · ${f.date_sold||''}</div>
+      </div>
+      <div class="pills"><div class="pill p-sold">Sold</div>${trackPill}</div>
+    </div>
+    <div class="ai-sum">
+      <div class="ai-ring" style="background:conic-gradient(var(--mint) 0deg,var(--mint) ${okDeg}deg,var(--fire) ${okDeg}deg,var(--fire) ${failDeg}deg,var(--amber) ${failDeg}deg,var(--amber) ${warnDeg}deg,var(--t4) ${warnDeg}deg);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 4px));mask:radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 4px))">
+        <span class="pct" style="color:${scoreColor}">${score}%</span>
+      </div>
+      <div class="ai-stats">
+        <div class="ai-s"><div class="n" style="color:var(--mint)">${passed}</div><div class="l" style="color:var(--mint2)">Verified</div></div>
+        <div class="ai-s"><div class="n" style="color:var(--fire)">${failed}</div><div class="l" style="color:var(--fire2)">Failed</div></div>
+        <div class="ai-s"><div class="n" style="color:var(--amber)">${warned}</div><div class="l" style="color:var(--amber)">Warning</div></div>
+        ${pending>0?`<div class="ai-s"><div class="n" style="color:var(--t3)">${pending}</div><div class="l" style="color:var(--t3)">Pending</div></div>`:''}
+      </div>
+    </div>
+    <div class="hero">
+      <div class="st sf"><div class="ai ai-ok"></div><div class="num">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Sale Amount</div></div>
+      <div class="st sv"><div class="ai ${rate>=500?'ai-ok':'ai-warn'}"></div><div class="num" style="color:${rateColor}">$${rate.toFixed(0)}<span style="font-size:13px;opacity:.5">/hr</span></div><div class="lbl">${hrs} Hrs · ${rateTier}</div></div>
+      <div class="st sm"><div class="ai ${parseFloat(matPct)<=18?'ai-ok':'ai-fail'}"></div><div class="num" style="color:${matColor}">${matPct}%</div><div class="lbl">Material Cost</div></div>
+      <div class="st sg"><div class="ai ai-ok"></div><div class="num" style="font-size:${(f.financing_company||'—').length>8?18:22}px">${f.financing_company||f.payment_method||'—'}</div><div class="lbl">${f.payment_method==='Financing'?'Financing':'Payment'}</div></div>
+    </div>
+    <div class="pipe-wrap">
+      <div class="pipe-top"><h2>Job Lifecycle</h2><div class="step">Stage 1 / 6</div></div>
+      <div class="pipe">${['Job Sold','Contact','Pre-Install','Day Before','Install','Post-Install'].map((s,i)=>{const cls=i===0?'now':'w';return`<div class="pn ${cls}"><div class="pb ${cls}"></div><div class="pt">${s}</div></div>`}).join('')}</div>
+    </div>
+    <div class="g2">
+      <div class="c"><div class="ch"><h3>Customer</h3></div><div class="cb">
+        ${vr('ai-ok','Name',d.customer_name||'—')}
+        ${vr('ai-ok','Job #','#'+(d.job_number||''),'font-family:var(--mono);color:var(--ice)')}
+        ${vr('ai-ok','Date Sold',f.date_sold||'—')}
+        ${vr('ai-ok','Star Package',starEmoji)}
+        ${vr('ai-ok','Payment',f.payment_method||'—')}
+        ${vr('ai-ok','Slack',d.slack_channel_id||'—','font-family:var(--mono);font-size:10px;color:var(--ice)')}
+      </div></div>
+      <div class="c"><div class="ch"><h3>Verification Checks</h3></div><div class="cb">
+        ${CHECKS.filter(c=>c.status!=='wait'||c.name==='Subcontractor Agreement').slice(0,8).map(c=>{
+          const dot=c.status==='ok'?'ai-ok':c.status==='fail'?'ai-fail':c.status==='warn'?'ai-warn':'ai-wait';
+          const chip=c.status==='ok'?'<span class="chip c-ok">✓ Verified</span>':c.status==='fail'?`<span class="chip c-fail">✗ ${c.failMsg||'Failed'}</span>`:c.status==='warn'?`<span class="chip c-warn">⚠ ${c.failMsg||'Check'}</span>`:'<span class="chip c-info">— N/A</span>';
+          return`<div class="vr"><div class="ai-dot ${dot}"></div><span class="k">${c.name}</span>${chip}</div>`;
+        }).join('')}
+      </div></div>
+    </div>
+    <div class="c full"><div class="ch"><h3>Work Scope</h3></div><div class="cb">
+      <div><div class="slbl"><div class="ai-dot ai-ok"></div>Description</div><div class="stxt cv">${esc(f.work_description||f.work_type||'Not specified')}</div></div>
+      <div class="g2" style="margin-top:8px;margin-bottom:0">
+        <div><div class="slbl"><div class="ai-dot ai-ok"></div>Equipment</div><div class="stxt cg">${esc(f.main_equipment_material||f.equipment||'Not specified')}</div></div>
+        <div><div class="slbl"><div class="ai-dot ${f.special_tools?'ai-ok':'ai-wait'}"></div>Special Tools</div><div class="stxt ca">${esc(f.special_tools||'None listed')}</div></div>
+      </div>
+      ${f.promises?`<div style="margin-top:8px"><div class="slbl"><div class="ai-dot ai-warn"></div>Customer Expectations</div><div class="stxt cf">${esc(f.promises)}</div></div>`:''}
+    </div></div>`;
+  if(matItems>0) h+=renderMatSection(ml,amt,matCost,matPct,matColor,matItems);
+  h+=`<div class="actions">
+    <button class="btn btn-go" id="btnSubmit" onclick="doSubmit()">Confirm & Push to Production</button>
+    <button class="btn btn-2" onclick="switchTab('materials')">View Materials</button>
+  </div>`;
+  return h;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 1: CUSTOMER INTEL
+// ═══════════════════════════════════════════════
+function renderIntel(){
+  const f=FORM,d=DATA;
+  const amt=parseFloat(f.package_amount||d.sold_amount||0);
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--icebg);border:1px solid var(--icebd);color:var(--ice)">${svgIcon('search')}</div>
+      <div class="tab-info"><div class="tab-title">Customer Intel</div><div class="tab-desc">AI-assembled pre-dispatch briefing — know everything before you knock</div></div>
+      <div class="tab-badge" style="background:var(--icebg);border:1px solid var(--icebd);color:var(--ice)">READ-ONLY</div>
+    </div>
+
+    <div class="intel" style="border-color:var(--icebd)">
+      <div class="intel-h"><div class="intel-icon" style="background:var(--voltbg);color:var(--volt)">${svgIcon('flag')}</div><div class="intel-title">Customer Profile</div></div>
+      <div class="intel-body">
+        <strong>${d.customer_name||'Unknown Customer'}</strong><br>
+        Job #${d.job_number||'—'} · ${d.business_unit||'—'}<br>
+        ${f.date_sold?'Sold '+f.date_sold:''} ${f.payment_method?'· '+f.payment_method:''}<br>
+        Sale: <strong style="color:var(--fire)">$${amt.toLocaleString()}</strong>
+        ${f.hours_bid?' · '+f.hours_bid+' hours bid':''}
+        ${f.star_package?' · '+f.star_package+' Star':''}
+      </div>
+    </div>
+
+    <div class="intel" style="border-color:var(--voltbd)">
+      <div class="intel-h"><div class="intel-icon" style="background:var(--mintbg);color:var(--mint)">${svgIcon('wrench')}</div><div class="intel-title">Work Scope & Equipment</div></div>
+      <div class="intel-body">
+        ${f.work_description||f.work_type?`<strong>Description:</strong> ${esc(f.work_description||f.work_type)}<br>`:''}<br>
+        ${f.main_equipment_material||f.equipment?`<strong>Equipment:</strong> ${esc(f.main_equipment_material||f.equipment)}<br>`:''}
+        ${f.special_tools?`<strong>Special Tools:</strong> ${esc(f.special_tools)}<br>`:''}
+        ${f.promises?`<br><strong style="color:var(--amber)">⚠ Customer Expectations:</strong> ${esc(f.promises)}`:''}
+      </div>
+    </div>
+
+    <div class="intel" style="border-color:var(--mintbd)">
+      <div class="intel-h"><div class="intel-icon" style="background:var(--grapebg);color:var(--grape)">${svgIcon('clipboard')}</div><div class="intel-title">AI Analysis</div></div>
+      <div class="intel-body">
+        <div style="padding:16px;background:var(--s3);border-radius:8px;border:1px solid var(--b2);color:var(--t2);text-align:center">
+          ${svgIcon('search')}<br><br>
+          <strong style="color:var(--t1)">Full customer history analysis will be generated here</strong><br>
+          Previous jobs, open estimates, Slack channel history, recall records, equipment age map, and AI-identified opportunities.<br><br>
+          <span style="font-family:var(--mono);font-size:10px;color:var(--ice)">Powered by Sonnet 4.6 · Auto-generated at dispatch</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="g2">
+      <div class="c"><div class="ch"><h3>Previous Jobs</h3><div class="tg" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">Loading...</div></div>
+        <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--voltbg);color:var(--volt)">${svgIcon('flag')}</div><div class="empty-title">Job history loads at dispatch</div><div class="empty-desc">All prior jobs at this location will appear here with dates, amounts, techs, and outcomes.</div></div></div>
+      </div>
+      <div class="c"><div class="ch"><h3>Open Estimates</h3></div>
+        <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--amberbg);color:var(--amber)">${svgIcon('dollar')}</div><div class="empty-title">Unsold estimates</div><div class="empty-desc">Any open estimates for this customer with dollar amounts and relevance flags.</div></div></div>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 2: SERVICE PROCESS
+// ═══════════════════════════════════════════════
+function renderServiceProcess(){
+  const steps=[
+    {q:'Q1',items:['ETA text to customer','Truck photo in Slack','Arrive on time (±15 min)','Check-in with manager','Photo: Main shut-off valve','Photo: Water heater data tag','Photo: Hose bibs','Whole-home inspection begins']},
+    {q:'Q2',items:['W&T inspection complete','Screenshot: W&T findings in Slack','Photo: Every issue found','Repair options presented','Quote built in ServiceTitan','Manager notified of options','Customer decision logged']},
+    {q:'HALFTIME',items:['Halftime show with customer','All photos reviewed by manager','All findings documented','Turnover notes complete','Manager posts "Halftime Show Complete"']}
+  ];
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">${svgIcon('play')}</div>
+      <div class="tab-info"><div class="tab-title">Service Process</div><div class="tab-desc">Live-scored Rules of the Road — Q1 through Halftime</div></div>
+      <div class="tab-badge" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">PLSERVICE</div>
+    </div>
+    <div class="qbar">${steps.map(s=>`<div class="qbar-seg">${s.q}</div>`).join('')}</div>
+    ${steps.map(section=>{
+      let stepNum=0;
+      return`<div class="sec"><div class="sec-h">${section.q}<span class="sec-score" style="background:var(--s3);color:var(--t3)">0/${section.items.length}</span></div>
+        <div class="c"><div class="ck">${section.items.map(item=>{
+          stepNum++;
+          return`<div class="ck-item"><div class="ck-num">${stepNum}</div><div class="ck-status ck-pend">⬜</div><div class="ck-body"><div class="ck-title">${item}</div><div class="ck-meta"><span>Pending</span></div></div></div>`;
+        }).join('')}</div></div></div>`;
+    }).join('')}`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 3: SALES PROCESS
+// ═══════════════════════════════════════════════
+function renderSalesProcess(){
+  const amt=parseFloat(FORM.package_amount||DATA.sold_amount||0);
+  const needsCancel=amt>3000;
+  const steps=[
+    {q:'Q3',items:['Turnover from service tech','Customer relationship established','Options review','Financing presented','Good-Better-Best pricing','Customer selects option','Objection handling']},
+    {q:'Q4',items:['Paperwork completed','Payment method confirmed','Financing application submitted','Deposit collected','Install date discussed','ServiceTitan updated']},
+    {q:'POST GAME',items:['Production tagged in Slack','Crew availability checked','Work scope posted','Material list posted','Manager posts "Post Game Complete"']}
+  ];
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)">${svgIcon('dollar')}</div>
+      <div class="tab-info"><div class="tab-title">Sales Process</div><div class="tab-desc">Q3 through Post Game Recap — sales/turnover scoring</div></div>
+    </div>
+    ${needsCancel?`<div style="background:var(--firebg);border:1px solid var(--firebd);border-radius:10px;padding:14px 18px;margin-bottom:16px;display:flex;align-items:center;gap:12px">
+      <div style="width:36px;height:36px;border-radius:9px;background:var(--firebd);display:flex;align-items:center;justify-content:center;flex-shrink:0;color:var(--fire);font-size:18px">⚠</div>
+      <div><div style="font-weight:700;color:var(--fire);font-size:13px">3-Day Right to Cancel — HARD GATE</div><div style="font-size:11px;color:var(--fire2);margin-top:2px">Sale is $${amt.toLocaleString()} (over $3,000). Signed cancellation notice REQUIRED before work begins.</div></div>
+      <div class="chip ${FORM.three_day_cancel?'c-ok':'c-fail'}" style="flex-shrink:0">${FORM.three_day_cancel?'✓ Verified':'✗ Missing'}</div>
+    </div>`:''}
+    <div class="qbar">${steps.map(s=>`<div class="qbar-seg">${s.q}</div>`).join('')}</div>
+    ${steps.map(section=>{
+      let stepNum=0;
+      return`<div class="sec"><div class="sec-h">${section.q}<span class="sec-score" style="background:var(--s3);color:var(--t3)">0/${section.items.length}</span></div>
+        <div class="c"><div class="ck">${section.items.map(item=>{
+          stepNum++;
+          return`<div class="ck-item"><div class="ck-num">${stepNum}</div><div class="ck-status ck-pend">⬜</div><div class="ck-body"><div class="ck-title">${item}</div><div class="ck-meta"><span>Pending</span></div></div></div>`;
+        }).join('')}</div></div></div>`;
+    }).join('')}`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 4: MATERIALS
+// ═══════════════════════════════════════════════
+function renderMaterials(){
+  const ml=ML,f=FORM,d=DATA;
+  const amt=parseFloat(f.package_amount||d.sold_amount||0);
+  let matCost=0;['parts','consumables'].forEach(c=>(ml[c]||[]).forEach(i=>matCost+=(i.est_cost||0)*(i.qty||1)));
+  const matPct=amt>0?(matCost/amt*100).toFixed(1):'—';
+  const matColor=parseFloat(matPct)>18?'var(--fire)':'var(--mint)';
+  const matItems=(ml.parts||[]).length+(ml.tools||[]).length+(ml.consumables||[]).length;
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">${svgIcon('box')}</div>
+      <div class="tab-info"><div class="tab-title">Materials — Lee Supply</div><div class="tab-desc">AI-generated material list · Tech verification · Staging</div></div>
+      <div class="tab-badge" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">${matItems} items</div>
+    </div>
+    ${matItems>0?renderMatSection(ml,amt,matCost,matPct,matColor,matItems):`
+      <div class="c full"><div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--mintbg);color:var(--mint)">${svgIcon('box')}</div><div class="empty-title">No materials generated yet</div><div class="empty-desc">AI will generate a material list from the Lee Supply catalog once the job scope is finalized.</div></div></div></div>`}
+    <div class="g3">
+      <div class="kpi"><div class="kpi-val" style="color:var(--volt)">—</div><div class="kpi-info"><strong>Ordered</strong>Sent to Lee Supply</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--amber)">—</div><div class="kpi-info"><strong>Staged</strong>In truck / warehouse</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--mint)">—</div><div class="kpi-info"><strong>Verified</strong>Photo confirmed</div></div>
+    </div>`;
+}
+
+function renderMatSection(ml,amt,matCost,matPct,matColor,matItems){
+  const fillW=amt>0?Math.min(100,matCost/(amt*0.25)*100):0;
+  let h=`<div class="c full"><div class="ch"><h3>Materials — Lee Supply</h3><div class="tg" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">${matItems} items</div></div><div class="cb">
+    <div class="bpct"><div class="bpct-left"><div class="bpct-num" style="color:${matColor}">${matPct}%</div><div class="bpct-info"><strong>$${matCost.toFixed(2)}</strong> of $${amt.toLocaleString()}<br>Target: under 18%</div></div>
+    <div class="bpct-bar"><div class="bpct-track"><div class="bpct-fill" style="width:${fillW}%;background:linear-gradient(90deg,var(--mint),var(--ice));border-radius:3px;box-shadow:0 0 8px var(--mintg)"></div></div><div class="bpct-sub">18% → $${(amt*0.18).toFixed(0)}</div></div></div>`;
+  ['parts','tools','consumables'].forEach(cat=>{
+    const items=ml[cat];if(!items?.length)return;
+    const label={parts:'Parts',tools:'Tools',consumables:'Consumables'}[cat];
+    h+=`<div class="mlbl"><div class="ai-dot ai-ok"></div>${label} — ${items.length}</div>`;
+    h+='<table class="mt"><thead><tr><th>Qty</th><th>Item</th><th>Lee #</th><th>Cost</th></tr></thead><tbody>';
+    items.forEach(i=>{const cost=i.est_cost?'$'+(i.est_cost*(i.qty||1)).toFixed(2):'—';h+=`<tr><td>${i.qty||1}</td><td>${esc(i.item||i.name||'')}</td><td>${i.lee_number||'—'}</td><td>${cost}</td></tr>`});
+    h+='</tbody></table>';
+  });
+  h+='</div></div>';return h;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 5: PERMITS
+// ═══════════════════════════════════════════════
+function renderPermits(){
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--amberbg);border:1px solid var(--amberbd);color:var(--amber)">${svgIcon('clipboard')}</div>
+      <div class="tab-info"><div class="tab-title">Permits</div><div class="tab-desc">Jurisdiction tracking with AI cold-start learning</div></div>
+    </div>
+    <div class="c full"><div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--amberbg);color:var(--amber)">${svgIcon('clipboard')}</div><div class="empty-title">Permit requirements auto-detected</div><div class="empty-desc">When a job is assigned to a jurisdiction, AI researches permit requirements. First encounter with a new area triggers research — results improve over time.</div></div></div></div>
+    <div class="g2">
+      <div class="c"><div class="ch"><h3>Permit Status</h3></div><div class="cb" style="color:var(--t3);font-size:12px">No permits required or jurisdiction not yet determined.</div></div>
+      <div class="c"><div class="ch"><h3>Contractor Credentials</h3></div><div class="cb">
+        ${vr('ai-ok','License','Active','color:var(--mint)')}
+        ${vr('ai-ok','Insurance','Active','color:var(--mint)')}
+        ${vr('ai-ok','Bond','Active','color:var(--mint)')}
+      </div></div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 6: PURCHASING CARDS
+// ═══════════════════════════════════════════════
+function renderPurchasingCards(){
+  const amt=parseFloat(FORM.package_amount||DATA.sold_amount||0);
+  const budget18=amt*0.18;
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--grapebg);border:1px solid var(--grapebd);color:var(--grape)">${svgIcon('creditcard')}</div>
+      <div class="tab-info"><div class="tab-title">Purchasing Cards</div><div class="tab-desc">CC request lifecycle · Response time KPIs · Receipt reconciliation</div></div>
+    </div>
+    <div class="g3">
+      <div class="kpi"><div class="kpi-val" style="color:var(--grape)">0</div><div class="kpi-info"><strong>Cards Issued</strong>This job</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--mint)">$0</div><div class="kpi-info"><strong>Total Spend</strong>of $${budget18.toFixed(0)} budget</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--volt)">—</div><div class="kpi-info"><strong>Avg Response</strong>Target: &lt;3 min</div></div>
+    </div>
+    <div class="c full" style="margin-top:12px"><div class="ch"><h3>Card Requests</h3></div>
+      <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--grapebg);color:var(--grape)">${svgIcon('creditcard')}</div><div class="empty-title">No card requests yet</div><div class="empty-desc">When a tech says "I need a credit card" in Slack, the system detects it, tags card-issuing members, and starts the response clock.</div></div></div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 7: INSTALL
+// ═══════════════════════════════════════════════
+function renderInstall(){
+  const checks=[
+    {code:'4.1',name:'Morning-of call',gate:false},
+    {code:'4.2',name:'Morning-of call scorecard',gate:false},
+    {code:'4.3',name:'Arrival confirmation',gate:false},
+    {code:'4.4',name:'Protection photos',gate:false},
+    {code:'4.5',name:'HEPA vac photo (concrete only)',gate:false},
+    {code:'4.6',name:'Before photos',gate:true},
+    {code:'4.7',name:'During photos (4+ hr jobs)',gate:false},
+    {code:'4.8',name:'After photos — AI must approve',gate:true},
+    {code:'4.9',name:'Customer walkthrough video',gate:true},
+    {code:'4.10',name:'Phone assistance disclosure',gate:false},
+    {code:'4.11',name:'ServiceTitan closeout check',gate:false},
+    {code:'4.12',name:'Off-platform call detection',gate:false},
+    {code:'4.13',name:'Check-in notes (every 2 hrs)',gate:false},
+  ];
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">${svgIcon('wrench')}</div>
+      <div class="tab-info"><div class="tab-title">Install — Day Of</div><div class="tab-desc">Verification checkpoints · Code compliance · Photo/video coverage</div></div>
+    </div>
+    <div class="c full"><div class="ch"><h3>Install Checkpoints</h3><div class="tg" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">0/13</div></div>
+      <div class="ck">${checks.map(c=>`<div class="ck-item">
+        <div class="ck-num">${c.code}</div>
+        <div class="ck-status ck-pend">⬜</div>
+        <div class="ck-body"><div class="ck-title">${c.name}${c.gate?'<span class="ck-gate">HARD GATE</span>':''}</div><div class="ck-meta"><span>Pending</span></div></div>
+      </div>`).join('')}</div>
+    </div>
+    <div class="g2">
+      <div class="c"><div class="ch"><h3>Code Compliance</h3></div><div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--mintbg);color:var(--mint)">${svgIcon('shield')}</div><div class="empty-title">Awaiting after photos</div><div class="empty-desc">AI reviews photos for plumbing code compliance and work quality after checkpoint 4.8.</div></div></div></div>
+      <div class="c"><div class="ch"><h3>Photo Coverage</h3></div><div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--icebg);color:var(--ice)">${svgIcon('search')}</div><div class="empty-title">Awaiting documentation</div><div class="empty-desc">AI verifies every angle and detail is photographed — no gaps in documentation.</div></div></div></div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 8: FINANCIALS
+// ═══════════════════════════════════════════════
+function renderFinancials(){
+  const f=FORM,d=DATA;
+  const amt=parseFloat(f.package_amount||d.sold_amount||0);
+  const deposit40=amt*0.4;
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--firebg);border:1px solid var(--firebd);color:var(--fire)">${svgIcon('chart')}</div>
+      <div class="tab-info"><div class="tab-title">Financials</div><div class="tab-desc">Deposits · Financing · Material costs · Profitability</div></div>
+    </div>
+    <div class="hero">
+      <div class="st sf"><div class="ai ai-ok"></div><div class="num">$${amt.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">Total Sale</div></div>
+      <div class="st sv"><div class="ai ${f.forty_pct_deposit?'ai-ok':'ai-fail'}"></div><div class="num" style="color:${f.forty_pct_deposit?'var(--volt)':'var(--fire)'}">$${deposit40.toLocaleString(undefined,{maximumFractionDigits:0})}</div><div class="lbl">40% Deposit Due</div></div>
+      <div class="st sm"><div class="ai ai-wait"></div><div class="num">$0</div><div class="lbl">Material Spend</div></div>
+      <div class="st sg"><div class="ai ai-ok"></div><div class="num" style="font-size:18px">${f.financing_company||f.payment_method||'—'}</div><div class="lbl">Payment Method</div></div>
+    </div>
+    <div class="g2">
+      <div class="c"><div class="ch"><h3>Deposit Tracking</h3></div><div class="cb">
+        ${vr(f.forty_pct_deposit?'ai-ok':'ai-fail','40% Required','$'+deposit40.toFixed(0))}
+        ${vr('ai-wait','Collected','Pending verification')}
+        ${vr('ai-wait','Receipt Photo','Not yet posted')}
+      </div></div>
+      <div class="c"><div class="ch"><h3>Financing Status</h3></div><div class="cb">
+        ${f.payment_method==='Financing'?`
+          ${vr('ai-ok','Lender',f.financing_company||'—')}
+          ${vr('ai-wait','Application','Monitoring...')}
+          ${vr('ai-wait','Funded','Pending')}
+        `:`<div style="color:var(--t3);font-size:12px;padding:8px 0">Not a financing job — ${f.payment_method||'payment method TBD'}</div>`}
+      </div></div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 9: POST-INSTALL / RECALL
+// ═══════════════════════════════════════════════
+function renderPostInstall(){
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">${svgIcon('star')}</div>
+      <div class="tab-info"><div class="tab-title">Post-Install / Recall</div><div class="tab-desc">Happy call · Reviews · Recall lifecycle</div></div>
+    </div>
+    <div class="c full"><div class="ch"><h3>Post-Install Checks</h3><div class="tg" style="background:var(--mintbg);border:1px solid var(--mintbd);color:var(--mint)">Stage 5</div></div>
+      <div class="ck">
+        ${[{c:'5.1',n:'Happy call SLA (24hr)'},{c:'5.2',n:'Happy call scorecard'},{c:'5.3',n:'Missed opportunity flag'},{c:'5.4',n:'Review posted check'},{c:'5.5',n:'Financing finalization'}].map(s=>
+          `<div class="ck-item"><div class="ck-num">${s.c}</div><div class="ck-status ck-pend">⬜</div><div class="ck-body"><div class="ck-title">${s.n}</div><div class="ck-meta"><span>Pending</span></div></div></div>`
+        ).join('')}
+      </div>
+    </div>
+    <div class="g2">
+      <div class="kpi"><div class="kpi-val" style="color:var(--mint)">0</div><div class="kpi-info"><strong>Customer Callbacks</strong>3+ = quality signal</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--amber)">—</div><div class="kpi-info"><strong>Review Status</strong>Not requested yet</div></div>
+    </div>
+    <div class="c full" style="margin-top:12px"><div class="ch"><h3>Recall / Patchwork</h3></div>
+      <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--amberbg);color:var(--amber)">${svgIcon('alert')}</div><div class="empty-title">No recall triggered</div><div class="empty-desc">If a return visit is needed, the full recall lifecycle (8 checkpoints + root cause analysis) appears here.</div></div></div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 10: BLOCKERS & RISK
+// ═══════════════════════════════════════════════
+function renderBlockers(){
+  const f=FORM;
+  const blockers=[];
+  if(f.forty_pct_deposit===false) blockers.push({title:'40% Deposit Not Collected',owner:'Production',age:'Since sale',level:'high'});
+  if(f.excavating&&!f.oups) blockers.push({title:'OUPS Not Called — Excavation Required',owner:'Production',age:'Since sale',level:'critical'});
+  if(f.video_posted===false) blockers.push({title:'Video Not Posted to Slack',owner:'Service Tech',age:'Since sale',level:'medium'});
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--amberbg);border:1px solid var(--amberbd);color:var(--amber)">${svgIcon('alert')}</div>
+      <div class="tab-info"><div class="tab-title">Blockers & Risk</div><div class="tab-desc">Central view of anything blocking or threatening job progress</div></div>
+      <div class="tab-badge" style="background:${blockers.length?'var(--firebd)':'var(--mintbg)'};color:${blockers.length?'var(--fire)':'var(--mint)'}">${blockers.length} active</div>
+    </div>
+    <div class="g3" style="margin-bottom:16px">
+      <div class="kpi"><div class="kpi-val" style="color:${blockers.length?'var(--fire)':'var(--mint)'}">${blockers.length}</div><div class="kpi-info"><strong>Active Blockers</strong>Preventing progress</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--mint)">0</div><div class="kpi-info"><strong>Resolved</strong>Cleared this job</div></div>
+      <div class="kpi"><div class="kpi-val" style="color:var(--volt)">🟢</div><div class="kpi-info"><strong>Timeline Risk</strong>AI assessment</div></div>
+    </div>
+    ${blockers.length?`<div class="c full"><div class="ch"><h3>Active Blockers</h3></div><div class="ck">${blockers.map(b=>`<div class="ck-item">
+      <div class="ck-status ${b.level==='critical'?'ck-fail':b.level==='high'?'ck-warn':'ck-pend'}">${b.level==='critical'?'🔴':b.level==='high'?'🟠':'🟡'}</div>
+      <div class="ck-body"><div class="ck-title">${b.title}</div><div class="ck-meta"><span>${b.owner}</span><span>${b.age}</span></div></div>
+    </div>`).join('')}</div></div>`:
+    `<div class="c full"><div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--mintbg);color:var(--mint)">${svgIcon('shield')}</div><div class="empty-title">No active blockers</div><div class="empty-desc">All clear. Any obstacle that prevents progress will appear here with escalation timing.</div></div></div></div>`}`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 11: VERIFICATION DASHBOARD
+// ═══════════════════════════════════════════════
+function renderVerifyDash(){
+  const {passed,failed,warned,pending,score}=getScore();
+  const scoreColor=score>=80?'var(--mint)':score>=60?'var(--amber)':'var(--fire)';
+  const phases=[
+    {name:'PRE-SALE',color:'volt',checks:[
+      {n:'CSR Booking',s:'wait'},{n:'Call Recording',s:'wait'},{n:'Diagnosis Quality',s:'wait'},{n:'Sales Presentation',s:'wait'},{n:'Options Presented',s:'wait'}
+    ]},
+    {name:'STAGE 1 — JOB SOLD',color:'fire',checks:CHECKS.filter(c=>c.phase==='stage1').map(c=>({n:c.name,s:c.status}))},
+    {name:'STAGE 2 — CUSTOMER CONTACT',color:'volt',checks:[
+      {n:'Initial Contact',s:'wait'},{n:'Install Date Set',s:'wait'},{n:'Scope Confirmed',s:'wait'},{n:'Special Requests',s:'wait'}
+    ]},
+    {name:'STAGE 3 — PRE-INSTALL',color:'grape',checks:[
+      {n:'Materials Ordered',s:'wait'},{n:'Materials Staged',s:'wait'},{n:'Staging Photo',s:'wait'},{n:'Permits Filed',s:'wait'},{n:'Truck Loaded',s:'wait'}
+    ]},
+    {name:'STAGE 4 — INSTALL',color:'mint',checks:CHECKS.filter(c=>c.phase==='stage4').map(c=>({n:c.name,s:c.status}))},
+    {name:'STAGE 5 — POST-INSTALL',color:'ice',checks:CHECKS.filter(c=>c.phase==='stage5').map(c=>({n:c.name,s:c.status}))},
+  ];
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--hotbg);border:1px solid var(--hotbd);color:var(--hot)">${svgIcon('shield')}</div>
+      <div class="tab-info"><div class="tab-title">Verification Dashboard</div><div class="tab-desc">Bird's-eye scorecard of ALL checks across ALL tabs</div></div>
+      <div style="text-align:center"><div style="font-family:var(--mono);font-size:36px;font-weight:700;color:${scoreColor}">${score}%</div><div style="font-size:9px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--t3)">Overall Score</div></div>
+    </div>
+    <div class="hero" style="grid-template-columns:repeat(4,1fr)">
+      <div class="st sm"><div class="num" style="font-size:28px">${passed}</div><div class="lbl">Passed</div></div>
+      <div class="st sf"><div class="num" style="font-size:28px">${failed}</div><div class="lbl">Failed</div></div>
+      <div class="st" style="background:var(--amberbg);border:1px solid var(--amberbd)"><div class="num" style="font-size:28px;color:var(--amber)">${warned}</div><div class="lbl" style="color:var(--amber)">Warnings</div></div>
+      <div class="st" style="background:var(--s3);border:1px solid var(--b2)"><div class="num" style="font-size:28px;color:var(--t3)">${pending}</div><div class="lbl">Pending</div></div>
+    </div>
+    ${phases.map(p=>{
+      const pPass=p.checks.filter(c=>c.s==='ok').length;
+      const pTotal=p.checks.length;
+      const pPct=pTotal>0?Math.round(pPass/pTotal*100):0;
+      return`<div class="sec"><div class="sec-h">${p.name}<span class="sec-score" style="background:var(--${p.color}bg);border:1px solid var(--${p.color}bd);color:var(--${p.color})">${pPass}/${pTotal}</span></div>
+        <div class="vg">${p.checks.map(c=>{
+          const dot=c.s==='ok'?'ai-ok':c.s==='fail'?'ai-fail':c.s==='warn'?'ai-warn':'ai-wait';
+          return`<div class="vg-item"><div class="vg-dot ${dot}"></div><div class="vg-label">${c.n}</div></div>`;
+        }).join('')}</div></div>`;
+    }).join('')}`;
+}
+
+// ═══════════════════════════════════════════════
+// TAB 12: CALLS & SCRIPTS
+// ═══════════════════════════════════════════════
+function renderCalls(){
+  const scripts=[
+    'Initial contact / setup call','Same-day scheduling','Moving up a date','Rescheduling (customer)','Rescheduling (company)','Day-before confirmation','Day-of late notification','Day-of scope change','Happy call','Payment follow-up','Recall scheduling','Review request','General communication','Morning-of customer call','Customer walkthrough video','Scope change on-site','End-of-job closeout'
+  ];
+  return`
+    <div class="tab-hdr">
+      <div class="tab-icon" style="background:var(--icebg);border:1px solid var(--icebd);color:var(--ice)">${svgIcon('phone')}</div>
+      <div class="tab-info"><div class="tab-title">Calls & Scripts</div><div class="tab-desc">17 preset scripts · AI script builder · Call scorecards</div></div>
+    </div>
+    <div class="c full"><div class="ch"><h3>Script Library</h3><div class="tg" style="background:var(--voltbg);border:1px solid var(--voltbd);color:var(--volt)">${scripts.length} scripts</div></div>
+      <div class="ck">${scripts.map((s,i)=>`<div class="ck-item" style="cursor:pointer">
+        <div class="ck-num">${i+1}</div>
+        <div class="ck-status" style="background:var(--icebg);border:1px solid var(--icebd);color:var(--ice);width:20px;height:20px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:10px">📋</div>
+        <div class="ck-body"><div class="ck-title">${s}</div><div class="ck-meta"><span>Original</span><span>${i<13?'Production':'Installer'}</span></div></div>
+      </div>`).join('')}</div>
+    </div>
+    <div class="c full"><div class="ch"><h3>AI Script Builder</h3></div>
+      <div class="cb"><div style="background:var(--s3);border:1px solid var(--b2);border-radius:8px;padding:12px;color:var(--t3);font-size:12px">
+        Describe what you need: <em>"I need a script for when a customer calls back angry about a delayed install"</em><br><br>
+        AI generates a draft in Spartan's tone — confident, assumptive, urgency-driven.
+      </div></div>
+    </div>
+    <div class="c full"><div class="ch"><h3>Call Recordings</h3></div>
+      <div class="cb"><div class="empty"><div class="empty-icon" style="background:var(--icebg);color:var(--ice)">${svgIcon('phone')}</div><div class="empty-title">No calls recorded yet</div><div class="empty-desc">ServiceTitan call recordings for this job will appear here with AI scorecards.</div></div></div>
+    </div>`;
+}
+
+// ─── ACTIVITY FEED ───
+function renderActivityFeed(){
+  const f=FORM,d=DATA,ml=ML;
+  const {passed,failed,warned,pending,score}=getScore();
+  const amt=parseFloat(f.package_amount||d.sold_amount||0);
+  const matItems=(ml.parts||[]).length+(ml.tools||[]).length+(ml.consumables||[]).length;
+  let matCost=0;['parts','consumables'].forEach(c=>(ml[c]||[]).forEach(i=>matCost+=(i.est_cost||0)*(i.qty||1)));
+  const matPct=amt>0?(matCost/amt*100).toFixed(1):'—';
+  const events=[];
+  events.push({dot:'fire',title:'Job Sold — Estimate accepted',time:f.date_sold||'—',src:'ServiceTitan',detail:`${f.star_package?f.star_package+(String(f.star_package).includes('Star')?'':'-Star'):''} · $${amt.toLocaleString()} · ${f.payment_method||''}${f.financing_company?' via '+f.financing_company:''}`});
+  events.push({dot:'volt',title:'AI Pre-fill Complete',time:d.generated_at?new Date(d.generated_at).toLocaleString():'—',src:d.ai_model||'Opus 4.6',detail:`Form fields populated from ServiceTitan data + Slack channel history. ${passed+failed+warned}/${passed+failed+warned+pending} checks evaluated.`});
+  if(matItems>0) events.push({dot:'mint',title:'Material List Generated',time:d.generated_at?new Date(d.generated_at).toLocaleString():'—',src:d.ai_model||'Opus 4.6',detail:`${matItems} items · Lee Supply catalog · $${matCost.toFixed(2)} · ${matPct}% of revenue`});
+  if(d.slack_channel_id) events.push({dot:'ice',title:'Posted to Slack',time:'—',src:'Slack Bot'});
+  if(f.three_day_cancel===true) events.push({dot:'grape',title:'3-Day Cancel — Verified ✓',time:'—',src:'AI Verification',detail:'Document requirement met per ServiceTitan data.'});
+  if(f.forty_pct_deposit===false) events.push({dot:'fire',title:'⚠ 40% Deposit — Failed',time:'—',src:'AI Check',detail:`No deposit record found. ${f.payment_method==='Financing'?'Financing job — may not apply.':'Deposit required before install.'}`});
+  if(f.excavating&&!f.oups) events.push({dot:'amber',title:'⚠ OUPS — Not Called',time:'—',src:'AI Check',detail:'Excavation flagged but no OUPS ticket.'});
+  if(f.video_posted===false) events.push({dot:'amber',title:'⚠ Video Not Posted',time:'—',src:'AI Check'});
+  events.push({dot:'hot',title:`AI Verification: ${score}%`,time:'Latest',src:'System',detail:`${passed} passed · ${failed} failed · ${warned} warnings · ${pending} pending`});
+  events.push({dot:'volt',title:d.form_confirmed?'Production Confirmed ✓':'Awaiting Production Review',time:'Now',src:d.form_confirmed?'Confirmed':'Waiting'});
+  document.getElementById('activityFeed').innerHTML=events.map(e=>`<div class="act"><div class="act-d ${e.dot}"></div><div class="act-b"><div class="act-t">${e.title}</div><div class="act-m"><span>${e.time}</span><span>${e.src}</span></div>${e.detail?`<div class="act-box">${e.detail}</div>`:''}</div></div>`).join('');
+}
+
+// ─── SUBMIT ───
+async function doSubmit(){
+  const btn=document.getElementById('btnSubmit');
+  if(!btn)return;
+  btn.disabled=true;btn.textContent='Submitting...';
+  try{
+    const r=await(await fetch('/api/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:formId,confirmed_data:{confirmed:true,confirmed_at:new Date().toISOString()},confirmed_by:'production'})})).json();
+    if(r.success){btn.textContent='✓ Pushed to Production';btn.style.background='var(--mint)';btn.style.boxShadow='0 4px 20px var(--mintg)'}else throw 0;
+  }catch(e){btn.textContent='Error — Retry';btn.disabled=false;setTimeout(()=>{btn.textContent='Confirm & Push to Production';btn.style.background='';btn.style.boxShadow=''},3000)}
+}
+
+// ─── INIT ───
+load();
+</script>
+</body>
+</html>
