@@ -6,25 +6,28 @@ const https = require('https');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '5mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
 
 const PORT = process.env.PORT || 3000;
 
-const NEON_URL = 'https://ep-crimson-bar-aetz67os.c-2.us-east-2.aws.neon.tech/sql';
-const NEON_CONN = process.env.NEON_CONNECTION_STRING ||
-  'postgresql://neondb_owner:npg_OYkCRU4aze2l@ep-crimson-bar-aetz67os.c-2.us-east-2.aws.neon.tech/neondb';
+const SUPABASE_URL = process.env.SUPABASE_URL || 'https://kong.thejuggernaut.org/rest/v1';
+const SUPABASE_KEY = process.env.SUPABASE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
+const CF_ID = process.env.CF_ACCESS_CLIENT_ID || 'd9d91ed78bf6b41408577f15d0bc629f.access';
+const CF_SECRET = process.env.CF_ACCESS_CLIENT_SECRET || '8cadf12c93312ab44cdf084065f26eee1bc502b73b4de66a4d0b5f9981517272';
 
-// --- Neon query helper ---
-function neonQuery(sql, params = []) {
+function supabaseQuery(sql) {
   return new Promise((resolve, reject) => {
-    const body = JSON.stringify({ query: sql, params });
-    const url = new URL(NEON_URL);
+    const body = JSON.stringify({ query: sql });
+    const url = new URL(SUPABASE_URL + '/rpc/exec_sql');
     const opts = {
-      hostname: url.hostname, path: url.pathname,
-      method: 'POST',
+      hostname: url.hostname, path: url.pathname, method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Neon-Connection-String': NEON_CONN,
+        'apikey': SUPABASE_KEY,
+        'Authorization': `Bearer ${SUPABASE_KEY}`,
+        'Content-Profile': 'knowledge_lake',
+        'Accept-Profile': 'knowledge_lake',
+        'CF-Access-Client-Id': CF_ID,
+        'CF-Access-Client-Secret': CF_SECRET,
         'Content-Length': Buffer.byteLength(body)
       }
     };
@@ -32,8 +35,11 @@ function neonQuery(sql, params = []) {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('Neon parse error: ' + data.substring(0, 200))); }
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.code) reject(new Error(`DB: ${parsed.message}`));
+          else resolve(parsed);
+        } catch (e) { reject(new Error('Parse error')); }
       });
     });
     req.on('error', reject);
@@ -42,88 +48,74 @@ function neonQuery(sql, params = []) {
   });
 }
 
-// --- Health check ---
+app.use('/form', express.static(path.join(__dirname, 'public', 'form')));
+app.use('/materials', express.static(path.join(__dirname, 'public', 'materials')));
+
 app.get('/health', (req, res) => res.json({ status: 'ok', service: 'spartan-sales-form' }));
 
-// --- Prefill data ---
+app.get('/', (req, res) => {
+  if (req.query.id) return res.redirect(`/form?id=${req.query.id}`);
+  res.json({ service: 'Spartan Sales & Materials', routes: ['/form?id=N', '/materials?id=N'] });
+});
+
 app.get('/api/prefill/:id', async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
-
-    const result = await neonQuery(
+    const rows = await supabaseQuery(
       `SELECT id, st_job_id, st_estimate_id, customer_name, job_number, sold_amount,
               sold_by, business_unit, track_type, slack_channel_id,
               sales_form_text, material_list_json, form_data, form_confirmed,
               confirmed_data, ai_model, generated_at
        FROM spartan_ops.auto_sales_forms WHERE id = ${id}`
     );
-
-    if (!result.rows || result.rows.length === 0) {
-      return res.status(404).json({ error: 'Form not found' });
-    }
-
-    const row = result.rows[0];
+    if (!rows || !rows.length) return res.status(404).json({ error: 'Not found' });
+    const row = rows[0];
     let formFields = row.form_data || null;
     if (!formFields && row.sales_form_text) {
       try { formFields = JSON.parse(row.sales_form_text); } catch (e) {}
     }
-
-    res.json({
-      id: row.id,
-      st_job_id: row.st_job_id,
-      customer_name: row.customer_name,
-      job_number: row.job_number,
-      sold_amount: row.sold_amount,
-      sold_by: row.sold_by,
-      business_unit: row.business_unit,
-      track_type: row.track_type,
-      slack_channel_id: row.slack_channel_id,
-      form_fields: formFields,
-      material_list: row.material_list_json,
-      form_confirmed: row.form_confirmed,
-      confirmed_data: row.confirmed_data,
-      ai_model: row.ai_model,
-      generated_at: row.generated_at
-    });
-  } catch (err) {
-    console.error('Prefill error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
+    res.json({ ...row, form_fields: formFields });
+  } catch (err) { console.error('Prefill error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// --- Submit confirmed form ---
 app.post('/api/submit', async (req, res) => {
   try {
     const { id, confirmed_data, confirmed_by } = req.body;
-    if (!id || !confirmed_data) {
-      return res.status(400).json({ error: 'Missing id or confirmed_data' });
-    }
-
+    if (!id || !confirmed_data) return res.status(400).json({ error: 'Missing id or confirmed_data' });
     const jsonStr = JSON.stringify(confirmed_data).replace(/'/g, "''");
     const byStr = (confirmed_by || 'production').replace(/'/g, "''");
-
-    await neonQuery(
-      `UPDATE spartan_ops.auto_sales_forms
-       SET confirmed_data = '${jsonStr}'::jsonb,
-           form_confirmed = true,
-           confirmed_at = now(),
-           confirmed_by = '${byStr}'
-       WHERE id = ${parseInt(id)}`
+    await supabaseQuery(
+      `UPDATE spartan_ops.auto_sales_forms SET confirmed_data = '${jsonStr}'::jsonb, form_confirmed = true, confirmed_at = now(), confirmed_by = '${byStr}' WHERE id = ${parseInt(id)}`
     );
-
-    res.json({ success: true, message: 'Form confirmed' });
-  } catch (err) {
-    console.error('Submit error:', err);
-    res.status(500).json({ error: 'Server error' });
-  }
+    res.json({ success: true });
+  } catch (err) { console.error('Submit error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
-// --- SPA fallback ---
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+app.get('/api/materials/:id', async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: 'Invalid ID' });
+    const rows = await supabaseQuery(
+      `SELECT id, customer_name, job_number, sold_amount, business_unit, material_list_json, form_confirmed FROM spartan_ops.auto_sales_forms WHERE id = ${id}`
+    );
+    if (!rows || !rows.length) return res.status(404).json({ error: 'Not found' });
+    res.json(rows[0]);
+  } catch (err) { console.error('Materials error:', err); res.status(500).json({ error: 'Server error' }); }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Spartan Sales Form running on port ${PORT}`);
+app.get('/api/catalog/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').replace(/'/g, "''").trim();
+    if (!q) return res.json([]);
+    const rows = await supabaseQuery(
+      `SELECT item_code, description, spartan_price, lee_number, category, is_active FROM spartan_ops.lee_supply_catalog WHERE is_active = true AND (description ILIKE '%${q}%' OR item_code ILIKE '%${q}%' OR lee_number ILIKE '%${q}%') ORDER BY description LIMIT 20`
+    );
+    res.json(rows || []);
+  } catch (err) { console.error('Search error:', err); res.status(500).json({ error: 'Server error' }); }
 });
+
+app.get('/form', (req, res) => res.sendFile(path.join(__dirname, 'public', 'form', 'index.html')));
+app.get('/materials', (req, res) => res.sendFile(path.join(__dirname, 'public', 'materials', 'index.html')));
+
+app.listen(PORT, '0.0.0.0', () => console.log(`Spartan Sales + Materials on port ${PORT}`));
