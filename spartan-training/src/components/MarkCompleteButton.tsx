@@ -1,26 +1,29 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
 export function MarkCompleteButton({ cardId, playbookId }: { cardId: string; playbookId: string }) {
   const [done, setDone] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [email, setEmail] = useState("");
-  const [showForm, setShowForm] = useState(false);
+  const [user, setUser] = useState<{ email: string; name: string } | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => { if (d?.user) setUser(d.user); })
+      .catch(() => {});
+  }, []);
 
   async function handleComplete() {
-    if (!email) {
-      setShowForm(true);
-      return;
-    }
+    if (!user) return;
     setLoading(true);
     try {
       const res = await fetch("/api/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          employee_email: email,
-          employee_name: email.split("@")[0],
+          employee_email: user.email,
+          employee_name: user.name,
           card_id: cardId,
           playbook_id: playbookId,
           time_spent_seconds: 0,
@@ -46,38 +49,13 @@ export function MarkCompleteButton({ cardId, playbookId }: { cardId: string; pla
     );
   }
 
-  if (showForm && !email) {
-    return (
-      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <input
-          type="email"
-          placeholder="your@spartan-plumbing.com"
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleComplete(); }}
-          style={{
-            padding: "8px 14px", borderRadius: 8,
-            border: "1px solid var(--border)", background: "var(--bg3)",
-            color: "var(--text)", fontSize: 14, width: 260,
-          }}
-        />
-        <button
-          className="btn btn-gold"
-          onClick={handleComplete}
-          disabled={loading}
-        >
-          {loading ? "Saving..." : "Confirm ✓"}
-        </button>
-      </div>
-    );
-  }
-
   return (
     <button
       className="btn btn-gold"
       onClick={handleComplete}
-      disabled={loading}
+      disabled={loading || !user}
     >
-      {loading ? "Saving..." : email ? "Mark Complete ✓" : "I've Read This — Mark Complete"}
+      {loading ? "Saving..." : "I've Read This — Mark Complete ✓"}
     </button>
   );
 }
