@@ -1,0 +1,69 @@
+import { NextRequest, NextResponse } from "next/server";
+import bcrypt from "bcryptjs";
+import { query } from "@/lib/supabase";
+import { createToken, setSessionCookie } from "@/lib/auth";
+
+export async function POST(req: NextRequest) {
+  try {
+    const { email, password } = await req.json();
+
+    if (!email || !password) {
+      return NextResponse.json({ error: "Email and password required" }, { status: 400 });
+    }
+
+    // Look up user
+    const rows = await query(
+      `SELECT id, email, name, password_hash, role, is_active 
+       FROM knowledge_lake.training_users 
+       WHERE email = '${email.replace(/'/g, "''").toLowerCase()}'`
+    );
+
+    if (!rows || rows.length === 0) {
+      return NextResponse.json({ error: "No account found. Ask your admin for an invite." }, { status: 401 });
+    }
+
+    const user = rows[0];
+
+    // Check if account is deactivated
+    if (!user.is_active) {
+      return NextResponse.json({ error: "Your account has been deactivated. Contact your admin." }, { status: 403 });
+    }
+
+    // Check if they haven't set a password yet
+    if (!user.password_hash) {
+      return NextResponse.json({
+        error: "You need to create a password first.",
+        needsPassword: true,
+      }, { status: 401 });
+    }
+
+    // Verify password
+    const valid = await bcrypt.compare(password, user.password_hash);
+    if (!valid) {
+      return NextResponse.json({ error: "Invalid password." }, { status: 401 });
+    }
+
+    // Update last_login_at
+    await query(
+      `UPDATE knowledge_lake.training_users SET last_login_at = now() WHERE id = '${user.id}'`
+    );
+
+    // Create JWT and set cookie
+    const token = await createToken({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      role: user.role,
+    });
+
+    await setSessionCookie(token);
+
+    return NextResponse.json({
+      ok: true,
+      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+    });
+  } catch (err) {
+    console.error("Login error:", err);
+    return NextResponse.json({ error: "Internal error" }, { status: 500 });
+  }
+}
