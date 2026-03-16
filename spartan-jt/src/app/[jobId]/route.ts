@@ -85,7 +85,6 @@ export async function GET(
       ORDER BY created_on DESC LIMIT 30
     `);
 
-    // 12. Verification definitions (54 checks)
     const verificationDefs = await query(`
       SELECT verification_code, verification_name, phase, stage,
         is_hard_gate, applies_to_track, input_source, sort_order
@@ -93,7 +92,6 @@ export async function GET(
       WHERE is_active = true ORDER BY sort_order
     `);
 
-    // 13. Recall jobs (jobs that are recalls for THIS job)
     const recallJobs = await query(`
       SELECT st_job_id, job_number, status, summary, total, created_on, completed_on
       FROM spartan_ops.st_jobs_v2 WHERE recall_for_id = ${jobId}
@@ -105,7 +103,10 @@ export async function GET(
     const jobTotal = parseFloat(job.total as string) || 0;
     const totalInvoiced = (jobInvoices as any[]).reduce((s: number, i: any) => s + (parseFloat(i.total) || 0), 0);
 
+    // ── Payment matching ────────────────────────────────────
+    // Pass 1: Match via applied_to array (standard ST linkage)
     let totalPaid = 0;
+    const matchedPaymentIds = new Set<string>();
     for (const p of payments as any[]) {
       let applied = p.applied_to;
       if (!applied) continue;
@@ -115,9 +116,35 @@ export async function GET(
         const invId = a.appliedTo || a.invoiceId;
         if ((jobInvoices as any[]).some((ji: any) => String(ji.st_invoice_id) === String(invId))) {
           totalPaid += parseFloat(a.appliedAmount) || 0;
+          matchedPaymentIds.add(String(p.st_payment_id));
         }
       }
     }
+
+    // Pass 2: Fallback for payments with empty applied_to arrays
+    // Only runs when Pass 1 found nothing AND this job has invoices
+    if (totalPaid === 0 && (jobInvoices as any[]).length > 0) {
+      const jobCreated = new Date(job.created_on as string);
+      const jobCompleted = job.completed_on ? new Date(job.completed_on as string) : new Date();
+      const bufferMs = 7 * 24 * 60 * 60 * 1000; // 7 day buffer
+      const rangeStart = new Date(jobCreated.getTime() - bufferMs);
+      const rangeEnd = new Date(jobCompleted.getTime() + bufferMs);
+
+      for (const p of payments as any[]) {
+        if (matchedPaymentIds.has(String(p.st_payment_id))) continue;
+        let applied = p.applied_to;
+        if (typeof applied === 'string') { try { applied = JSON.parse(applied); } catch { applied = null; } }
+        const isEmpty = !applied || (Array.isArray(applied) && applied.length === 0);
+        if (!isEmpty) continue;
+
+        const payDate = new Date(p.payment_date as string);
+        if (payDate >= rangeStart && payDate <= rangeEnd) {
+          totalPaid += parseFloat(p.total as string) || 0;
+          matchedPaymentIds.add(String(p.st_payment_id));
+        }
+      }
+    }
+    // ── End payment matching ─────────────────────────────────
 
     let materialCost = 0;
     const materialItems: any[] = [];
