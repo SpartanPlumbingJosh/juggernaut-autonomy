@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { UserNav } from "@/components/UserNav";
 
 export const metadata: Metadata = {
   title: "Spartan Academy",
@@ -33,6 +34,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <a href="/" style={{ fontSize: 14, color: "#999", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" as const }}>SOPs</a>
             <a href="/onboard" style={{ fontSize: 14, color: "#c8a84e", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" as const }}>Onboarding</a>
             <a href="/admin" style={{ fontSize: 14, color: "#b91c1c", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" as const }}>Admin</a>
+            <div style={{ width: 1, height: 20, background: "#333" }} />
+            <UserNav />
           </nav>
         </header>
         <main style={{ maxWidth: 960, margin: "0 auto", padding: "24px 16px" }}>
