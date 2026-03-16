@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  experimental: {},
+  // Spartan JT — Job Tracker
 };
 
 export default nextConfig;
