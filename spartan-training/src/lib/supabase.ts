@@ -4,7 +4,7 @@ const CF_ID = process.env.CF_ACCESS_CLIENT_ID || "";
 const CF_SECRET = process.env.CF_ACCESS_CLIENT_SECRET || "";
 
 export async function query(sql: string) {
-  const res = await fetch(`${SB_URL}/rest/v1/rpc/run_sql`, {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/exec_sql`, {
     method: "POST",
     headers: {
       apikey: SB_KEY,
@@ -22,7 +22,7 @@ export async function query(sql: string) {
 }
 
 export async function querySpartanOps(sql: string) {
-  const res = await fetch(`${SB_URL}/rest/v1/rpc/run_sql`, {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/exec_sql`, {
     method: "POST",
     headers: {
       apikey: SB_KEY,
