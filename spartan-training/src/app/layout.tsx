@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Spartan Training",
-  description: "Spartan Plumbing — Training & SOPs",
+  title: "Spartan Academy",
+  description: "Spartan Plumbing — Training, SOPs & Onboarding",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -23,11 +23,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         }}>
           <a href="/" style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--gold)", letterSpacing: 0.5 }}>
-              SPARTAN TRAINING
+              SPARTAN ACADEMY
             </span>
           </a>
-          <nav style={{ display: "flex", gap: 16, alignItems: "center" }}>
-            <a href="/" style={{ fontSize: 14, color: "var(--text2)" }}>Home</a>
+          <nav style={{ display: "flex", gap: 20, alignItems: "center" }}>
+            <a href="/" style={{ fontSize: 14, color: "var(--text2)" }}>SOPs</a>
+            <a href="/onboard" style={{ fontSize: 14, color: "var(--gold)", fontWeight: 600 }}>Onboarding</a>
           </nav>
         </header>
         <main style={{ maxWidth: 960, margin: "0 auto", padding: "24px 16px" }}>
