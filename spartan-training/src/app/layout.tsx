@@ -32,6 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <nav style={{ display: "flex", gap: 20, alignItems: "center" }}>
             <a href="/" style={{ fontSize: 14, color: "#999", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 600, letterSpacing: 1, textTransform: "uppercase" as const }}>SOPs</a>
             <a href="/onboard" style={{ fontSize: 14, color: "#c8a84e", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" as const }}>Onboarding</a>
+            <a href="/admin" style={{ fontSize: 14, color: "#b91c1c", fontFamily: "'Barlow Condensed', sans-serif", fontWeight: 700, letterSpacing: 1, textTransform: "uppercase" as const }}>Admin</a>
           </nav>
         </header>
         <main style={{ maxWidth: 960, margin: "0 auto", padding: "24px 16px" }}>
