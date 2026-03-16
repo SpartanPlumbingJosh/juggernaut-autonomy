@@ -13,7 +13,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <header style={{
           background: "var(--bg2)",
           borderBottom: "1px solid var(--border)",
-          padding: "12px 24px",
+          padding: "10px 24px",
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
@@ -22,9 +22,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           zIndex: 100,
         }}>
           <a href="/" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <span style={{ fontWeight: 700, fontSize: "1.1rem", color: "var(--gold)", letterSpacing: 0.5 }}>
-              SPARTAN ACADEMY
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="https://spartan-plumbing.com/wp-content/uploads/spartan-logo-nav.svg"
+              alt="Spartan Plumbing"
+              style={{ height: 36, width: "auto" }}
+            />
           </a>
           <nav style={{ display: "flex", gap: 20, alignItems: "center" }}>
             <a href="/" style={{ fontSize: 14, color: "var(--text2)" }}>SOPs</a>
