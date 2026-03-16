@@ -1,0 +1,185 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { query } from '@/lib/supabase';
+import { buildJTHtml } from '@/lib/jt-html';
+
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ jobId: string }> }
+) {
+  const { jobId } = await params;
+
+  if (!/^\d+$/.test(jobId)) {
+    return new NextResponse(errorHtml('Invalid job ID', 'Use a numeric ServiceTitan job ID'), {
+      status: 400,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
+
+  try {
+    // 1. Job with BU + Job Type lookup
+    const jobRows = await query(`
+      SELECT j.*, bu.name as bu_display_name, bu.track_type, jt.name as jt_display_name
+      FROM spartan_ops.st_jobs_v2 j
+      LEFT JOIN spartan_ops.st_business_units bu ON bu.st_bu_id = j.st_business_unit_id
+      LEFT JOIN spartan_ops.st_job_types jt ON jt.st_job_type_id = j.st_job_type_id
+      WHERE j.st_job_id = ${jobId}
+    `);
+    if (!jobRows.length) {
+      return new NextResponse(errorHtml('Job Not Found', `Job ID ${jobId} does not exist in ServiceTitan.`), {
+        status: 404,
+        headers: { 'Content-Type': 'text/html; charset=utf-8' },
+      });
+    }
+    const job = jobRows[0] as Record<string, any>;
+
+    // 2. Customer
+    const customer = (await query(`SELECT * FROM spartan_ops.st_customers_v2 WHERE st_customer_id = ${job.st_customer_id}`))[0] || null;
+
+    // 3. Location
+    const location = (await query(`SELECT * FROM spartan_ops.st_locations_v2 WHERE st_location_id = ${job.st_location_id}`))[0] || null;
+
+    // 4. Customer contacts
+    const contacts = await query(`SELECT type, value, memo, is_active FROM spartan_ops.st_contacts WHERE st_customer_id = ${job.st_customer_id} AND is_active = true ORDER BY type`);
+
+    // 5. All jobs at this location
+    const locationJobs = await query(`
+      SELECT j.st_job_id, j.job_number, j.status, j.summary, j.total, j.created_on, j.completed_on,
+        j.recall_for_id, bu.name as bu_name, bu.track_type, jt.name as job_type_name
+      FROM spartan_ops.st_jobs_v2 j
+      LEFT JOIN spartan_ops.st_business_units bu ON bu.st_bu_id = j.st_business_unit_id
+      LEFT JOIN spartan_ops.st_job_types jt ON jt.st_job_type_id = j.st_job_type_id
+      WHERE j.st_location_id = ${job.st_location_id}
+      ORDER BY j.created_on DESC LIMIT 50
+    `);
+
+    // 6. Estimates
+    const estimates = await query(`
+      SELECT st_estimate_id, st_job_id, estimate_name, status_name, summary,
+        subtotal, tax, items, sold_on, sold_by_name, created_on, job_number
+      FROM spartan_ops.st_estimates_v2
+      WHERE st_customer_id = ${job.st_customer_id}
+      ORDER BY created_on DESC LIMIT 30
+    `);
+
+    // 7. Invoices for this job
+    const jobInvoices = await query(`
+      SELECT st_invoice_id, st_job_id, st_job_number, invoice_date, due_date,
+        sub_total, sales_tax, total, balance, invoice_type, items, paid_on, created_on, summary
+      FROM spartan_ops.st_invoices_v2 WHERE st_job_id = ${jobId} ORDER BY created_on DESC
+    `);
+
+    // 8. Payments
+    const payments = await query(`
+      SELECT st_payment_id, payment_date, total, payment_type, memo,
+        auth_code, check_number, applied_to, created_on
+      FROM spartan_ops.st_payments_v2 WHERE st_customer_id = ${job.st_customer_id}
+      ORDER BY payment_date DESC LIMIT 30
+    `);
+
+    // 9. Appointments
+    const appointments = await query(`
+      SELECT st_appointment_id, start_time, end_time,
+        arrival_window_start, arrival_window_end, status, special_instructions
+      FROM spartan_ops.st_appointments_v2 WHERE st_job_id = ${jobId} ORDER BY start_time ASC
+    `);
+
+    // 10. Assignments
+    const assignments = await query(`
+      SELECT st_assignment_id, st_appointment_id, technician_name, status, assigned_on
+      FROM spartan_ops.st_appointment_assignments_v2 WHERE st_job_id = ${jobId} ORDER BY assigned_on ASC
+    `);
+
+    // 11. Calls
+    const calls = await query(`
+      SELECT st_call_id, created_on, duration, duration_seconds,
+        from_number, to_number, direction, status, call_type,
+        recording_url, st_job_id, job_number, agent_name, reason_name
+      FROM spartan_ops.st_calls WHERE st_customer_id = '${job.st_customer_id}'
+      ORDER BY created_on DESC LIMIT 30
+    `);
+
+    // Aggregates
+    const lifetimeSpend = (locationJobs as any[]).reduce((s: number, j: any) => s + (parseFloat(j.total) || 0), 0);
+    const jobTotal = parseFloat(job.total as string) || 0;
+    const totalInvoiced = (jobInvoices as any[]).reduce((s: number, i: any) => s + (parseFloat(i.total) || 0), 0);
+
+    let totalPaid = 0;
+    for (const p of payments as any[]) {
+      let applied = p.applied_to;
+      if (!applied) continue;
+      if (typeof applied === 'string') { try { applied = JSON.parse(applied); } catch { continue; } }
+      if (!Array.isArray(applied)) continue;
+      for (const a of applied) {
+        const invId = a.appliedTo || a.invoiceId;
+        if ((jobInvoices as any[]).some((ji: any) => String(ji.st_invoice_id) === String(invId))) {
+          totalPaid += parseFloat(a.appliedAmount) || 0;
+        }
+      }
+    }
+
+    let materialCost = 0;
+    for (const inv of jobInvoices as any[]) {
+      let items = inv.items;
+      if (!items) continue;
+      if (typeof items === 'string') { try { items = JSON.parse(items); } catch { continue; } }
+      if (!Array.isArray(items)) continue;
+      for (const item of items) {
+        if (item.type === 'Material' || item.type === 'Equipment') {
+          materialCost += parseFloat(item.totalCost || item.cost || 0);
+        }
+      }
+    }
+
+    // Strip raw_data to reduce page size
+    function stripRaw(obj: any): any {
+      if (!obj || typeof obj !== 'object') return obj;
+      if (Array.isArray(obj)) return obj.map(stripRaw);
+      const out: Record<string, any> = {};
+      for (const [k, v] of Object.entries(obj)) {
+        if (k === 'raw_data' || k === 'external_data' || k === 'custom_fields' || k === 'tag_type_ids') continue;
+        out[k] = stripRaw(v);
+      }
+      return out;
+    }
+
+    const data = stripRaw({
+      job: { ...job, bu_display_name: job.bu_display_name, track_type: job.track_type, jt_display_name: job.jt_display_name },
+      customer, location, contacts, locationJobs, estimates,
+      jobInvoices, customerInvoices: [], payments, appointments, assignments, calls,
+      summary: {
+        lifetimeSpend: lifetimeSpend.toFixed(2),
+        jobCount: locationJobs.length,
+        firstJob: locationJobs.length ? (locationJobs as any[])[locationJobs.length - 1].created_on : null,
+        jobTotal: jobTotal.toFixed(2),
+        totalInvoiced: totalInvoiced.toFixed(2),
+        totalPaid: totalPaid.toFixed(2),
+        materialCost: materialCost.toFixed(2),
+        materialPct: jobTotal > 0 ? ((materialCost / jobTotal) * 100).toFixed(1) : '0.0',
+        depositTarget: (jobTotal * 0.40).toFixed(2),
+        depositMet: totalPaid >= (jobTotal * 0.40),
+      },
+    });
+
+    const html = buildJTHtml(data);
+
+    return new NextResponse(html, {
+      status: 200,
+      headers: {
+        'Content-Type': 'text/html; charset=utf-8',
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+      },
+    });
+  } catch (err) {
+    console.error('JT render error:', err);
+    return new NextResponse(errorHtml('Server Error', String(err)), {
+      status: 500,
+      headers: { 'Content-Type': 'text/html; charset=utf-8' },
+    });
+  }
+}
+
+function errorHtml(title: string, desc: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Spartan JT</title></head>
+<body style="background:#050609;color:#f0f2f8;font-family:'Outfit',system-ui,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0">
+<div style="text-align:center"><h1 style="color:#ff2d46;font-size:28px;margin-bottom:12px">${title}</h1><p style="color:#7e85a0;font-size:14px">${desc}</p></div></body></html>`;
+}
