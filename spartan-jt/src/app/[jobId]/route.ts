@@ -16,7 +16,6 @@ export async function GET(
   }
 
   try {
-    // 1. Job with BU + Job Type lookup
     const jobRows = await query(`
       SELECT j.*, bu.name as bu_display_name, bu.track_type, jt.name as jt_display_name
       FROM spartan_ops.st_jobs_v2 j
@@ -32,16 +31,10 @@ export async function GET(
     }
     const job = jobRows[0] as Record<string, any>;
 
-    // 2. Customer
     const customer = (await query(`SELECT * FROM spartan_ops.st_customers_v2 WHERE st_customer_id = ${job.st_customer_id}`))[0] || null;
-
-    // 3. Location
     const location = (await query(`SELECT * FROM spartan_ops.st_locations_v2 WHERE st_location_id = ${job.st_location_id}`))[0] || null;
-
-    // 4. Customer contacts
     const contacts = await query(`SELECT type, value, memo, is_active FROM spartan_ops.st_contacts WHERE st_customer_id = ${job.st_customer_id} AND is_active = true ORDER BY type`);
 
-    // 5. All jobs at this location
     const locationJobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary, j.total, j.created_on, j.completed_on,
         j.recall_for_id, bu.name as bu_name, bu.track_type, jt.name as job_type_name
@@ -52,7 +45,6 @@ export async function GET(
       ORDER BY j.created_on DESC LIMIT 50
     `);
 
-    // 6. Estimates
     const estimates = await query(`
       SELECT st_estimate_id, st_job_id, estimate_name, status_name, summary,
         subtotal, tax, items, sold_on, sold_by_name, created_on, job_number
@@ -61,14 +53,12 @@ export async function GET(
       ORDER BY created_on DESC LIMIT 30
     `);
 
-    // 7. Invoices for this job
     const jobInvoices = await query(`
       SELECT st_invoice_id, st_job_id, st_job_number, invoice_date, due_date,
         sub_total, sales_tax, total, balance, invoice_type, items, paid_on, created_on, summary
       FROM spartan_ops.st_invoices_v2 WHERE st_job_id = ${jobId} ORDER BY created_on DESC
     `);
 
-    // 8. Payments
     const payments = await query(`
       SELECT st_payment_id, payment_date, total, payment_type, memo,
         auth_code, check_number, applied_to, created_on
@@ -76,26 +66,38 @@ export async function GET(
       ORDER BY payment_date DESC LIMIT 30
     `);
 
-    // 9. Appointments
     const appointments = await query(`
       SELECT st_appointment_id, start_time, end_time,
         arrival_window_start, arrival_window_end, status, special_instructions
       FROM spartan_ops.st_appointments_v2 WHERE st_job_id = ${jobId} ORDER BY start_time ASC
     `);
 
-    // 10. Assignments
     const assignments = await query(`
       SELECT st_assignment_id, st_appointment_id, technician_name, status, assigned_on
       FROM spartan_ops.st_appointment_assignments_v2 WHERE st_job_id = ${jobId} ORDER BY assigned_on ASC
     `);
 
-    // 11. Calls
     const calls = await query(`
       SELECT st_call_id, created_on, duration, duration_seconds,
         from_number, to_number, direction, status, call_type,
         recording_url, st_job_id, job_number, agent_name, reason_name
       FROM spartan_ops.st_calls WHERE st_customer_id = '${job.st_customer_id}'
       ORDER BY created_on DESC LIMIT 30
+    `);
+
+    // 12. Verification definitions (54 checks)
+    const verificationDefs = await query(`
+      SELECT verification_code, verification_name, phase, stage,
+        is_hard_gate, applies_to_track, input_source, sort_order
+      FROM spartan_ops.verification_definitions
+      WHERE is_active = true ORDER BY sort_order
+    `);
+
+    // 13. Recall jobs (jobs that are recalls for THIS job)
+    const recallJobs = await query(`
+      SELECT st_job_id, job_number, status, summary, total, created_on, completed_on
+      FROM spartan_ops.st_jobs_v2 WHERE recall_for_id = ${jobId}
+      ORDER BY created_on DESC
     `);
 
     // Aggregates
@@ -118,6 +120,8 @@ export async function GET(
     }
 
     let materialCost = 0;
+    const materialItems: any[] = [];
+    const serviceItems: any[] = [];
     for (const inv of jobInvoices as any[]) {
       let items = inv.items;
       if (!items) continue;
@@ -126,11 +130,13 @@ export async function GET(
       for (const item of items) {
         if (item.type === 'Material' || item.type === 'Equipment') {
           materialCost += parseFloat(item.totalCost || item.cost || 0);
+          materialItems.push(item);
+        } else if (item.type === 'Service') {
+          serviceItems.push(item);
         }
       }
     }
 
-    // Strip raw_data to reduce page size
     function stripRaw(obj: any): any {
       if (!obj || typeof obj !== 'object') return obj;
       if (Array.isArray(obj)) return obj.map(stripRaw);
@@ -142,10 +148,31 @@ export async function GET(
       return out;
     }
 
+    // Compute job lifecycle stage
+    const status = job.status as string;
+    let lifecycleStage = 0;
+    if (status === 'Completed') lifecycleStage = 5;
+    else if (status === 'InProgress') lifecycleStage = 4;
+    else if ((appointments as any[]).length > 0) lifecycleStage = 3;
+    else if ((estimates as any[]).filter((e: any) => e.status_name === 'Sold').length > 0) lifecycleStage = 2;
+    else if (jobTotal > 0) lifecycleStage = 1;
+
+    // Compute blockers
+    const blockers: any[] = [];
+    const track = (job.track_type as string) || 'unknown';
+    if (track === 'install') {
+      if (totalPaid < jobTotal * 0.4 && jobTotal > 0) blockers.push({title:'40% Deposit Not Collected',severity:'high',owner:'Production'});
+      if (!(assignments as any[]).length && lifecycleStage < 5) blockers.push({title:'No Crew Assigned',severity:'medium',owner:'Production'});
+      if (materialItems.length === 0 && lifecycleStage >= 2 && lifecycleStage < 5) blockers.push({title:'No Material Items on Invoice',severity:'low',owner:'Production'});
+    }
+    if (!(jobInvoices as any[]).length && lifecycleStage >= 4) blockers.push({title:'No Invoice Created',severity:'high',owner:'Office'});
+    if (jobTotal > 3000 && lifecycleStage < 5) blockers.push({title:'3-Day Cancel Notice Required (>$3K)',severity:'medium',owner:'Sales'});
+
     const data = stripRaw({
       job: { ...job, bu_display_name: job.bu_display_name, track_type: job.track_type, jt_display_name: job.jt_display_name },
       customer, location, contacts, locationJobs, estimates,
-      jobInvoices, customerInvoices: [], payments, appointments, assignments, calls,
+      jobInvoices, payments, appointments, assignments, calls,
+      verificationDefs, recallJobs, materialItems, serviceItems, blockers,
       summary: {
         lifetimeSpend: lifetimeSpend.toFixed(2),
         jobCount: locationJobs.length,
@@ -157,6 +184,13 @@ export async function GET(
         materialPct: jobTotal > 0 ? ((materialCost / jobTotal) * 100).toFixed(1) : '0.0',
         depositTarget: (jobTotal * 0.40).toFixed(2),
         depositMet: totalPaid >= (jobTotal * 0.40),
+        lifecycleStage,
+        track,
+        materialItemCount: materialItems.length,
+        serviceItemCount: serviceItems.length,
+        blockerCount: blockers.length,
+        recallCount: recallJobs.length,
+        isRecall: !!job.recall_for_id,
       },
     });
 
