@@ -75,7 +75,7 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 <div class="main"><div id="loading" class="loading">Loading job data...</div><div id="content" class="hidden"></div></div>
 <aside class="panel"><div class="panel-h"><h2>Activity</h2><div class="live">Live</div></div><div class="panel-f" id="activityFeed"></div></aside>
 </div>
-<script>const D = $` + '{jsonData}' + `;</script>
+<script>const D = ${jsonData};</script>
 <script src="/jt-app.js"></script>
 </body>
 </html>`;
