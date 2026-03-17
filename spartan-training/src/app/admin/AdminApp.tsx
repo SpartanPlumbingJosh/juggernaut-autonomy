@@ -23,6 +23,11 @@ interface Template {
   xp_value: number; sort_order: number; requires_value: boolean; value_label: string;
   requires_manager_approval: boolean;
 }
+interface TrainingUser {
+  id: string; email: string; name: string; role: string; is_active: boolean;
+  created_at: string; last_login_at: string | null; password_set_at: string | null;
+  invited_by: string | null;
+}
 
 /* Only CSS that globals.css doesn't cover — forms, toggle, tabs, progress bar */
 const ADMIN_CSS = `.adm-field{width:100%;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:#0a0a0a;color:var(--text);font-size:14px;font-family:inherit;outline:none;transition:border-color .2s;box-sizing:border-box}
@@ -46,17 +51,21 @@ const ADMIN_CSS = `.adm-field{width:100%;padding:12px 14px;border:1px solid var(
 .adm-toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--gold);color:#0a0a0a;padding:10px 28px;border-radius:20px;font-weight:600;font-size:14px;z-index:400;box-shadow:0 4px 20px rgba(200,168,78,0.4)}
 .adm-detail{border-left:3px solid var(--gold);padding-left:16px;margin:12px 0}
 .adm-detail div{display:flex;gap:8px;padding:3px 0;font-size:13px}
-.adm-detail span:first-child{color:var(--text3);min-width:90px}`;
+.adm-detail span:first-child{color:var(--text3);min-width:90px}
+.adm-user-row{padding:14px 24px;display:flex;align-items:center;gap:14;border-bottom:1px solid var(--border)}`;
 
 export function AdminApp() {
   const [adminEmail, setAdminEmail] = useState("");
   const [pin, setPin] = useState("");
   const [authed, setAuthed] = useState(false);
   const [loginError, setLoginError] = useState("");
-  const [tab, setTab] = useState<"team"|"add"|"tasks"|"settings">("team");
+  const [tab, setTab] = useState<"team"|"add"|"tasks"|"users"|"settings">("team");
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [progressMap, setProgressMap] = useState<Record<string, Progress>>({});
   const [templates, setTemplates] = useState<Template[]>([]);
+  const [trainingUsers, setTrainingUsers] = useState<TrainingUser[]>([]);
+  const [inviteForm, setInviteForm] = useState({ name: "", email: "", role: "member" });
+  const [inviteLoading, setInviteLoading] = useState(false);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
   const [selectedEmp, setSelectedEmp] = useState<string|null>(null);
@@ -83,7 +92,17 @@ export function AdminApp() {
     if (res.ok) { const d = await res.json(); setTemplates(d.templates || []); }
   }, []);
 
-  useEffect(() => { const s = typeof window !== "undefined" ? sessionStorage.getItem("sa_admin") : null; if (s) { setAdminEmail(s); loadData(s); loadTemplates(s); } }, [loadData, loadTemplates]);
+  const loadTrainingUsers = useCallback(async () => {
+    try {
+      const res = await fetch("/api/admin/users");
+      if (res.ok) { const d = await res.json(); setTrainingUsers(d.users || []); }
+    } catch { /* silent */ }
+  }, []);
+
+  useEffect(() => {
+    const s = typeof window !== "undefined" ? sessionStorage.getItem("sa_admin") : null;
+    if (s) { setAdminEmail(s); loadData(s); loadTemplates(s); loadTrainingUsers(); }
+  }, [loadData, loadTemplates, loadTrainingUsers]);
 
   async function handleLogin() {
     if (!adminEmail || !pin) { setLoginError("Enter email and PIN"); return; }
@@ -91,14 +110,30 @@ export function AdminApp() {
     const res = await fetch("/api/onboard/auth", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: adminEmail, pin }) });
     if (!res.ok) { setLoginError("Invalid credentials"); return; }
     if (!(await res.json()).id) { setLoginError("Invalid credentials"); return; }
-    sessionStorage.setItem("sa_admin", adminEmail); await loadData(adminEmail); await loadTemplates(adminEmail);
+    sessionStorage.setItem("sa_admin", adminEmail);
+    await loadData(adminEmail);
+    await loadTemplates(adminEmail);
+    await loadTrainingUsers();
   }
 
   async function addEmployee() {
     if (!af.name || !af.email) { notify("Name and email required"); return; }
     const res = await fetch("/api/admin", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ admin_email: adminEmail, ...af }) });
     const d = await res.json();
-    if (d.ok) { notify(`${af.name} added — PIN: ${d.generated_pin}`); setAf({name:"",email:"",role:"tech",position:"",hire_date:"",phone:"",personal_email:"",is_admin:false,manager_id:""}); loadData(adminEmail); }
+    if (d.ok) {
+      notify(`${af.name} added — PIN: ${d.generated_pin}`);
+      // Auto-create training app invite so they can log into the web app
+      try {
+        await fetch("/api/admin/users", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "invite", email: af.email, name: af.name, role: af.is_admin ? "admin" : "member" })
+        });
+      } catch { /* non-blocking — best effort */ }
+      setAf({name:"",email:"",role:"tech",position:"",hire_date:"",phone:"",personal_email:"",is_admin:false,manager_id:""});
+      loadData(adminEmail);
+      loadTrainingUsers();
+    }
     else notify(d.error || "Failed");
   }
 
@@ -116,6 +151,40 @@ export function AdminApp() {
   async function resetPin(id: string) {
     const p = String(100000 + Math.floor(Math.random() * 900000));
     await updateEmp(id, { pin_code: p }); notify(`New PIN: ${p}`);
+  }
+
+  async function inviteTrainingUser() {
+    if (!inviteForm.name || !inviteForm.email) { notify("Name and email required"); return; }
+    setInviteLoading(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "invite", ...inviteForm })
+      });
+      const d = await res.json();
+      if (d.ok) {
+        notify(`${inviteForm.name} invited — send them to training.spartan-plumbing.com to log in`);
+        setInviteForm({ name: "", email: "", role: "member" });
+        loadTrainingUsers();
+      } else {
+        notify(d.error || "Failed to invite");
+      }
+    } catch { notify("Connection error"); }
+    setInviteLoading(false);
+  }
+
+  async function updateTrainingUser(userId: string, action: string) {
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, userId })
+      });
+      const d = await res.json();
+      if (d.ok) { notify(d.message || "Updated"); loadTrainingUsers(); }
+      else notify(d.error || "Failed");
+    } catch { notify("Connection error"); }
   }
 
   /* ── LOGIN ── uses global .card class */
@@ -139,6 +208,7 @@ export function AdminApp() {
   const filteredEmp = roleFilter ? employees.filter(e => e.role === roleFilter) : employees;
   const filteredTemplates = templates.filter(t => taskRoleFilter === "all" || t.role === taskRoleFilter);
   const taskCategories = [...new Set(filteredTemplates.map(t => t.category))];
+  const adminUsers = trainingUsers.filter(u => u.role === "admin" && u.is_active);
 
   return (<><style>{ADMIN_CSS}</style>
     {toast && <div className="adm-toast">{toast}</div>}
@@ -154,7 +224,7 @@ export function AdminApp() {
         {icon:"👥",n:active.length,l:"Active",c:"var(--gold)"},
         {icon:"⚠️",n:behind,l:"Behind",c:behind>0?"#ef4444":"var(--green)"},
         {icon:"📊",n:`${avgPct}%`,l:"Avg Progress",c:"var(--gold)"},
-        {icon:"🔑",n:employees.filter(e=>e.is_admin).length,l:"Admins",c:"var(--gold)"},
+        {icon:"🔑",n:adminUsers.length,l:"Admins",c:"var(--gold)"},
       ].map((s,i) => (
         <div key={i} className="card" style={{padding:16,textAlign:"center"}}>
           <div style={{fontSize:20,marginBottom:6}}>{s.icon}</div>
@@ -166,11 +236,11 @@ export function AdminApp() {
 
     {/* TABS — using .badge pattern */}
     <div className="adm-tabs">
-      {(["team","add","tasks","settings"] as const).map(t => (
+      {(["team","add","tasks","users","settings"] as const).map(t => (
         <button key={t} className={`badge ${tab===t?"badge-gold":""}`}
           style={{cursor:"pointer",padding:"6px 16px",fontSize:13,fontWeight:600,border:tab===t?undefined:"1px solid var(--border)",background:tab===t?undefined:"transparent",color:tab===t?undefined:"var(--text3)"}}
           onClick={()=>setTab(t)}>
-          {t==="team"?"👥 Team":t==="add"?"➕ Add Person":t==="tasks"?"📋 Tasks":"⚙️ Settings"}
+          {t==="team"?"👥 Team":t==="add"?"➕ Add Person":t==="tasks"?"📋 Tasks":t==="users"?"🔑 Users":"⚙️ Settings"}
         </button>
       ))}
       <button className="btn btn-outline" style={{marginLeft:"auto",fontSize:12,padding:"6px 14px"}} onClick={()=>{sessionStorage.removeItem("sa_admin");setAuthed(false);}}>Sign Out</button>
@@ -248,7 +318,7 @@ export function AdminApp() {
           <div style={{width:44,height:44,borderRadius:12,background:"rgba(200,168,78,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>➕</div>
           <div>
             <h2 style={{fontSize:"1.1rem",fontWeight:600,marginBottom:2}}>Add New Employee</h2>
-            <p style={{fontSize:13,color:"var(--text3)",margin:0}}>A 6-digit PIN will be auto-generated. Role determines onboarding tasks.</p>
+            <p style={{fontSize:13,color:"var(--text3)",margin:0}}>A 6-digit PIN will be auto-generated. Role determines onboarding tasks. A training app invite is created automatically.</p>
           </div>
         </div>
         <div style={{borderTop:"1px solid var(--border)",padding:"20px 24px"}}>
@@ -319,6 +389,105 @@ export function AdminApp() {
       </div>
     </>}
 
+    {/* ═══ USERS ═══ */}
+    {tab==="users"&&<>
+      {/* Training App Users List */}
+      <div className="card" style={{padding:0,marginBottom:12}}>
+        <div style={{padding:"20px 24px",display:"flex",alignItems:"flex-start",gap:14}}>
+          <div style={{width:44,height:44,borderRadius:12,background:"rgba(200,168,78,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>🔑</div>
+          <div>
+            <h2 style={{fontSize:"1.1rem",fontWeight:600,marginBottom:2}}>Training App Access</h2>
+            <p style={{fontSize:13,color:"var(--text3)",margin:0}}>Manage who can log into Spartan Academy. Admins can access this Command Center.</p>
+          </div>
+        </div>
+        <div style={{borderTop:"1px solid var(--border)"}}>
+          {trainingUsers.map(u => {
+            const isLastAdmin = u.role==="admin" && adminUsers.length===1;
+            return (
+              <div key={u.id} style={{padding:"14px 24px",display:"flex",alignItems:"center",gap:12,borderBottom:"1px solid var(--border)",flexWrap:"wrap"}}>
+                <div style={{flex:1,minWidth:160}}>
+                  <div style={{fontWeight:600,fontSize:"0.95rem"}}>{u.name}</div>
+                  <div style={{fontSize:12,color:"var(--text3)",marginTop:2}}>{u.email}</div>
+                  <div style={{fontSize:11,color:"var(--text3)",marginTop:2}}>
+                    {u.last_login_at
+                      ? `Last login: ${new Date(u.last_login_at).toLocaleDateString()}`
+                      : u.password_set_at
+                        ? "Password set, never logged in"
+                        : "Invite pending — password not set"}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                  {u.role==="admin" && <span className="badge badge-gold" style={{fontSize:11}}>admin</span>}
+                  {!u.is_active && <span className="badge" style={{fontSize:11,background:"rgba(239,68,68,.15)",color:"#ef4444"}}>inactive</span>}
+                  {u.is_active && !u.password_set_at && <span className="badge" style={{fontSize:11,background:"rgba(200,168,78,0.08)",color:"var(--gold)",border:"1px solid rgba(200,168,78,0.3)"}}>pending invite</span>}
+                  {!isLastAdmin && (u.role!=="admin"
+                    ? <button className="btn btn-outline" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>updateTrainingUser(u.id,"make_admin")}>Make Admin</button>
+                    : <button className="btn btn-outline" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>updateTrainingUser(u.id,"remove_admin")}>Remove Admin</button>
+                  )}
+                  {u.is_active
+                    ? <button className="btn" style={{fontSize:11,padding:"4px 10px",background:"rgba(239,68,68,.12)",color:"#ef4444",border:"1px solid rgba(239,68,68,.25)"}} onClick={()=>updateTrainingUser(u.id,"deactivate")}>Deactivate</button>
+                    : <button className="btn btn-outline" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>updateTrainingUser(u.id,"reactivate")}>Reactivate</button>
+                  }
+                  <button className="btn btn-outline" style={{fontSize:11,padding:"4px 10px"}} onClick={()=>updateTrainingUser(u.id,"reset_password")}>Reset Password</button>
+                </div>
+              </div>
+            );
+          })}
+          {trainingUsers.length===0 && (
+            <p style={{textAlign:"center",padding:32,color:"var(--text3)",fontSize:13,margin:0}}>No training app users yet — invite someone below.</p>
+          )}
+        </div>
+      </div>
+
+      {/* Invite new training app user */}
+      <div className="card" style={{padding:0,marginBottom:12}}>
+        <div style={{padding:"20px 24px",display:"flex",alignItems:"flex-start",gap:14}}>
+          <div style={{width:44,height:44,borderRadius:12,background:"rgba(200,168,78,0.1)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:20,flexShrink:0}}>✉️</div>
+          <div>
+            <h2 style={{fontSize:"1.1rem",fontWeight:600,marginBottom:2}}>Invite to Training App</h2>
+            <p style={{fontSize:13,color:"var(--text3)",margin:0}}>They can set their password at <span style={{color:"var(--gold)"}}>training.spartan-plumbing.com</span>. Set role to Admin to give Command Center access.</p>
+          </div>
+        </div>
+        <div style={{borderTop:"1px solid var(--border)",padding:"20px 24px"}}>
+          <div className="adm-form">
+            <div className="adm-fg"><label>Full Name *</label><input className="adm-field" value={inviteForm.name} onChange={e=>setInviteForm({...inviteForm,name:e.target.value})} placeholder="Nick Hernandez"/></div>
+            <div className="adm-fg"><label>Work Email *</label><input className="adm-field" value={inviteForm.email} onChange={e=>setInviteForm({...inviteForm,email:e.target.value})} placeholder="nick@spartan-plumbing.com"/></div>
+            <div className="adm-fg"><label>App Role</label>
+              <select value={inviteForm.role} onChange={e=>setInviteForm({...inviteForm,role:e.target.value})}>
+                <option value="member">Member — training access only</option>
+                <option value="admin">Admin — training + Command Center</option>
+              </select>
+            </div>
+            <div className="adm-fg" style={{justifyContent:"flex-end"}}>
+              <label>&nbsp;</label>
+              <button className="btn btn-gold" onClick={inviteTrainingUser} disabled={inviteLoading||!inviteForm.name||!inviteForm.email}>
+                {inviteLoading?"Sending...":"Send Invite"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Notification Recipients */}
+      <div className="card" style={{padding:"20px 24px"}}>
+        <h2 style={{fontSize:"1.05rem",fontWeight:600,marginBottom:4}}>📬 Notification Recipients</h2>
+        <p style={{fontSize:13,color:"var(--text3)",marginBottom:16,lineHeight:1.6}}>
+          These admin emails will receive alerts when Slack notifications are enabled. To add or remove a recipient, adjust their admin role above.
+        </p>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {adminUsers.map(u => (
+            <span key={u.id} className="badge badge-gold" style={{fontSize:12,display:"flex",alignItems:"center",gap:6}}>
+              <span>✉</span>
+              <span>{u.email}</span>
+            </span>
+          ))}
+          {adminUsers.length===0 && (
+            <p style={{fontSize:13,color:"var(--text3)",margin:0}}>No active admins yet — invite admins above to set notification recipients.</p>
+          )}
+        </div>
+      </div>
+    </>}
+
     {/* ═══ SETTINGS ═══ */}
     {tab==="settings"&&<>
       <div className="card" style={{padding:0}}>
@@ -328,11 +497,12 @@ export function AdminApp() {
             <h2 style={{fontSize:"1.1rem",fontWeight:600,marginBottom:2}}>Account</h2>
             <p style={{fontSize:13,color:"var(--text3)",margin:0}}>{adminEmail}</p>
           </div>
-          <button className="btn btn-outline" style={{fontSize:12,padding:"6px 14px"}} onClick={()=>{loadData(adminEmail);loadTemplates(adminEmail);notify("Refreshed");}} disabled={loading}>{loading?"...":"Refresh"}</button>
+          <button className="btn btn-outline" style={{fontSize:12,padding:"6px 14px"}} onClick={()=>{loadData(adminEmail);loadTemplates(adminEmail);loadTrainingUsers();notify("Refreshed");}} disabled={loading}>{loading?"...":"Refresh"}</button>
         </div>
         <div style={{borderTop:"1px solid var(--border)",padding:"12px 24px",display:"flex",flexWrap:"wrap",gap:8}}>
           <span className="badge badge-gold">{employees.length} employees</span>
           <span className="badge badge-gold">{active.length} active</span>
+          <span className="badge badge-gold">{trainingUsers.length} app users</span>
           <span className="badge badge-gold">{templates.length} tasks</span>
           <span className="badge badge-gold">282 SOPs</span>
         </div>
@@ -352,9 +522,15 @@ export function AdminApp() {
 
       <div className="card" style={{padding:"20px 24px",marginTop:12}}>
         <h2 style={{fontSize:"1.05rem",fontWeight:600,marginBottom:8}}>Notifications</h2>
-        <p style={{fontSize:13,color:"var(--text3)",lineHeight:1.6}}>
+        <p style={{fontSize:13,color:"var(--text3)",lineHeight:1.6,marginBottom:12}}>
           Coming soon — Slack notifications when employees complete categories, weekly digest of who is behind, milestone alerts. Wire via n8n.
         </p>
+        <div style={{display:"flex",flexWrap:"wrap",gap:8}}>
+          {adminUsers.map(u => (
+            <span key={u.id} className="badge badge-gold" style={{fontSize:12}}>✉ {u.email}</span>
+          ))}
+          {adminUsers.length===0&&<span style={{fontSize:13,color:"var(--text3)"}}>No admin recipients — manage in the Users tab.</span>}
+        </div>
       </div>
     </>}
   </>);
