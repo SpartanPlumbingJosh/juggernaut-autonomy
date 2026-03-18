@@ -86,7 +86,7 @@ export function ContentApp() {
   }
 
   function startEdit(item: AnyItem) {
-    const it = item as Record<string, unknown>;
+    const it = item as unknown as Record<string, unknown>;
     setEditingId(it.id as string);
     setEditData({
       name: (it.name || it.title || "") as string,
@@ -294,7 +294,7 @@ export function ContentApp() {
 
         {/* Item rows */}
         {!loading && items.map((item) => {
-          const it = item as Record<string, unknown>;
+          const it = item as unknown as Record<string, unknown>;
           const isEditing = editingId === it.id;
           const displayName = (it.title || it.name || "") as string;
           const cardCount = it.card_count as number | undefined;
