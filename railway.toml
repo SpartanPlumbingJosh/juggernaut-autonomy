@@ -7,7 +7,7 @@ builder = "dockerfile"
 dockerfilePath = "Dockerfile"
 
 [deploy]
-startCommand = "python main.py"
+startCommand = "python start_engine.py"
 healthcheckPath = "/health"
 healthcheckTimeout = 30
 restartPolicyType = "always"
