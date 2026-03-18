@@ -97,7 +97,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
 
   const events = [
     { dot: 'fire', title: `Job ${job.status || 'Created'}`, time: fmt(job.created_on), src: 'ServiceTitan', detail: `${job.business_unit_name || ''} \u00b7 ${job.job_type_name || ''} \u00b7 ${money(amt)}` },
-    ...(data.appointments || []).slice(0, 2).map((a: any) => ({ dot: 'volt', title: `Appointment ${a.status}`, time: fmt(a.start_time), src: 'ServiceTitan' })),
+    ...(data.appointments || []).slice(0, 2).map((a: any) => ({ dot: 'volt', title: `Appointment ${a.status}`, time: fmt(a.start_time), src: 'ServiceTitan', detail: '' })),
     ...invoices.slice(0, 2).map((i: any) => ({ dot: 'mint', title: `Invoice ${i.reference_number || i.st_invoice_id}`, time: fmt(i.invoice_date), src: 'ST Accounting', detail: `Total: ${money(i.total)}` })),
     ...payments.slice(0, 2).map((p: any) => ({ dot: 'grape', title: `Payment \u2014 ${p.payment_type || ''}`, time: fmt(p.payment_date), src: 'ST Payments', detail: money(p.total) })),
     { dot: 'hot', title: `AI Verification: ${score}%`, time: 'Latest', src: 'System', detail: `${passed} passed \u00b7 ${failed} failed \u00b7 ${total - passed - failed} pending` },
