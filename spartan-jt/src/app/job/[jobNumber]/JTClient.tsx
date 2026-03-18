@@ -11,7 +11,7 @@ interface JobData {
 }
 
 const TABS = [
-  { id: 'dashboard', icon: 'flag', label: 'Dashboard', color: 'fire' },
+  { id: 'dashboard', icon: 'flag', label: 'Dashboard', color: 'fire', num: '' },
   { id: 'intel', icon: 'search', label: 'Customer Intel', color: 'ice', num: '1' },
   { id: 'service', icon: 'play', label: 'Service Process', color: 'volt', num: '2' },
   { id: 'sales', icon: 'dollar', label: 'Sales Process', color: 'fire', num: '3' },
