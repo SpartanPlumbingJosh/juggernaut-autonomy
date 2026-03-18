@@ -9,7 +9,7 @@ FROM python:3.11-slim
 
 # Labels
 LABEL maintainer="JUGGERNAUT System"
-LABEL version="1.3.0"
+LABEL version="1.3.1"
 LABEL description="JUGGERNAUT Autonomy Engine - Autonomous Revenue Framework"
 
 # Install system dependencies (git for Aider repo operations)
@@ -28,9 +28,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN which aider && aider --version || (echo "ERROR: aider CLI not found in PATH" && exit 1)
 
 # Cache bust - change this to force rebuild of COPY layers
-ARG CACHEBUST=20260125210000
+ARG CACHEBUST=20260318164500
 
 # Copy application code (these layers will rebuild when CACHEBUST changes)
+COPY start_engine.py .
 COPY main.py .
 COPY core/ ./core/
 COPY api/ ./api/
@@ -58,5 +59,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # Expose port
 EXPOSE 8000
 
-# Run the autonomy engine
-CMD ["python", "main.py"]
+# Run the autonomy engine (railway.toml startCommand overrides this)
+CMD ["python", "start_engine.py"]
