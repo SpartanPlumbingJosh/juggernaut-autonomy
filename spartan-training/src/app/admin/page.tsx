@@ -1,7 +1,7 @@
-import { AdminApp } from "./AdminApp";
+import { AdminAutoAuth } from "./AdminAutoAuth";
 
 export const dynamic = "force-dynamic";
 
 export default function AdminPage() {
-  return <AdminApp />;
+  return <AdminAutoAuth />;
 }
