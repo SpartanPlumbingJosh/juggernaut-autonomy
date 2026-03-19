@@ -4,6 +4,7 @@ import MaterialsTab from './MaterialsTab';
 import ServiceTab from './ServiceTab';
 import PostInstallTab from './PostInstallTab';
 import CallsTab from './CallsTab';
+import IntelTab from './IntelTab';
 
 interface JobData {
   job: Record<string, any> | null;
@@ -14,6 +15,10 @@ interface JobData {
   payments: Record<string, any>[];
   estimates: Record<string, any>[];
   assignments: Record<string, any>[];
+  contacts: Record<string, any>[];
+  unsoldEstimates: Record<string, any>[];
+  recallsAtLocation: Record<string, any>[];
+  [key: string]: any;
 }
 
 const TABS = [
@@ -232,42 +237,6 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
         <div><div className="slbl"><div className="ai-dot ai-ok" />Business Unit</div><div className="stxt ca">{job.business_unit_name || '\u2014'}</div></div>
       </div>
     </div></div>
-  </>;
-}
-
-function IntelTab({ job, data, amt }: any) {
-  const related = data.relatedJobs || [];
-  const appts = data.appointments || [];
-  return <>
-    <div className="tab-hdr">
-      <div className="tab-icon" style={{ background: 'var(--icebg)', border: '1px solid var(--icebd)', color: 'var(--ice)' }}><Icon name="search" /></div>
-      <div className="tab-info"><div className="tab-title">Customer Intel</div><div className="tab-desc">Pre-dispatch briefing &mdash; know everything before you knock</div></div>
-      <div className="tab-badge" style={{ background: 'var(--icebg)', border: '1px solid var(--icebd)', color: 'var(--ice)' }}>READ-ONLY</div>
-    </div>
-    <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
-      <div className="st sf"><div className="num">{related.length + 1}</div><div className="lbl">Total Jobs</div></div>
-      <div className="st sv"><div className="num">{related.filter((r: any) => (r.business_unit_name || '').toLowerCase().includes('replacement')).length}</div><div className="lbl">Installs</div></div>
-      <div className="st sm"><div className="num">{money(amt)}</div><div className="lbl">Current Job</div></div>
-      <div className="st sg"><div className="num">{appts.length}</div><div className="lbl">Appointments</div></div>
-    </div>
-    <div className="intel" style={{ borderColor: 'var(--icebd)' }}>
-      <div className="intel-h"><div className="intel-icon" style={{ background: 'var(--voltbg)', color: 'var(--volt)' }}><Icon name="flag" /></div><div className="intel-title">Customer Profile</div></div>
-      <div className="intel-body"><strong>{job.customer_name || 'Unknown'}</strong><br />{job.customer_address && <>{job.customer_address}<br /></>}Current job: <strong style={{ color: 'var(--fire)' }}>{money(amt)}</strong> &middot; {job.business_unit_name || ''}</div>
-    </div>
-    <div className="intel" style={{ borderColor: 'var(--voltbd)' }}>
-      <div className="intel-h"><div className="intel-icon" style={{ background: 'var(--mintbg)', color: 'var(--mint)' }}><Icon name="wrench" /></div><div className="intel-title">Work Scope</div></div>
-      <div className="intel-body">{job.summary ? <><strong>Description:</strong> {job.summary}<br /></> : 'No scope available'}{job.job_type_name && <><strong>Type:</strong> {job.job_type_name}</>}</div>
-    </div>
-    <div className="c full"><div className="ch"><h3>Previous Jobs at Location</h3><div className="tg" style={{ background: 'var(--voltbg)', border: '1px solid var(--voltbd)', color: 'var(--volt)' }}>{related.length}</div></div>
-      {related.length > 0 ? <div className="cb" style={{ padding: 0 }}><table className="mt"><thead><tr><th>Job #</th><th>Type</th><th>Status</th><th>Amount</th><th>Date</th></tr></thead><tbody>
-        {related.map((r: any, i: number) => <tr key={i}><td style={{ fontFamily: 'var(--mono)', color: 'var(--ice)' }}>{r.job_number || r.st_job_id}</td><td>{r.job_type_name || r.business_unit_name || '\u2014'}</td><td><span className={`chip ${r.status === 'Completed' ? 'c-ok' : 'c-info'}`}>{r.status}</span></td><td>{money(r.total)}</td><td>{fmt(r.created_on)}</td></tr>)}
-      </tbody></table></div> : <div className="cb" style={{ color: 'var(--t3)', fontSize: 12 }}>No prior jobs at this location.</div>}
-    </div>
-    {appts.length > 0 && <div className="c full"><div className="ch"><h3>Appointments</h3><div className="tg" style={{ background: 'var(--grapebg)', border: '1px solid var(--grapebd)', color: 'var(--grape)' }}>{appts.length}</div></div>
-      <div className="cb" style={{ padding: 0 }}><table className="mt"><thead><tr><th>ID</th><th>Status</th><th>Start</th><th>End</th></tr></thead><tbody>
-        {appts.map((a: any, i: number) => <tr key={i}><td style={{ fontFamily: 'var(--mono)', color: 'var(--ice)' }}>{a.st_appointment_id}</td><td><span className={`chip ${a.status === 'Done' ? 'c-ok' : 'c-info'}`}>{a.status}</span></td><td>{fmt(a.start_time)}</td><td>{fmt(a.end_time)}</td></tr>)}
-      </tbody></table></div>
-    </div>}
   </>;
 }
 
