@@ -195,11 +195,12 @@ export async function GET(
     const isDrain = buName.includes('drain');
     const playbookKey = isDrain ? 'drservice' : 'plservice';
     const salesPlaybookKey = isDrain ? 'drsales' : 'plsales';
+    const phoneCloseKey = isDrain ? 'drphone' : 'plphone';
 
     const playbookSteps = await query(`
       SELECT playbook_key, step_number, quarter, title, description, verification_type, hard_gate
       FROM spartan_ops.playbook_definitions
-      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}', 'install')
+      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}', '${phoneCloseKey}', 'install')
       ORDER BY playbook_key, step_number
     `);
 
@@ -281,7 +282,7 @@ export async function GET(
       estimates, assignments, contacts, unsoldEstimates, recallsAtLocation,
       calls, recallJobs, callScripts, materialList, catalogImages,
       purchaseOrders, verificationDefs, companyAverages,
-      playbook: { serviceKey: playbookKey, salesKey: salesPlaybookKey, steps: playbookSteps, tracking: stepTracking },
+      playbook: { serviceKey: playbookKey, salesKey: salesPlaybookKey, phoneCloseKey, steps: playbookSteps, tracking: stepTracking },
       permits, permitRules, cardRequests, blockers, jobMedia,
     });
   } catch (err) {
