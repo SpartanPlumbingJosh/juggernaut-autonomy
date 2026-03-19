@@ -16,6 +16,7 @@ export async function GET(
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
              j.total, j.business_unit_name, j.job_type_name,
              j.completed_on, j.created_on, j.recall_for_id,
+             j.st_customer_id, j.st_location_id,
              c.name as customer_name,
              CONCAT(l.address_street, ', ', l.address_city, ', ', l.address_state, ' ', l.address_zip) as customer_address
       FROM spartan_ops.st_jobs_v2 j
@@ -34,7 +35,7 @@ export async function GET(
     const relatedJobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
              j.total, j.business_unit_name, j.job_type_name,
-             j.completed_on, j.created_on
+             j.completed_on, j.created_on, j.recall_for_id
       FROM spartan_ops.st_jobs_v2 j
       WHERE j.st_location_id = (
         SELECT st_location_id FROM spartan_ops.st_jobs_v2 WHERE st_job_id = ${jobNumber}
@@ -94,6 +95,42 @@ export async function GET(
       ORDER BY a.assigned_on DESC
       LIMIT 20
     `);
+
+    // Customer contacts (phone, email)
+    const custId = (job as any).st_customer_id;
+    const contacts = custId ? await query(`
+      SELECT type, value, memo
+      FROM spartan_ops.st_contacts
+      WHERE st_customer_id = ${custId}
+      AND is_active = true
+      ORDER BY type
+      LIMIT 10
+    `) : [];
+
+    // Unsold estimates at this location (opportunities)
+    const locId = (job as any).st_location_id;
+    const unsoldEstimates = locId ? await query(`
+      SELECT e.st_estimate_id, e.estimate_name, e.status_name, e.summary,
+             e.subtotal, e.created_on, j.job_number, j.st_job_id
+      FROM spartan_ops.st_estimates_v2 e
+      JOIN spartan_ops.st_jobs_v2 j ON j.st_job_id = e.st_job_id
+      WHERE j.st_location_id = ${locId}
+      AND e.status_name NOT IN ('Sold', 'Dismissed')
+      AND e.is_active = true
+      ORDER BY e.created_on DESC
+      LIMIT 10
+    `) : [];
+
+    // Recall history at this location
+    const recallsAtLocation = locId ? await query(`
+      SELECT j.st_job_id, j.job_number, j.status, j.summary, j.created_on,
+             j.completed_on, j.recall_for_id
+      FROM spartan_ops.st_jobs_v2 j
+      WHERE j.st_location_id = ${locId}
+      AND j.recall_for_id IS NOT NULL
+      ORDER BY j.created_on DESC
+      LIMIT 10
+    `) : [];
 
     // Calls for this job
     const calls = await query(`
@@ -184,6 +221,9 @@ export async function GET(
       payments,
       estimates,
       assignments,
+      contacts,
+      unsoldEstimates,
+      recallsAtLocation,
       calls,
       recallJobs,
       callScripts,
