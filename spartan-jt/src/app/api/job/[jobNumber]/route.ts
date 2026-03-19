@@ -14,7 +14,8 @@ export async function GET(
   try {
     const jobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
-             j.total, j.business_unit_name, j.job_type_name,
+             j.total, COALESCE(j.business_unit_name, bu.name) as business_unit_name,
+             COALESCE(j.job_type_name, jt.name) as job_type_name,
              j.completed_on, j.created_on, j.recall_for_id,
              j.st_customer_id, j.st_location_id,
              c.name as customer_name,
@@ -22,6 +23,8 @@ export async function GET(
       FROM spartan_ops.st_jobs_v2 j
       LEFT JOIN spartan_ops.st_customers_v2 c ON c.st_customer_id = j.st_customer_id
       LEFT JOIN spartan_ops.st_locations_v2 l ON l.st_location_id = j.st_location_id
+      LEFT JOIN spartan_ops.st_business_units bu ON bu.st_bu_id = j.st_business_unit_id
+      LEFT JOIN spartan_ops.st_job_types jt ON jt.st_job_type_id = j.st_job_type_id
       WHERE j.st_job_id = ${jobNumber}
       LIMIT 1
     `);
@@ -34,9 +37,12 @@ export async function GET(
 
     const relatedJobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
-             j.total, j.business_unit_name, j.job_type_name,
+             j.total, COALESCE(j.business_unit_name, bu.name) as business_unit_name,
+             COALESCE(j.job_type_name, jt.name) as job_type_name,
              j.completed_on, j.created_on, j.recall_for_id
       FROM spartan_ops.st_jobs_v2 j
+      LEFT JOIN spartan_ops.st_business_units bu ON bu.st_bu_id = j.st_business_unit_id
+      LEFT JOIN spartan_ops.st_job_types jt ON jt.st_job_type_id = j.st_job_type_id
       WHERE j.st_location_id = (
         SELECT st_location_id FROM spartan_ops.st_jobs_v2 WHERE st_job_id = ${jobNumber}
       )
@@ -46,7 +52,7 @@ export async function GET(
     `);
 
     const verifications = await query(`
-      SELECT verification_name, result, checked_at
+      SELECT verification_code, verification_name, result, checked_at
       FROM spartan_ops.job_verifications
       WHERE job_id = ${jobNumber}
       ORDER BY checked_at DESC
@@ -193,7 +199,7 @@ export async function GET(
     const playbookSteps = await query(`
       SELECT playbook_key, step_number, quarter, title, description, verification_type, hard_gate
       FROM spartan_ops.playbook_definitions
-      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}')
+      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}', 'install')
       ORDER BY playbook_key, step_number
     `);
 
@@ -218,11 +224,11 @@ export async function GET(
     `);
 
     const companyAverages = await query(`
-      SELECT verification_name,
+      SELECT verification_code, verification_name,
         round(100.0 * sum(case when result = 'pass' then 1 else 0 end) / count(*), 1) as pass_pct,
         count(*) as total_checks
       FROM spartan_ops.job_verifications
-      GROUP BY verification_name
+      GROUP BY verification_code, verification_name
     `);
 
     const permits = await query(`
