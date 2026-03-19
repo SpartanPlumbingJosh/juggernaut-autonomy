@@ -2,11 +2,16 @@
 import { useEffect, useState } from 'react';
 import MaterialsTab from './MaterialsTab';
 import ServiceTab from './ServiceTab';
+import SalesTab from './SalesTab';
+import InstallTab from './InstallTab';
 import PostInstallTab from './PostInstallTab';
 import CallsTab from './CallsTab';
 import IntelTab from './IntelTab';
 import FinancialsTab from './FinancialsTab';
 import VerifyTab from './VerifyTab';
+import PermitsTab from './PermitsTab';
+import CardsTab from './CardsTab';
+import BlockersTab from './BlockersTab';
 
 interface JobData {
   job: Record<string, any> | null;
@@ -53,6 +58,8 @@ const ICONS: Record<string, string> = {
   alert: '<path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
   phone: '<path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.12.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0122 16.92z"/>',
+  chevronRight: '<polyline points="9 18 15 12 9 6"/>',
+  chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
 };
 
 function Icon({ name }: { name: string }) {
@@ -66,6 +73,24 @@ function fmt(d: string | null | undefined): string {
 function money(n: number | string | null | undefined): string {
   const v = parseFloat(String(n || 0));
   return v > 0 ? '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '\u2014';
+}
+
+/** Strip HTML tags from ST summary, preserve line breaks */
+function stripHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/li>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&middot;/g, '\u00b7')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 const TAB_DESCS: Record<string, string> = {
@@ -85,6 +110,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     fetch(`/api/job/${jobNumber}`)
@@ -117,30 +143,43 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   ];
 
   return (
-    <div className="shell">
-      <nav className="rail">
-        <div className="rail-logo">S</div>
-        {TABS.map((t, i) => (
-          <div key={t.id}>
-            {(i === 1 || i === 5 || i === 10) && <div className="rsep" />}
-            <div className={`ri${activeTab === t.id ? ' on' : ''}`} onClick={() => setActiveTab(t.id)}>
-              <Icon name={t.icon} />
-              <span className="tip">{t.num ? t.num + '. ' : ''}{t.label}</span>
+    <div className={`shell${sidebarOpen ? ' rail-open' : ''}`}>
+      <nav className={`rail${sidebarOpen ? ' expanded' : ''}`}>
+        <div className="rail-top">
+          <div className="rail-logo">S</div>
+          {sidebarOpen && <span className="rail-brand">Spartan</span>}
+        </div>
+        <div className="rail-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
+          <Icon name={sidebarOpen ? 'chevronLeft' : 'chevronRight'} />
+        </div>
+        <div className="rail-items">
+          {TABS.map((t, i) => (
+            <div key={t.id}>
+              {(i === 1 || i === 5 || i === 10) && <div className="rsep" />}
+              <div className={`ri${activeTab === t.id ? ' on' : ''}`} onClick={() => setActiveTab(t.id)} title={!sidebarOpen ? (t.num ? t.num + '. ' : '') + t.label : undefined}>
+                <Icon name={t.icon} />
+                {sidebarOpen && <span className="ri-label">{t.num ? t.num + '. ' : ''}{t.label}</span>}
+                {!sidebarOpen && <span className="tip">{t.num ? t.num + '. ' : ''}{t.label}</span>}
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </nav>
 
       <div className="main">
         {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={isInstall} jobNumber={jobNumber} />}
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
         {activeTab === 'service' && <ServiceTab job={job} data={data} />}
+        {activeTab === 'sales' && <SalesTab job={job} data={data} />}
         {activeTab === 'materials' && <MaterialsTab job={job} data={data} amt={amt} />}
+        {activeTab === 'permits' && <PermitsTab job={job} data={data} />}
+        {activeTab === 'cards' && <CardsTab job={job} data={data} />}
+        {activeTab === 'install' && <InstallTab job={job} data={data} />}
         {activeTab === 'financials' && <FinancialsTab job={job} data={data} amt={amt} invTotal={invTotal} paidTotal={paidTotal} />}
-        {activeTab === 'verify' && <VerifyTab data={data} score={score} passed={passed} failed={failed} total={total} />}
         {activeTab === 'postinstall' && <PostInstallTab job={job} data={data} />}
+        {activeTab === 'blockers' && <BlockersTab job={job} data={data} />}
+        {activeTab === 'verify' && <VerifyTab data={data} score={score} passed={passed} failed={failed} total={total} />}
         {activeTab === 'calls' && <CallsTab job={job} data={data} />}
-        {!['dashboard', 'intel', 'service', 'materials', 'financials', 'verify', 'postinstall', 'calls'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
       </div>
 
       <aside className="panel">
@@ -185,17 +224,20 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
         {job.status === 'Completed' && <div className="pill p-sold">Completed</div>}
         {job.status === 'Scheduled' && <div className="pill p-svc">Scheduled</div>}
         {job.status === 'InProgress' && <div className="pill p-svc">In Progress</div>}
+        {job.status === 'Canceled' && <div className="pill p-cancel">Canceled</div>}
         {isInstall ? <div className="pill p-inst">Install</div> : <div className="pill p-svc">Service</div>}
       </div>
     </div>
     <div className="ai-sum">
-      <div className="ai-ring" style={{ background: `conic-gradient(var(--mint) 0deg, var(--mint) ${okDeg}deg, var(--fire) ${okDeg}deg, var(--fire) ${failDeg}deg, var(--t4) ${failDeg}deg)`, WebkitMask: 'radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 4px))', mask: 'radial-gradient(farthest-side,transparent calc(100% - 4px),#000 calc(100% - 4px))' }}>
-        <span className="pct" style={{ color: scoreColor }}>{score}%</span>
+      <div className="ai-ring" style={{ background: `conic-gradient(var(--mint) 0deg, var(--mint) ${okDeg}deg, var(--fire) ${okDeg}deg, var(--fire) ${failDeg}deg, var(--t4) ${failDeg}deg)` }}>
+        <div className="ai-ring-inner">
+          <span className="pct" style={{ color: scoreColor }}>{score}%</span>
+        </div>
       </div>
       <div className="ai-stats">
-        <div className="ai-s"><div className="n" style={{ color: 'var(--mint)' }}>{passed}</div><div className="l" style={{ color: 'var(--mint2)' }}>Verified</div></div>
-        <div className="ai-s"><div className="n" style={{ color: 'var(--fire)' }}>{failed}</div><div className="l" style={{ color: 'var(--fire2)' }}>Failed</div></div>
-        {pending > 0 && <div className="ai-s"><div className="n" style={{ color: 'var(--t3)' }}>{pending}</div><div className="l" style={{ color: 'var(--t3)' }}>Pending</div></div>}
+        <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--mint)' }}>{passed}</div><div className="ai-s-l" style={{ color: 'var(--mint2)' }}>Verified</div></div>
+        <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--fire)' }}>{failed}</div><div className="ai-s-l" style={{ color: 'var(--fire2)' }}>Failed</div></div>
+        {pending > 0 && <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--t3)' }}>{pending}</div><div className="ai-s-l" style={{ color: 'var(--t3)' }}>Pending</div></div>}
       </div>
     </div>
     <div className="hero">
@@ -233,7 +275,7 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
     </div>
     <div className="c full"><div className="ch"><h3>Work Scope</h3></div><div className="cb">
       <div className="slbl"><div className="ai-dot ai-ok" />Description</div>
-      <div className="stxt cv">{job.summary || 'No scope summary available'}</div>
+      <div className="stxt cv scope-text">{stripHtml(job.summary || 'No scope summary available')}</div>
       <div className="g2" style={{ marginTop: 8, marginBottom: 0 }}>
         <div><div className="slbl"><div className="ai-dot ai-ok" />Job Type</div><div className="stxt cg">{job.job_type_name || '\u2014'}</div></div>
         <div><div className="slbl"><div className="ai-dot ai-ok" />Business Unit</div><div className="stxt ca">{job.business_unit_name || '\u2014'}</div></div>
