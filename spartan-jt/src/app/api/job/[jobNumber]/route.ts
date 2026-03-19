@@ -111,7 +111,7 @@ export async function GET(
     if (materialList && (materialList as any).material_list_json) {
       const mlJson = (materialList as any).material_list_json;
       const leeNums: string[] = [];
-      for (const section of ['parts', 'tools', 'consumables']) {
+      for (const section of ['parts', 'tools']) {
         const items = (mlJson as any)[section] || [];
         for (const item of items) {
           if (item.lee_number) leeNums.push(item.lee_number);
@@ -130,6 +130,28 @@ export async function GET(
       }
     }
 
+    // Determine playbook key based on BU and job type
+    const buName = String(job.business_unit_name || '').toLowerCase();
+    const isDrain = buName.includes('drain');
+    // For now default to standard service playbook; phone close detection TBD
+    const playbookKey = isDrain ? 'drservice' : 'plservice';
+    const salesPlaybookKey = isDrain ? 'drsales' : 'plsales';
+
+    // Playbook definitions for this job's service and sales playbooks
+    const playbookSteps = await query(`
+      SELECT playbook_key, step_number, quarter, title, description, verification_type, hard_gate
+      FROM spartan_ops.playbook_definitions
+      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}')
+      ORDER BY playbook_key, step_number
+    `);
+
+    // Step tracking for this specific job
+    const stepTracking = await query(`
+      SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes
+      FROM spartan_ops.playbook_step_tracking
+      WHERE st_job_id = ${jobNumber}
+    `);
+
     return NextResponse.json({
       job,
       relatedJobs,
@@ -141,6 +163,12 @@ export async function GET(
       assignments,
       materialList,
       catalogImages,
+      playbook: {
+        serviceKey: playbookKey,
+        salesKey: salesPlaybookKey,
+        steps: playbookSteps,
+        tracking: stepTracking,
+      },
     });
   } catch (err) {
     console.error('Job API error:', err);
