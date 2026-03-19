@@ -6,6 +6,7 @@ import PostInstallTab from './PostInstallTab';
 import CallsTab from './CallsTab';
 import IntelTab from './IntelTab';
 import SalesTab from './SalesTab';
+import InstallTab from './InstallTab';
 
 interface JobData {
   job: Record<string, any> | null;
@@ -68,15 +69,9 @@ function money(n: number | string | null | undefined): string {
 }
 
 const TAB_DESCS: Record<string, string> = {
-  service: 'Live-scored Rules of the Road checklist \u2014 auto-selects the correct playbook and tracks every step in real-time.',
-  sales: 'Sales process scoring from Q3 through Post Game Recap, including 3-day right to cancel enforcement on sales over $3K.',
-  materials: 'AI-generated material lists from Lee Supply catalog, tech verification, staging photo verification, and 18% budget tracking.',
   permits: 'Jurisdiction-aware permit tracking with AI cold-start research for new areas and document verification.',
   cards: 'Full purchasing card lifecycle \u2014 Slack trigger detection, response time KPIs, receipt quality AI gate.',
-  install: 'Day-of execution tracking with 13 checkpoints, code compliance verification, and hard gates on after photos + walkthrough video.',
-  postinstall: 'Happy call SLA tracking (24hr), call scorecards, review monitoring, and recall lifecycle management.',
   blockers: 'Central blocker tracking with automated escalation (30min \u2192 1hr \u2192 2hr), AI-generated timeline risk assessment.',
-  calls: '17 preset call scripts with personalization, AI script builder, call recording playback with AI scorecards.',
 };
 
 export default function JTClient({ jobNumber }: { jobNumber: string }) {
@@ -121,12 +116,13 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
         {activeTab === 'service' && <ServiceTab job={job} data={data} />}
         {activeTab === 'sales' && <SalesTab job={job} data={data} />}
+        {activeTab === 'install' && <InstallTab job={job} data={data} />}
         {activeTab === 'materials' && <MaterialsTab job={job} data={data} amt={amt} />}
         {activeTab === 'financials' && <FinancialsTab job={job} data={data} amt={amt} invTotal={invTotal} paidTotal={paidTotal} />}
         {activeTab === 'verify' && <VerifyTab data={data} score={score} passed={passed} failed={failed} total={total} />}
         {activeTab === 'postinstall' && <PostInstallTab job={job} data={data} />}
         {activeTab === 'calls' && <CallsTab job={job} data={data} />}
-        {!['dashboard', 'intel', 'service', 'sales', 'materials', 'financials', 'verify', 'postinstall', 'calls'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
+        {!['dashboard', 'intel', 'service', 'sales', 'install', 'materials', 'financials', 'verify', 'postinstall', 'calls'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
       </div>
       <aside className="panel">
         <div className="panel-h"><h2>Activity</h2><div className="live">Live</div></div>
