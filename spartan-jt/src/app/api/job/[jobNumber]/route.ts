@@ -95,6 +95,32 @@ export async function GET(
       LIMIT 20
     `);
 
+    // Calls for this job
+    const calls = await query(`
+      SELECT st_call_id, created_on, duration_seconds, from_number, to_number,
+             direction, status, call_type, recording_url, customer_name
+      FROM spartan_ops.st_calls
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY created_on DESC
+      LIMIT 50
+    `);
+
+    // Recall jobs — other jobs that are recalls FOR this job
+    const recallJobs = await query(`
+      SELECT st_job_id, job_number, status, summary, created_on, completed_on
+      FROM spartan_ops.st_jobs_v2
+      WHERE recall_for_id = ${jobNumber}
+      ORDER BY created_on DESC
+      LIMIT 10
+    `);
+
+    // Call scripts
+    const callScripts = await query(`
+      SELECT script_key, title, category, stage, template_text, personalization_fields
+      FROM spartan_ops.call_scripts
+      ORDER BY id
+    `);
+
     // AI-generated Lee Supply material list
     const materialListRows = await query(`
       SELECT material_list_json, sold_amount, form_confirmed, confirmed_at,
@@ -130,14 +156,12 @@ export async function GET(
       }
     }
 
-    // Determine playbook key based on BU and job type
+    // Playbook
     const buName = String(job.business_unit_name || '').toLowerCase();
     const isDrain = buName.includes('drain');
-    // For now default to standard service playbook; phone close detection TBD
     const playbookKey = isDrain ? 'drservice' : 'plservice';
     const salesPlaybookKey = isDrain ? 'drsales' : 'plsales';
 
-    // Playbook definitions for this job's service and sales playbooks
     const playbookSteps = await query(`
       SELECT playbook_key, step_number, quarter, title, description, verification_type, hard_gate
       FROM spartan_ops.playbook_definitions
@@ -145,7 +169,6 @@ export async function GET(
       ORDER BY playbook_key, step_number
     `);
 
-    // Step tracking for this specific job
     const stepTracking = await query(`
       SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes
       FROM spartan_ops.playbook_step_tracking
@@ -161,6 +184,9 @@ export async function GET(
       payments,
       estimates,
       assignments,
+      calls,
+      recallJobs,
+      callScripts,
       materialList,
       catalogImages,
       playbook: {
