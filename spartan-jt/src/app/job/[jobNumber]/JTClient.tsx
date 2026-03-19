@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react';
 import MaterialsTab from './MaterialsTab';
 import ServiceTab from './ServiceTab';
+import PostInstallTab from './PostInstallTab';
+import CallsTab from './CallsTab';
 
 interface JobData {
   job: Record<string, any> | null;
@@ -129,7 +131,9 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
         {activeTab === 'materials' && <MaterialsTab job={job} data={data} amt={amt} />}
         {activeTab === 'financials' && <FinancialsTab job={job} data={data} amt={amt} invTotal={invTotal} paidTotal={paidTotal} />}
         {activeTab === 'verify' && <VerifyTab data={data} score={score} passed={passed} failed={failed} total={total} />}
-        {!['dashboard', 'intel', 'service', 'materials', 'financials', 'verify'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
+        {activeTab === 'postinstall' && <PostInstallTab job={job} data={data} />}
+        {activeTab === 'calls' && <CallsTab job={job} data={data} />}
+        {!['dashboard', 'intel', 'service', 'materials', 'financials', 'verify', 'postinstall', 'calls'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
       </div>
 
       <aside className="panel">
