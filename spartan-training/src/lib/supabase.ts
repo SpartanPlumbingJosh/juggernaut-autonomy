@@ -3,7 +3,8 @@ const SB_KEY = process.env.SUPABASE_KEY || "";
 const CF_ID = process.env.CF_ACCESS_CLIENT_ID || "";
 const CF_SECRET = process.env.CF_ACCESS_CLIENT_SECRET || "";
 
-async function supabaseFetch(sql: string, schema: string): Promise<unknown[]> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function supabaseFetch(sql: string, schema: string): Promise<any[]> {
   const url = `${SB_URL}/rest/v1/rpc/exec_sql`;
   const headers: Record<string, string> = {
     apikey: SB_KEY,
