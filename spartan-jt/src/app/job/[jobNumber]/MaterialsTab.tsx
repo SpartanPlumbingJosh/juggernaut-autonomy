@@ -46,15 +46,13 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
   const ml = data.materialList;
   const images: Record<string, string> = data.catalogImages || {};
   const hasList = ml && ml.material_list_json;
-  const list = hasList ? ml.material_list_json : { parts: [], tools: [], consumables: [] };
+  const list = hasList ? ml.material_list_json : { parts: [], tools: [] };
   const parts = list.parts || [];
   const tools = list.tools || [];
-  const consumables = list.consumables || [];
-  const totalItems = parts.length + tools.length + consumables.length;
+  const totalItems = parts.length + tools.length;
 
   const matCost = parts.reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0)
-    + tools.reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0)
-    + consumables.reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0);
+    + tools.reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0);
   const soldAmt = hasList ? parseFloat(ml.sold_amount) || amt : amt;
   const budget18 = soldAmt * 0.18;
   const materialPct = soldAmt > 0 ? (matCost / soldAmt) * 100 : 0;
@@ -170,17 +168,9 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
       </div>
     </div>}
 
-    {/* Consumables */}
-    {consumables.length > 0 && <div className="c full">
-      <div className="ch"><h3>Consumables</h3><div className="tg" style={{ background: 'var(--grapebg)', border: '1px solid var(--grapebd)', color: 'var(--grape)' }}>{consumables.length}</div></div>
-      <div className="cb" style={{ padding: 0 }}>
-        {consumables.map((c: any, i: number) => <ItemRow key={i} item={c} images={images} />)}
-      </div>
-    </div>}
-
     {/* Generation info */}
     <div style={{ fontSize: 11, color: 'var(--t3)', textAlign: 'center', padding: '8px 0' }}>
-      AI-generated from Lee Supply catalog &middot; {ml.ai_model || 'Gemini Flash'} &middot; {fmt(ml.generated_at)}
+      AI-generated from Lee Supply catalog &middot; {ml.ai_model || 'Opus 4.6'} &middot; {fmt(ml.generated_at)}
       {ml.form_confirmed && <span style={{ color: 'var(--mint)', fontWeight: 600 }}> &middot; Confirmed {fmt(ml.confirmed_at)}</span>}
       {!ml.form_confirmed && <span style={{ color: 'var(--amber)', fontWeight: 600 }}> &middot; Awaiting confirmation</span>}
     </div>
