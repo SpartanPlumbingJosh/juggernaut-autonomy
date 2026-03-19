@@ -13,6 +13,7 @@ const BOARD_ICONS: Record<string, string> = {
 
 export const dynamic = "force-dynamic";
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export default async function HomePage() {
   let boards: Array<{
     id: string; name: string;
@@ -31,7 +32,7 @@ export default async function HomePage() {
       FROM knowledge_lake.sop_boards b
       ORDER BY b.name
     `);
-    boards = (raw || []).map((b: Record<string, unknown>) => ({
+    boards = (raw || []).map((b: any) => ({
       ...b,
       library_count: Number(b.library_count),
       card_count: Number(b.card_count),
@@ -46,7 +47,7 @@ export default async function HomePage() {
         WHERE l.board_id = '${board.id}'
         ORDER BY l.sort_order
       `);
-      board.libraries = (libs || []).map((l: Record<string, unknown>) => ({
+      board.libraries = (libs || []).map((l: any) => ({
         ...l,
         playbook_count: Number(l.playbook_count),
       }));
