@@ -1,7 +1,7 @@
-import { OnboardingApp } from "./OnboardingApp";
+import { OnboardAutoAuth } from "./OnboardAutoAuth";
 
 export const dynamic = "force-dynamic";
 
 export default function OnboardPage() {
-  return <OnboardingApp />;
+  return <OnboardAutoAuth />;
 }
