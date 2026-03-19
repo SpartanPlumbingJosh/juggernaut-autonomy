@@ -3,38 +3,44 @@
 import { useState, useEffect } from "react";
 import { OnboardingApp } from "./OnboardingApp";
 
-// Pre-seed sessionStorage and warm the onboard API before OnboardingApp mounts
-// so it skips its internal PIN login screen.
+// Same overlay pattern as admin — renders OnboardingApp immediately
+// so its useEffect fires, but covers it until API data is loaded.
 export default function OnboardPage() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
     async function init() {
       try {
-        const meRes = await fetch("/api/auth/me");
-        if (!meRes.ok) { setReady(true); return; }
-        const me = await meRes.json();
-        const email = me.user?.email;
-        if (!email) { setReady(true); return; }
-
-        // Seed sessionStorage BEFORE OnboardingApp mounts
-        sessionStorage.setItem("sa_email", email);
-
-        // Pre-warm the onboard API
-        await fetch(`/api/onboard?email=${encodeURIComponent(email)}`);
-      } catch { /* proceed anyway */ }
+        const res = await fetch("/api/auth/me");
+        if (res.ok) {
+          const me = await res.json();
+          const email = me.user?.email;
+          if (email) {
+            sessionStorage.setItem("sa_email", email);
+            // Pre-warm the onboard API
+            await fetch(`/api/onboard?email=${encodeURIComponent(email)}`);
+          }
+        }
+      } catch { /* proceed */ }
+      await new Promise(r => setTimeout(r, 300));
       setReady(true);
     }
     init();
   }, []);
 
-  if (!ready) {
-    return (
-      <div style={{ padding: 60, textAlign: "center", color: "#555", fontSize: 14 }}>
-        Loading onboarding...
-      </div>
-    );
-  }
-
-  return <OnboardingApp />;
+  return (
+    <div style={{ position: "relative", minHeight: "60vh" }}>
+      {!ready && (
+        <div style={{
+          position: "fixed", inset: 0, background: "#0a0a0a", zIndex: 150,
+          display: "flex", alignItems: "center", justifyContent: "center",
+        }}>
+          <div style={{ color: "#555", fontSize: 14, fontFamily: "'Barlow Condensed', sans-serif" }}>
+            Loading...
+          </div>
+        </div>
+      )}
+      <OnboardingApp />
+    </div>
+  );
 }
