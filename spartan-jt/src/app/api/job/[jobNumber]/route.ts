@@ -57,11 +57,12 @@ export async function GET(
 
     // Appointments
     const appointments = await query(`
-      SELECT st_appointment_id, status, start_time, end_time
+      SELECT st_appointment_id, appointment_number, status, start_time, end_time,
+             arrival_window_start, arrival_window_end, special_instructions
       FROM spartan_ops.st_appointments_v2
       WHERE st_job_id = ${jobNumber}
       ORDER BY start_time DESC
-      LIMIT 5
+      LIMIT 10
     `);
 
     // Invoices
@@ -82,6 +83,26 @@ export async function GET(
       LIMIT 10
     `);
 
+    // Estimates with inline items
+    const estimates = await query(`
+      SELECT st_estimate_id, estimate_name, status_name, review_status, summary,
+             sold_on, sold_by_name, subtotal, tax, items, is_active, created_on
+      FROM spartan_ops.st_estimates_v2
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY created_on DESC
+      LIMIT 10
+    `);
+
+    // Technician assignments for this job's appointments
+    const assignments = await query(`
+      SELECT a.st_assignment_id, a.st_appointment_id, a.st_tech_id, a.technician_name,
+             a.status, a.is_paused, a.assigned_on
+      FROM spartan_ops.st_appointment_assignments_v2 a
+      WHERE a.st_job_id = ${jobNumber}
+      ORDER BY a.assigned_on DESC
+      LIMIT 20
+    `);
+
     return NextResponse.json({
       job,
       relatedJobs,
@@ -89,6 +110,8 @@ export async function GET(
       appointments,
       invoices,
       payments,
+      estimates,
+      assignments,
     });
   } catch (err) {
     console.error('Job API error:', err);
