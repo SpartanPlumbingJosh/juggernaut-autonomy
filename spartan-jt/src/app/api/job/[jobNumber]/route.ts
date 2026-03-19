@@ -106,6 +106,30 @@ export async function GET(
     `);
     const materialList = materialListRows.length > 0 ? materialListRows[0] : null;
 
+    // Fetch catalog images for Lee Supply items
+    let catalogImages: Record<string, string> = {};
+    if (materialList && (materialList as any).material_list_json) {
+      const mlJson = (materialList as any).material_list_json;
+      const leeNums: string[] = [];
+      for (const section of ['parts', 'tools', 'consumables']) {
+        const items = (mlJson as any)[section] || [];
+        for (const item of items) {
+          if (item.lee_number) leeNums.push(item.lee_number);
+        }
+      }
+      if (leeNums.length > 0) {
+        const inList = leeNums.map(n => `'${n}'`).join(',');
+        const imgRows = await query(`
+          SELECT item_number, image_url
+          FROM spartan_ops.lee_supply_catalog
+          WHERE item_number IN (${inList}) AND image_url IS NOT NULL AND image_url != ''
+        `);
+        for (const row of imgRows) {
+          catalogImages[(row as any).item_number] = (row as any).image_url;
+        }
+      }
+    }
+
     return NextResponse.json({
       job,
       relatedJobs,
@@ -116,6 +140,7 @@ export async function GET(
       estimates,
       assignments,
       materialList,
+      catalogImages,
     });
   } catch (err) {
     console.error('Job API error:', err);
