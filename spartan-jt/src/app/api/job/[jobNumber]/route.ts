@@ -12,7 +12,6 @@ export async function GET(
   }
 
   try {
-    // Primary lookup: st_jobs_v2 joined with customer + location
     const jobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
              j.total, j.business_unit_name, j.job_type_name,
@@ -32,7 +31,6 @@ export async function GET(
 
     const job = jobs[0] as Record<string, unknown>;
 
-    // Related jobs at same location
     const relatedJobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
              j.total, j.business_unit_name, j.job_type_name,
@@ -46,7 +44,6 @@ export async function GET(
       LIMIT 20
     `);
 
-    // Verifications
     const verifications = await query(`
       SELECT verification_name, result, checked_at
       FROM spartan_ops.job_verifications
@@ -55,7 +52,6 @@ export async function GET(
       LIMIT 54
     `);
 
-    // Appointments
     const appointments = await query(`
       SELECT st_appointment_id, appointment_number, status, start_time, end_time,
              arrival_window_start, arrival_window_end, special_instructions
@@ -65,7 +61,6 @@ export async function GET(
       LIMIT 10
     `);
 
-    // Invoices
     const invoices = await query(`
       SELECT st_invoice_id, reference_number, summary, sub_total, sales_tax, total, balance, invoice_date, items
       FROM spartan_ops.st_invoices_v2
@@ -74,7 +69,6 @@ export async function GET(
       LIMIT 10
     `);
 
-    // Payments (via invoices)
     const payments = await query(`
       SELECT p.st_payment_id, p.payment_date, p.total, p.payment_type, p.memo
       FROM spartan_ops.st_payments_v2 p
@@ -83,7 +77,6 @@ export async function GET(
       LIMIT 10
     `);
 
-    // Estimates with inline items
     const estimates = await query(`
       SELECT st_estimate_id, estimate_name, status_name, review_status, summary,
              sold_on, sold_by_name, subtotal, tax, items, is_active, created_on
@@ -93,7 +86,6 @@ export async function GET(
       LIMIT 10
     `);
 
-    // Technician assignments for this job's appointments
     const assignments = await query(`
       SELECT a.st_assignment_id, a.st_appointment_id, a.st_tech_id, a.technician_name,
              a.status, a.is_paused, a.assigned_on
@@ -102,6 +94,17 @@ export async function GET(
       ORDER BY a.assigned_on DESC
       LIMIT 20
     `);
+
+    // AI-generated Lee Supply material list
+    const materialListRows = await query(`
+      SELECT material_list_json, sold_amount, form_confirmed, confirmed_at,
+             generated_at, ai_model, sold_by, track_type
+      FROM spartan_ops.auto_sales_forms
+      WHERE st_job_id = '${jobNumber}'
+      ORDER BY generated_at DESC
+      LIMIT 1
+    `);
+    const materialList = materialListRows.length > 0 ? materialListRows[0] : null;
 
     return NextResponse.json({
       job,
@@ -112,6 +115,7 @@ export async function GET(
       payments,
       estimates,
       assignments,
+      materialList,
     });
   } catch (err) {
     console.error('Job API error:', err);
