@@ -96,7 +96,6 @@ export async function GET(
       LIMIT 20
     `);
 
-    // Customer contacts (phone, email)
     const custId = (job as any).st_customer_id;
     const contacts = custId ? await query(`
       SELECT type, value, memo
@@ -107,7 +106,6 @@ export async function GET(
       LIMIT 10
     `) : [];
 
-    // Unsold estimates at this location (opportunities)
     const locId = (job as any).st_location_id;
     const unsoldEstimates = locId ? await query(`
       SELECT e.st_estimate_id, e.estimate_name, e.status_name, e.summary,
@@ -121,7 +119,6 @@ export async function GET(
       LIMIT 10
     `) : [];
 
-    // Recall history at this location
     const recallsAtLocation = locId ? await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary, j.created_on,
              j.completed_on, j.recall_for_id
@@ -132,7 +129,6 @@ export async function GET(
       LIMIT 10
     `) : [];
 
-    // Calls for this job
     const calls = await query(`
       SELECT st_call_id, created_on, duration_seconds, from_number, to_number,
              direction, status, call_type, recording_url, customer_name
@@ -142,7 +138,6 @@ export async function GET(
       LIMIT 50
     `);
 
-    // Recall jobs — other jobs that are recalls FOR this job
     const recallJobs = await query(`
       SELECT st_job_id, job_number, status, summary, created_on, completed_on
       FROM spartan_ops.st_jobs_v2
@@ -151,14 +146,12 @@ export async function GET(
       LIMIT 10
     `);
 
-    // Call scripts
     const callScripts = await query(`
       SELECT script_key, title, category, stage, template_text, personalization_fields
       FROM spartan_ops.call_scripts
       ORDER BY id
     `);
 
-    // AI-generated Lee Supply material list
     const materialListRows = await query(`
       SELECT material_list_json, sold_amount, form_confirmed, confirmed_at,
              generated_at, ai_model, sold_by, track_type
@@ -169,7 +162,6 @@ export async function GET(
     `);
     const materialList = materialListRows.length > 0 ? materialListRows[0] : null;
 
-    // Fetch catalog images for Lee Supply items
     let catalogImages: Record<string, string> = {};
     if (materialList && (materialList as any).material_list_json) {
       const mlJson = (materialList as any).material_list_json;
@@ -193,7 +185,6 @@ export async function GET(
       }
     }
 
-    // Playbook
     const buName = String(job.business_unit_name || '').toLowerCase();
     const isDrain = buName.includes('drain');
     const playbookKey = isDrain ? 'drservice' : 'plservice';
@@ -202,7 +193,7 @@ export async function GET(
     const playbookSteps = await query(`
       SELECT playbook_key, step_number, quarter, title, description, verification_type, hard_gate
       FROM spartan_ops.playbook_definitions
-      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}')
+      WHERE playbook_key IN ('${playbookKey}', '${salesPlaybookKey}', 'install')
       ORDER BY playbook_key, step_number
     `);
 
@@ -210,6 +201,16 @@ export async function GET(
       SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes
       FROM spartan_ops.playbook_step_tracking
       WHERE st_job_id = ${jobNumber}
+    `);
+
+    const jobMedia = await query(`
+      SELECT id, media_type, media_url, thumb_url, file_name, message_text,
+             posted_by_name, posted_at, ai_classification, ai_confidence,
+             matched_step_id, matched_playbook, matched_quarter, capture_source
+      FROM spartan_ops.job_media
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY posted_at DESC
+      LIMIT 50
     `);
 
     return NextResponse.json({
@@ -229,9 +230,11 @@ export async function GET(
       callScripts,
       materialList,
       catalogImages,
+      jobMedia,
       playbook: {
         serviceKey: playbookKey,
         salesKey: salesPlaybookKey,
+        installKey: 'install',
         steps: playbookSteps,
         tracking: stepTracking,
       },
