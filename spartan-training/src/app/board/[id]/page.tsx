@@ -5,6 +5,7 @@ export const dynamic = "force-dynamic";
 
 interface Params { params: Promise<{ id: string }> }
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export default async function BoardPage({ params }: Params) {
   const { id } = await params;
   
@@ -24,7 +25,7 @@ export default async function BoardPage({ params }: Params) {
       WHERE l.board_id = '${id}'
       ORDER BY l.sort_order
     `);
-    libraries = (lRows || []).map((l: Record<string, unknown>) => ({ ...l, playbooks: [] }));
+    libraries = (lRows || []).map((l: any) => ({ ...l, playbooks: [] }));
 
     for (const lib of libraries) {
       const pRows = await query(`
@@ -34,7 +35,7 @@ export default async function BoardPage({ params }: Params) {
         WHERE p.library_id = '${lib.id}'
         ORDER BY p.sort_order, p.name
       `);
-      lib.playbooks = (pRows || []).map((p: Record<string, unknown>) => ({
+      lib.playbooks = (pRows || []).map((p: any) => ({
         ...p,
         card_count: Number(p.card_count),
       }));
