@@ -262,11 +262,11 @@ export async function GET(
     `);
 
     const jobMedia = await query(`
-      SELECT media_type, file_name, thumb_url, full_url, ai_classification,
-             ai_confidence, matched_step_id, matched_playbook, posted_by, created_at
+      SELECT media_type, file_name, thumb_url, media_url as full_url, ai_classification,
+             ai_confidence, matched_step_id, matched_playbook, posted_by, posted_at as created_at
       FROM spartan_ops.job_media
       WHERE st_job_id = ${jobNumber}
-      ORDER BY created_at DESC
+      ORDER BY posted_at DESC NULLS LAST
       LIMIT 50
     `);
 
