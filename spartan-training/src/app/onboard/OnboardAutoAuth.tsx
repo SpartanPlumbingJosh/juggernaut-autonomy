@@ -6,15 +6,14 @@ export function OnboardAutoAuth() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    // Fetch current JWT user and pre-populate sessionStorage
-    // so OnboardingApp skips its internal PIN login
     async function init() {
       try {
         const res = await fetch("/api/auth/me");
         if (res.ok) {
           const data = await res.json();
-          if (data.email) {
-            sessionStorage.setItem("sa_email", data.email);
+          const email = data.user?.email || data.email;
+          if (email) {
+            sessionStorage.setItem("sa_email", email);
           }
         }
       } catch { /* proceed anyway */ }
