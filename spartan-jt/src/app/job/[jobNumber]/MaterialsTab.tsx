@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 
-function moneyExact(n: number | string | null | undefined): string {
+function $(n: number | string | null | undefined): string {
   const v = parseFloat(String(n || 0));
   return v > 0 ? '$' + v.toFixed(2) : '\u2014';
 }
@@ -14,29 +14,64 @@ function fmt(d: string | null | undefined): string {
   try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d; }
 }
 
-function ItemImg({ src, alt }: { src?: string; alt: string }) {
+function ProductImage({ src, alt }: { src?: string; alt: string }) {
   const [err, setErr] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+
   if (!src || err) {
-    return <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--s3)', border: '1px solid var(--b2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--t3)', flexShrink: 0 }}>
-      <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="16" height="16"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+    return <div style={{ width: 64, height: 64, borderRadius: 8, background: 'var(--s3)', border: '1px solid var(--b2)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t3)', flexShrink: 0 }}>
+      <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="24" height="24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
     </div>;
   }
-  return <img src={src} alt={alt} onError={() => setErr(true)} style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', background: '#fff', border: '1px solid var(--b2)', flexShrink: 0 }} />;
+
+  return <>
+    <img
+      src={src} alt={alt} onError={() => setErr(true)}
+      onClick={() => setExpanded(true)}
+      style={{ width: 64, height: 64, borderRadius: 8, objectFit: 'contain', background: '#fff', border: '1px solid var(--b2)', flexShrink: 0, cursor: 'pointer', transition: 'transform 0.15s' }}
+      onMouseOver={e => (e.currentTarget.style.transform = 'scale(1.1)')}
+      onMouseOut={e => (e.currentTarget.style.transform = 'scale(1)')}
+    />
+    {expanded && <div onClick={() => setExpanded(false)} style={{
+      position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, zIndex: 9999,
+      background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+      cursor: 'pointer'
+    }}>
+      <img src={src} alt={alt} style={{ maxWidth: '80vw', maxHeight: '80vh', borderRadius: 12, background: '#fff', boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }} />
+      <div style={{ position: 'absolute', top: 20, right: 20, color: '#fff', fontSize: 24, fontWeight: 700 }}>{'\u2715'}</div>
+    </div>}
+  </>;
 }
 
-function ItemRow({ item, images }: { item: any; images: Record<string, string> }) {
+function ItemCard({ item, images, num }: { item: any; images: Record<string, string>; num: number }) {
   const imgUrl = item.lee_number ? images[item.lee_number] : undefined;
+  const cost = parseFloat(item.est_cost) || 0;
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: '1px solid var(--b2)' }}>
-      <ItemImg src={imgUrl} alt={item.item || ''} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.item}</div>
-        {item.lee_number && <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ice)' }}>Lee #{item.lee_number}</div>}
-        {item.notes && <div style={{ fontSize: 10, color: 'var(--t3)', fontStyle: 'italic' }}>{item.notes}</div>}
+    <div style={{ display: 'flex', gap: 14, padding: '14px 16px', borderBottom: '1px solid var(--b1)', alignItems: 'flex-start' }}>
+      <div style={{ position: 'relative' }}>
+        <ProductImage src={imgUrl} alt={item.item || ''} />
+        <div style={{
+          position: 'absolute', top: -4, left: -4, width: 20, height: 20, borderRadius: 10,
+          background: 'var(--s2)', border: '1px solid var(--b2)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 9, fontWeight: 700, color: 'var(--t3)'
+        }}>{num}</div>
       </div>
-      <div style={{ textAlign: 'right', flexShrink: 0 }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>x{item.qty}</div>
-        {item.est_cost > 0 && <div style={{ fontSize: 11, color: 'var(--fire)', fontWeight: 600 }}>{moneyExact(item.est_cost)}</div>}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t1)', lineHeight: 1.3, marginBottom: 3 }}>
+          {item.item}
+        </div>
+        {item.lee_number && <div style={{ fontSize: 11, color: 'var(--ice)', marginBottom: 4 }}>
+          Lee Supply #{item.lee_number}
+        </div>}
+        {item.notes && <div style={{ fontSize: 12, color: 'var(--t3)', lineHeight: 1.4 }}>
+          {item.notes}
+        </div>}
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0, minWidth: 60 }}>
+        <div style={{ fontSize: 11, color: 'var(--t3)', marginBottom: 2 }}>Qty: {item.qty}</div>
+        {cost > 0 && <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t1)' }}>{$(cost)}</div>}
       </div>
     </div>
   );
@@ -51,12 +86,9 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
   const tools = list.tools || [];
   const totalItems = parts.length + tools.length;
 
-  const matCost = parts.reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0)
-    + tools.reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0);
+  const matCost = [...parts, ...tools].reduce((s: number, i: any) => s + (parseFloat(i.est_cost) || 0), 0);
   const soldAmt = hasList ? parseFloat(ml.sold_amount) || amt : amt;
-  const budget18 = soldAmt * 0.18;
   const materialPct = soldAmt > 0 ? (matCost / soldAmt) * 100 : 0;
-  const budgetOk = materialPct <= 18;
 
   if (!hasList) {
     return <>
@@ -68,7 +100,7 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
           </svg>
         </div>
         <div className="tab-info">
-          <div className="tab-title">Materials &mdash; Lee Supply</div>
+          <div className="tab-title">Materials</div>
           <div className="tab-desc">AI-generated material list from Lee Supply catalog</div>
         </div>
       </div>
@@ -79,9 +111,9 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
             <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
           </svg>
         </div>
-        <div className="empty-title">No materials generated yet</div>
-        <div className="empty-desc">AI will generate a material list from the Lee Supply catalog once the job scope is finalized and the sales-to-install pipeline processes this job.</div>
-        <div style={{ marginTop: 16, padding: '4px 12px', borderRadius: 20, background: 'var(--s3)', border: '1px solid var(--b2)', fontSize: 10, color: 'var(--t3)', fontWeight: 600 }}>Awaiting AI Generation</div>
+        <div className="empty-title">No materials yet</div>
+        <div className="empty-desc">The material list will be generated automatically when a sale is processed.</div>
+        <div style={{ marginTop: 16, padding: '4px 12px', borderRadius: 20, background: 'var(--s3)', border: '1px solid var(--b2)', fontSize: 10, color: 'var(--t3)', fontWeight: 600 }}>Waiting for sale</div>
       </div>
     </>;
   }
@@ -95,82 +127,70 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
         </svg>
       </div>
       <div className="tab-info">
-        <div className="tab-title">Materials &mdash; Lee Supply</div>
-        <div className="tab-desc">AI-generated material list &middot; {totalItems} items &middot; Generated {fmt(ml.generated_at)}</div>
-      </div>
-      <div className="tab-badge" style={{ background: budgetOk ? 'var(--mintbg)' : 'var(--firebg)', border: `1px solid ${budgetOk ? 'var(--mintbd)' : 'var(--firebd)'}`, color: budgetOk ? 'var(--mint)' : 'var(--fire)' }}>
-        {materialPct.toFixed(1)}% OF REVENUE
+        <div className="tab-title">Materials</div>
+        <div className="tab-desc">{totalItems} items from Lee Supply &middot; Generated {fmt(ml.generated_at)}</div>
       </div>
     </div>
 
-    <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
-      <div className="st sf"><div className="num">{money(soldAmt)}</div><div className="lbl">Sale Amount</div></div>
-      <div className="st sv"><div className="num">{money(budget18)}</div><div className="lbl">18% Budget</div></div>
-      <div className="st sm"><div className="num" style={{ color: budgetOk ? 'var(--mint)' : 'var(--fire)' }}>{moneyExact(matCost)}</div><div className="lbl">Material Cost</div></div>
-      <div className="st sg"><div className="num">{totalItems}</div><div className="lbl">Lee Items</div></div>
-    </div>
-
-    {/* 18% Budget Gauge */}
-    <div className="c full">
-      <div className="ch"><h3>18% Material Budget</h3></div>
-      <div className="cb">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <div style={{ flex: 1, height: 8, borderRadius: 4, background: 'var(--s3)', overflow: 'hidden' }}>
-            <div style={{ width: `${Math.min(materialPct / 18 * 100, 100)}%`, height: '100%', borderRadius: 4, background: budgetOk ? 'var(--mint)' : 'var(--fire)', transition: 'width 0.3s' }} />
-          </div>
-          <span style={{ fontFamily: 'var(--mono)', fontSize: 13, fontWeight: 700, color: budgetOk ? 'var(--mint)' : 'var(--fire)' }}>
-            {materialPct.toFixed(1)}%
-          </span>
+    {/* Summary Bar */}
+    <div className="hero" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
+      <div className="st" style={{ background: 'var(--s3)', border: '1px solid var(--b2)' }}>
+        <div className="num" style={{ fontSize: 28 }}>{totalItems}</div>
+        <div className="lbl">Items</div>
+      </div>
+      <div className="st" style={{ background: 'var(--s3)', border: '1px solid var(--b2)' }}>
+        <div className="num" style={{ fontSize: 28, color: 'var(--t1)' }}>{$(matCost)}</div>
+        <div className="lbl">Material Cost</div>
+      </div>
+      <div className="st" style={{ background: 'var(--s3)', border: '1px solid var(--b2)' }}>
+        <div className="num" style={{ fontSize: 28, color: materialPct <= 18 ? 'var(--mint)' : 'var(--fire)' }}>
+          {materialPct.toFixed(1)}%
         </div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--t3)' }}>
-          <span>$0</span>
-          <span style={{ color: budgetOk ? 'var(--mint)' : 'var(--fire)', fontWeight: 600 }}>
-            {moneyExact(matCost)} of {moneyExact(budget18)} budget
-          </span>
-          <span>{moneyExact(budget18)}</span>
-        </div>
+        <div className="lbl">of {money(soldAmt)} job</div>
       </div>
     </div>
 
-    {/* Status Row */}
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, margin: '0 0 16px 0' }}>
-      <div className="c"><div className="cb" style={{ textAlign: 'center', padding: '12px' }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--volt)' }}>&mdash;</div>
-        <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}><strong>Ordered</strong> &middot; Sent to Lee</div>
-      </div></div>
-      <div className="c"><div className="cb" style={{ textAlign: 'center', padding: '12px' }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--amber)' }}>&mdash;</div>
-        <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}><strong>Staged</strong> &middot; In truck</div>
-      </div></div>
-      <div className="c"><div className="cb" style={{ textAlign: 'center', padding: '12px' }}>
-        <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--mint)' }}>&mdash;</div>
-        <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}><strong>Verified</strong> &middot; Photo confirmed</div>
-      </div></div>
+    {/* Material Cost Bar */}
+    <div style={{ padding: '0 0 16px 0' }}>
+      <div style={{ height: 6, borderRadius: 3, background: 'var(--s3)', overflow: 'hidden' }}>
+        <div style={{
+          width: `${Math.min(materialPct / 25 * 100, 100)}%`,
+          height: '100%', borderRadius: 3,
+          background: materialPct <= 18 ? 'var(--mint)' : 'var(--fire)',
+          transition: 'width 0.3s'
+        }} />
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4, fontSize: 10, color: 'var(--t3)' }}>
+        <span>{$(matCost)} material cost</span>
+        <span>{materialPct.toFixed(1)}% of {money(soldAmt)} job revenue</span>
+      </div>
     </div>
 
-    {/* Parts */}
+    {/* Parts List */}
     {parts.length > 0 && <div className="c full">
       <div className="ch"><h3>Parts</h3><div className="tg" style={{ background: 'var(--mintbg)', border: '1px solid var(--mintbd)', color: 'var(--mint)' }}>{parts.length}</div></div>
       <div className="cb" style={{ padding: 0 }}>
-        {parts.map((p: any, i: number) => <ItemRow key={i} item={p} images={images} />)}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px', borderTop: '2px solid var(--b2)', fontWeight: 700, fontSize: 13 }}>
-          <span style={{ color: 'var(--t2)', marginRight: 12 }}>Parts Total</span>
-          <span style={{ color: budgetOk ? 'var(--mint)' : 'var(--fire)' }}>{moneyExact(parts.reduce((s: number, p: any) => s + (parseFloat(p.est_cost) || 0), 0))}</span>
+        {parts.map((p: any, i: number) => <ItemCard key={i} item={p} images={images} num={i + 1} />)}
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 16px', borderTop: '2px solid var(--b2)' }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--t2)' }}>Parts Total ({parts.length} items)</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--t1)' }}>
+            {$(parts.reduce((s: number, p: any) => s + (parseFloat(p.est_cost) || 0), 0))}
+          </span>
         </div>
       </div>
     </div>}
 
     {/* Tools */}
     {tools.length > 0 && <div className="c full">
-      <div className="ch"><h3>Tools</h3><div className="tg" style={{ background: 'var(--voltbg)', border: '1px solid var(--voltbd)', color: 'var(--volt)' }}>{tools.length}</div></div>
+      <div className="ch"><h3>Specialty Tools</h3><div className="tg" style={{ background: 'var(--voltbg)', border: '1px solid var(--voltbd)', color: 'var(--volt)' }}>{tools.length}</div></div>
       <div className="cb" style={{ padding: 0 }}>
-        {tools.map((t: any, i: number) => <ItemRow key={i} item={t} images={images} />)}
+        {tools.map((t: any, i: number) => <ItemCard key={i} item={t} images={images} num={i + 1} />)}
       </div>
     </div>}
 
-    {/* Generation info */}
-    <div style={{ fontSize: 11, color: 'var(--t3)', textAlign: 'center', padding: '8px 0' }}>
-      AI-generated from Lee Supply catalog &middot; {ml.ai_model || 'Opus 4.6'} &middot; {fmt(ml.generated_at)}
+    {/* Footer */}
+    <div style={{ fontSize: 11, color: 'var(--t3)', textAlign: 'center', padding: '12px 0' }}>
+      Generated by AI ({ml.ai_model || 'Sonnet 4.6'}) from Lee Supply catalog &middot; {fmt(ml.generated_at)}
       {ml.form_confirmed && <span style={{ color: 'var(--mint)', fontWeight: 600 }}> &middot; Confirmed {fmt(ml.confirmed_at)}</span>}
       {!ml.form_confirmed && <span style={{ color: 'var(--amber)', fontWeight: 600 }}> &middot; Awaiting confirmation</span>}
     </div>
