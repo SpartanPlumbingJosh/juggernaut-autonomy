@@ -1,5 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
+import MaterialsTab from './MaterialsTab';
+import ServiceTab from './ServiceTab';
 
 interface JobData {
   job: Record<string, any> | null;
@@ -8,6 +10,8 @@ interface JobData {
   appointments: Record<string, any>[];
   invoices: Record<string, any>[];
   payments: Record<string, any>[];
+  estimates: Record<string, any>[];
+  assignments: Record<string, any>[];
 }
 
 const TABS = [
@@ -121,9 +125,11 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       <div className="main">
         {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={isInstall} jobNumber={jobNumber} />}
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
+        {activeTab === 'service' && <ServiceTab job={job} data={data} />}
+        {activeTab === 'materials' && <MaterialsTab job={job} data={data} amt={amt} />}
         {activeTab === 'financials' && <FinancialsTab job={job} data={data} amt={amt} invTotal={invTotal} paidTotal={paidTotal} />}
         {activeTab === 'verify' && <VerifyTab data={data} score={score} passed={passed} failed={failed} total={total} />}
-        {!['dashboard', 'intel', 'financials', 'verify'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
+        {!['dashboard', 'intel', 'service', 'materials', 'financials', 'verify'].includes(activeTab) && <EmptyTab tab={TABS.find(t => t.id === activeTab)!} />}
       </div>
 
       <aside className="panel">
