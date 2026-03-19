@@ -1,4 +1,5 @@
 'use client';
+import { useState } from 'react';
 
 function moneyExact(n: number | string | null | undefined): string {
   const v = parseFloat(String(n || 0));
@@ -13,8 +14,37 @@ function fmt(d: string | null | undefined): string {
   try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d; }
 }
 
+function ItemImg({ src, alt }: { src?: string; alt: string }) {
+  const [err, setErr] = useState(false);
+  if (!src || err) {
+    return <div style={{ width: 40, height: 40, borderRadius: 6, background: 'var(--s3)', border: '1px solid var(--b2)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, color: 'var(--t3)', flexShrink: 0 }}>
+      <svg fill="none" stroke="currentColor" strokeWidth="1.5" viewBox="0 0 24 24" width="16" height="16"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+    </div>;
+  }
+  return <img src={src} alt={alt} onError={() => setErr(true)} style={{ width: 40, height: 40, borderRadius: 6, objectFit: 'cover', background: '#fff', border: '1px solid var(--b2)', flexShrink: 0 }} />;
+}
+
+function ItemRow({ item, images }: { item: any; images: Record<string, string> }) {
+  const imgUrl = item.lee_number ? images[item.lee_number] : undefined;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 16px', borderBottom: '1px solid var(--b2)' }}>
+      <ItemImg src={imgUrl} alt={item.item || ''} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--t1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.item}</div>
+        {item.lee_number && <div style={{ fontSize: 10, fontFamily: 'var(--mono)', color: 'var(--ice)' }}>Lee #{item.lee_number}</div>}
+        {item.notes && <div style={{ fontSize: 10, color: 'var(--t3)', fontStyle: 'italic' }}>{item.notes}</div>}
+      </div>
+      <div style={{ textAlign: 'right', flexShrink: 0 }}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t1)' }}>x{item.qty}</div>
+        {item.est_cost > 0 && <div style={{ fontSize: 11, color: 'var(--fire)', fontWeight: 600 }}>{moneyExact(item.est_cost)}</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function MaterialsTab({ job, data, amt }: { job: any; data: any; amt: number }) {
   const ml = data.materialList;
+  const images: Record<string, string> = data.catalogImages || {};
   const hasList = ml && ml.material_list_json;
   const list = hasList ? ml.material_list_json : { parts: [], tools: [], consumables: [] };
   const parts = list.parts || [];
@@ -105,7 +135,7 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
     </div>
 
     {/* Status Row */}
-    <div className="g3" style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, margin: '0 0 16px 0' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, margin: '0 0 16px 0' }}>
       <div className="c"><div className="cb" style={{ textAlign: 'center', padding: '12px' }}>
         <div style={{ fontSize: 20, fontWeight: 700, color: 'var(--volt)' }}>&mdash;</div>
         <div style={{ fontSize: 11, color: 'var(--t3)', marginTop: 2 }}><strong>Ordered</strong> &middot; Sent to Lee</div>
@@ -124,20 +154,11 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
     {parts.length > 0 && <div className="c full">
       <div className="ch"><h3>Parts</h3><div className="tg" style={{ background: 'var(--mintbg)', border: '1px solid var(--mintbd)', color: 'var(--mint)' }}>{parts.length}</div></div>
       <div className="cb" style={{ padding: 0 }}>
-        <table className="mt"><thead><tr><th style={{ textAlign: 'right' }}>Qty</th><th>Item</th><th>Lee #</th><th style={{ textAlign: 'right' }}>Cost</th></tr></thead><tbody>
-          {parts.map((p: any, i: number) => (
-            <tr key={i}>
-              <td style={{ textAlign: 'right', fontWeight: 600 }}>{p.qty}</td>
-              <td style={{ maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.item}</td>
-              <td style={{ fontFamily: 'var(--mono)', color: 'var(--ice)', fontSize: 11 }}>{p.lee_number || '\u2014'}</td>
-              <td style={{ textAlign: 'right', color: 'var(--fire)', fontWeight: 600 }}>{moneyExact(p.est_cost)}</td>
-            </tr>
-          ))}
-          <tr style={{ borderTop: '2px solid var(--b2)', fontWeight: 700 }}>
-            <td colSpan={3} style={{ textAlign: 'right', color: 'var(--t2)' }}>Parts Total</td>
-            <td style={{ textAlign: 'right', color: budgetOk ? 'var(--mint)' : 'var(--fire)' }}>{moneyExact(parts.reduce((s: number, p: any) => s + (parseFloat(p.est_cost) || 0), 0))}</td>
-          </tr>
-        </tbody></table>
+        {parts.map((p: any, i: number) => <ItemRow key={i} item={p} images={images} />)}
+        <div style={{ display: 'flex', justifyContent: 'flex-end', padding: '10px 16px', borderTop: '2px solid var(--b2)', fontWeight: 700, fontSize: 13 }}>
+          <span style={{ color: 'var(--t2)', marginRight: 12 }}>Parts Total</span>
+          <span style={{ color: budgetOk ? 'var(--mint)' : 'var(--fire)' }}>{moneyExact(parts.reduce((s: number, p: any) => s + (parseFloat(p.est_cost) || 0), 0))}</span>
+        </div>
       </div>
     </div>}
 
@@ -145,16 +166,7 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
     {tools.length > 0 && <div className="c full">
       <div className="ch"><h3>Tools</h3><div className="tg" style={{ background: 'var(--voltbg)', border: '1px solid var(--voltbd)', color: 'var(--volt)' }}>{tools.length}</div></div>
       <div className="cb" style={{ padding: 0 }}>
-        <table className="mt"><thead><tr><th style={{ textAlign: 'right' }}>Qty</th><th>Item</th><th>Lee #</th><th style={{ textAlign: 'right' }}>Cost</th></tr></thead><tbody>
-          {tools.map((t: any, i: number) => (
-            <tr key={i}>
-              <td style={{ textAlign: 'right', fontWeight: 600 }}>{t.qty}</td>
-              <td>{t.item}</td>
-              <td style={{ fontFamily: 'var(--mono)', color: 'var(--ice)', fontSize: 11 }}>{t.lee_number || '\u2014'}</td>
-              <td style={{ textAlign: 'right' }}>{moneyExact(t.est_cost)}</td>
-            </tr>
-          ))}
-        </tbody></table>
+        {tools.map((t: any, i: number) => <ItemRow key={i} item={t} images={images} />)}
       </div>
     </div>}
 
@@ -162,16 +174,7 @@ export default function MaterialsTab({ job, data, amt }: { job: any; data: any; 
     {consumables.length > 0 && <div className="c full">
       <div className="ch"><h3>Consumables</h3><div className="tg" style={{ background: 'var(--grapebg)', border: '1px solid var(--grapebd)', color: 'var(--grape)' }}>{consumables.length}</div></div>
       <div className="cb" style={{ padding: 0 }}>
-        <table className="mt"><thead><tr><th style={{ textAlign: 'right' }}>Qty</th><th>Item</th><th>Lee #</th><th style={{ textAlign: 'right' }}>Cost</th></tr></thead><tbody>
-          {consumables.map((c: any, i: number) => (
-            <tr key={i}>
-              <td style={{ textAlign: 'right', fontWeight: 600 }}>{c.qty}</td>
-              <td>{c.item}</td>
-              <td style={{ fontFamily: 'var(--mono)', color: 'var(--ice)', fontSize: 11 }}>{c.lee_number || '\u2014'}</td>
-              <td style={{ textAlign: 'right' }}>{moneyExact(c.est_cost)}</td>
-            </tr>
-          ))}
-        </tbody></table>
+        {consumables.map((c: any, i: number) => <ItemRow key={i} item={c} images={images} />)}
       </div>
     </div>}
 
