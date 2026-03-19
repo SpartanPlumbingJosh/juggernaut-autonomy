@@ -96,7 +96,6 @@ export async function GET(
       LIMIT 20
     `);
 
-    // Customer contacts (phone, email)
     const custId = (job as any).st_customer_id;
     const contacts = custId ? await query(`
       SELECT type, value, memo
@@ -107,7 +106,6 @@ export async function GET(
       LIMIT 10
     `) : [];
 
-    // Unsold estimates at this location (opportunities)
     const locId = (job as any).st_location_id;
     const unsoldEstimates = locId ? await query(`
       SELECT e.st_estimate_id, e.estimate_name, e.status_name, e.summary,
@@ -121,7 +119,6 @@ export async function GET(
       LIMIT 10
     `) : [];
 
-    // Recall history at this location
     const recallsAtLocation = locId ? await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary, j.created_on,
              j.completed_on, j.recall_for_id
@@ -132,7 +129,6 @@ export async function GET(
       LIMIT 10
     `) : [];
 
-    // Calls for this job
     const calls = await query(`
       SELECT st_call_id, created_on, duration_seconds, from_number, to_number,
              direction, status, call_type, recording_url, customer_name
@@ -142,7 +138,6 @@ export async function GET(
       LIMIT 50
     `);
 
-    // Recall jobs — other jobs that are recalls FOR this job
     const recallJobs = await query(`
       SELECT st_job_id, job_number, status, summary, created_on, completed_on
       FROM spartan_ops.st_jobs_v2
@@ -151,14 +146,12 @@ export async function GET(
       LIMIT 10
     `);
 
-    // Call scripts
     const callScripts = await query(`
       SELECT script_key, title, category, stage, template_text, personalization_fields
       FROM spartan_ops.call_scripts
       ORDER BY id
     `);
 
-    // AI-generated Lee Supply material list
     const materialListRows = await query(`
       SELECT material_list_json, sold_amount, form_confirmed, confirmed_at,
              generated_at, ai_model, sold_by, track_type
@@ -169,7 +162,6 @@ export async function GET(
     `);
     const materialList = materialListRows.length > 0 ? materialListRows[0] : null;
 
-    // Fetch catalog images for Lee Supply items
     let catalogImages: Record<string, string> = {};
     if (materialList && (materialList as any).material_list_json) {
       const mlJson = (materialList as any).material_list_json;
@@ -193,7 +185,6 @@ export async function GET(
       }
     }
 
-    // Playbook
     const buName = String(job.business_unit_name || '').toLowerCase();
     const isDrain = buName.includes('drain');
     const playbookKey = isDrain ? 'drservice' : 'plservice';
@@ -212,7 +203,6 @@ export async function GET(
       WHERE st_job_id = ${jobNumber}
     `);
 
-    // Purchase orders for this job (PO-based material cost tracking)
     const purchaseOrders = await query(`
       SELECT st_po_id, po_number, vendor_id, status, total, tax, po_date, items, summary, received_on
       FROM spartan_ops.st_purchase_orders_v2
@@ -221,14 +211,12 @@ export async function GET(
       LIMIT 20
     `);
 
-    // Verification definitions (full 54-check set with phases/stages)
     const verificationDefs = await query(`
       SELECT verification_code, verification_name, phase, stage, is_hard_gate, applies_to_track, is_active, sort_order
       FROM spartan_ops.verification_definitions
       ORDER BY sort_order
     `);
 
-    // Company-wide verification averages
     const companyAverages = await query(`
       SELECT verification_name,
         round(100.0 * sum(case when result = 'pass' then 1 else 0 end) / count(*), 1) as pass_pct,
@@ -237,32 +225,58 @@ export async function GET(
       GROUP BY verification_name
     `);
 
+    const permits = await query(`
+      SELECT permit_type, status, filed_date, approved_date, expires_date,
+             ai_verified, ai_notes, document_url, jurisdiction
+      FROM spartan_ops.permit_documents
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY created_at DESC
+    `);
+
+    const permitRules = locId ? await query(`
+      SELECT pr.jurisdiction, pr.permit_type, pr.required, pr.confidence_level, pr.reviewed
+      FROM spartan_ops.permit_rules pr
+      WHERE pr.jurisdiction IN (
+        SELECT COALESCE(l2.address_city, '') FROM spartan_ops.st_locations_v2 l2 WHERE l2.st_location_id = ${locId}
+        UNION
+        SELECT COALESCE(l2.address_zip, '') FROM spartan_ops.st_locations_v2 l2 WHERE l2.st_location_id = ${locId}
+      )
+      ORDER BY pr.jurisdiction, pr.permit_type
+    `) : [];
+
+    const cardRequests = await query(`
+      SELECT requested_by, requested_at, responded_by, responded_at, response_time_seconds,
+             card_issued, receipt_posted, receipt_ai_pass, receipt_ai_notes,
+             amount, mismatch_flagged, reconciled
+      FROM spartan_ops.job_card_requests
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY requested_at DESC
+    `);
+
+    const blockers = await query(`
+      SELECT category, escalation_level, description, owner, auto_detected,
+             source, impact_assessment, resolved_at, resolution_notes, created_at
+      FROM spartan_ops.job_blockers
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY resolved_at NULLS FIRST, created_at DESC
+    `);
+
+    const jobMedia = await query(`
+      SELECT media_type, file_name, thumb_url, full_url, ai_classification,
+             ai_confidence, matched_step_id, matched_playbook, posted_by, created_at
+      FROM spartan_ops.job_media
+      WHERE st_job_id = ${jobNumber}
+      ORDER BY created_at DESC
+      LIMIT 50
+    `);
+
     return NextResponse.json({
-      job,
-      relatedJobs,
-      verifications,
-      appointments,
-      invoices,
-      payments,
-      estimates,
-      assignments,
-      contacts,
-      unsoldEstimates,
-      recallsAtLocation,
-      calls,
-      recallJobs,
-      callScripts,
-      materialList,
-      catalogImages,
-      purchaseOrders,
-      verificationDefs,
-      companyAverages,
-      playbook: {
-        serviceKey: playbookKey,
-        salesKey: salesPlaybookKey,
-        steps: playbookSteps,
-        tracking: stepTracking,
-      },
+      job, relatedJobs, verifications, appointments, invoices, payments,
+      estimates, assignments, contacts, unsoldEstimates, recallsAtLocation,
+      calls, recallJobs, callScripts, materialList, catalogImages,
+      purchaseOrders, verificationDefs, companyAverages,
+      playbook: { serviceKey: playbookKey, salesKey: salesPlaybookKey, steps: playbookSteps, tracking: stepTracking },
+      permits, permitRules, cardRequests, blockers, jobMedia,
     });
   } catch (err) {
     console.error('Job API error:', err);
