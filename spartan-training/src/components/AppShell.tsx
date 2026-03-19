@@ -5,11 +5,11 @@ import { usePathname, useRouter } from "next/navigation";
 
 interface User { id: string; email: string; name: string; role: string }
 
-const NAV: { href: string; label: string; icon: string; adminOnly?: boolean }[] = [
-  { href: "/", label: "Training Library", icon: "📚" },
-  { href: "/onboard", label: "My Onboarding", icon: "🎯" },
-  { href: "/admin", label: "Command Center", icon: "🔒", adminOnly: true },
-  { href: "/admin/content", label: "SOP Content", icon: "📝", adminOnly: true },
+const NAV: { href: string; label: string; adminOnly?: boolean }[] = [
+  { href: "/", label: "SOPs" },
+  { href: "/onboard", label: "Onboarding" },
+  { href: "/admin", label: "Command Center", adminOnly: true },
+  { href: "/admin/content", label: "SOP Content", adminOnly: true },
 ];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
@@ -20,10 +20,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const seedSessionStorage = useCallback((email: string) => {
     if (typeof window === "undefined") return;
-    // Pre-seed sessionStorage keys that AdminApp and OnboardingApp check
-    // so they skip their internal login gates
-    if (!sessionStorage.getItem("sa_admin")) sessionStorage.setItem("sa_admin", email);
-    if (!sessionStorage.getItem("sa_email")) sessionStorage.setItem("sa_email", email);
+    sessionStorage.setItem("sa_admin", email);
+    sessionStorage.setItem("sa_email", email);
   }, []);
 
   useEffect(() => {
@@ -47,7 +45,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     router.refresh();
   }
 
-  // Don't render shell on login/setup pages
   if (pathname === "/login" || pathname === "/setup-password") {
     return <>{children}</>;
   }
@@ -61,7 +58,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   const isActive = (href: string) => {
-    if (href === "/") return pathname === "/";
+    if (href === "/") return pathname === "/" || pathname.startsWith("/board") || pathname.startsWith("/playbook");
+    if (href === "/admin") return pathname === "/admin";
     return pathname.startsWith(href);
   };
 
@@ -69,7 +67,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ minHeight: "100vh", background: "#0a0a0a" }}>
-      {/* ─── TOP BAR ─── */}
       <header style={{
         background: "#111",
         borderBottom: "1px solid #1a1a1a",
@@ -82,7 +79,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         zIndex: 200,
         height: 56,
       }}>
-        {/* Logo */}
         <a href="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none" }}>
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -92,47 +88,37 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           />
           <span style={{
             fontFamily: "'Archivo Black', sans-serif",
-            fontSize: 14,
-            color: "#c8a84e",
-            letterSpacing: 2,
+            fontSize: 14, color: "#c8a84e", letterSpacing: 2,
             textTransform: "uppercase" as const,
           }}>
             Academy
           </span>
         </a>
 
-        {/* Nav Links */}
-        <nav style={{ display: "flex", alignItems: "center", gap: 4, height: "100%" }}>
+        <nav style={{ display: "flex", alignItems: "center", gap: 2, height: "100%" }}>
           {visibleNav.map(n => {
             const active = isActive(n.href);
             return (
-              <a
-                key={n.href}
-                href={n.href}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 6,
-                  padding: "6px 14px",
-                  borderRadius: 6,
-                  fontSize: 13,
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 600,
-                  letterSpacing: 0.5,
-                  textDecoration: "none",
-                  color: active ? "#c8a84e" : "#666",
-                  background: active ? "rgba(200,168,78,0.08)" : "transparent",
-                  transition: "all 0.15s",
-                }}
-              >
-                <span style={{ fontSize: 15 }}>{n.icon}</span>
+              <a key={n.href} href={n.href} style={{
+                padding: "8px 16px",
+                borderRadius: 6,
+                fontSize: 13,
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: active ? 700 : 600,
+                letterSpacing: 1,
+                textTransform: "uppercase" as const,
+                textDecoration: "none",
+                color: active ? "#c8a84e" : "#555",
+                background: active ? "rgba(200,168,78,0.08)" : "transparent",
+                borderBottom: active ? "2px solid #c8a84e" : "2px solid transparent",
+                transition: "all 0.15s",
+              }}>
                 {n.label}
               </a>
             );
           })}
         </nav>
 
-        {/* User */}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           {user && (
             <>
@@ -147,16 +133,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   }}>ADMIN</span>
                 )}
               </span>
-              <button
-                onClick={handleLogout}
-                style={{
-                  background: "transparent", border: "1px solid #222",
-                  color: "#555", padding: "5px 12px", borderRadius: 6,
-                  fontSize: 11, cursor: "pointer",
-                  fontFamily: "'Barlow Condensed', sans-serif",
-                  fontWeight: 600, letterSpacing: 0.5, transition: "all 0.15s",
-                }}
-              >
+              <button onClick={handleLogout} style={{
+                background: "transparent", border: "1px solid #222",
+                color: "#555", padding: "5px 12px", borderRadius: 6,
+                fontSize: 11, cursor: "pointer",
+                fontFamily: "'Barlow Condensed', sans-serif",
+                fontWeight: 600, letterSpacing: 0.5, transition: "all 0.15s",
+              }}>
                 Sign Out
               </button>
             </>
@@ -164,7 +147,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      {/* ─── CONTENT ─── */}
       <main style={{ maxWidth: 960, margin: "0 auto", padding: "24px 16px" }}>
         {children}
       </main>
