@@ -1,25 +1,23 @@
 import { query } from '@/lib/supabase';
 import { Metadata } from 'next';
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
-
 function formatMoney(num: number): string {
   if (isNaN(num)) return '0.00';
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function has(v: any): boolean {
+function has(v: unknown): boolean {
   if (v === undefined || v === null) return false;
   const s = String(v).trim();
   return s !== '' && s !== '0';
 }
 
-function str(v: any): string {
+function str(v: unknown): string {
   if (v === undefined || v === null) return '';
   return String(v);
 }
 
-function stars(s: any): string {
+function stars(s: unknown): string {
   if (!s) return '';
   const t = String(s).toLowerCase();
   if (t.includes('5')) return '⭐⭐⭐⭐⭐';
@@ -30,7 +28,7 @@ function stars(s: any): string {
   return String(s);
 }
 
-function parseMoney(v: any): number {
+function parseMoney(v: unknown): number {
   if (typeof v === 'number') return v;
   return parseFloat(String(v || '0').replace(/[^0-9.]/g, '')) || 0;
 }
@@ -41,6 +39,10 @@ function tierInfo(rate: number): { label: string; color: string; emoji: string }
   if (rate > 750) return { label: 'Tight', color: '#ffeb3b', emoji: '🟡' };
   return { label: 'Critical', color: '#ff4444', emoji: '🔴' };
 }
+
+interface JobType { name: string; avgTime: string; permit: string }
+interface PricingCheck { sale: number; hours: number; rate: number }
+interface FormRecord { form_data: Record<string, unknown>; created_at: string }
 
 export async function generateMetadata({ params }: { params: Promise<{ jobId: string }> }): Promise<Metadata> {
   const { jobId } = await params;
@@ -54,11 +56,11 @@ export default async function ChecklistPage({ params }: { params: Promise<{ jobI
     return <ErrorPage message="Invalid job ID" />;
   }
 
-  let d: any;
+  let d: Record<string, unknown>;
   let createdAt: string;
 
   try {
-    const rows = await query<{ form_data: any; created_at: string }>(
+    const rows = await query<FormRecord>(
       `SELECT form_data, created_at FROM spartan_ops.sales_form_checklists WHERE st_job_id = '${jobId}' LIMIT 1`
     );
 
@@ -66,13 +68,16 @@ export default async function ChecklistPage({ params }: { params: Promise<{ jobI
       return <ErrorPage message={`No checklist found for Job ${jobId}`} />;
     }
 
-    d = typeof rows[0].form_data === 'string' ? JSON.parse(rows[0].form_data) : rows[0].form_data;
+    d = typeof rows[0].form_data === 'string' ? JSON.parse(rows[0].form_data as string) : rows[0].form_data;
     createdAt = rows[0].created_at;
-  } catch (err: any) {
-    return <ErrorPage message={`Error loading checklist: ${err?.message || 'Unknown error'}`} />;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Unknown error';
+    return <ErrorPage message={`Error loading checklist: ${msg}`} />;
   }
 
   const amt = parseMoney(d.pkgAmt);
+  const jobTypes = (d.jobTypes || []) as JobType[];
+  const pricing = d.pricingCheck as PricingCheck | null;
 
   return (
     <html lang="en">
@@ -148,27 +153,27 @@ export default async function ChecklistPage({ params }: { params: Promise<{ jobI
           <div className="crew-msg">💪 <em>{str(d.crewMsg)}</em></div>
         )}
 
-        {d.jobTypes && d.jobTypes.length > 0 && (
+        {jobTypes.length > 0 && (
           <>
-            {d.jobTypes.map((jt: any, i: number) => (
+            {jobTypes.map((jt: JobType, i: number) => (
               <div key={i} className="job-header">
-                <div className="name">{str(jt.name)}</div>
-                <div className="meta">⏱️ {str(jt.avgTime)} | 📝 Permit: {str(jt.permit)}</div>
+                <div className="name">{jt.name}</div>
+                <div className="meta">⏱️ {jt.avgTime} | 📝 Permit: {jt.permit}</div>
               </div>
             ))}
           </>
         )}
 
-        {d.pricingCheck && d.pricingCheck.sale > 0 && d.pricingCheck.hours > 0 && (
+        {pricing && pricing.sale > 0 && pricing.hours > 0 && (
           <div className="pricing">
             <h2 style={{ marginTop: 0 }}>📊 Pricing Check</h2>
-            <div className="row"><span className="lb">Sale</span><span className="vl">${formatMoney(d.pricingCheck.sale)}</span></div>
-            <div className="row"><span className="lb">Hours Bid</span><span className="vl">{d.pricingCheck.hours}</span></div>
-            <div className="row"><span className="lb">Rate</span><span className="vl">${formatMoney(d.pricingCheck.rate)}/hr</span></div>
+            <div className="row"><span className="lb">Sale</span><span className="vl">${formatMoney(pricing.sale)}</span></div>
+            <div className="row"><span className="lb">Hours Bid</span><span className="vl">{pricing.hours}</span></div>
+            <div className="row"><span className="lb">Rate</span><span className="vl">${formatMoney(pricing.rate)}/hr</span></div>
             <div className="row">
               <span className="lb">Tier</span>
-              <span className="vl" style={{ color: tierInfo(d.pricingCheck.rate).color }}>
-                {tierInfo(d.pricingCheck.rate).emoji} {tierInfo(d.pricingCheck.rate).label}
+              <span className="vl" style={{ color: tierInfo(pricing.rate).color }}>
+                {tierInfo(pricing.rate).emoji} {tierInfo(pricing.rate).label}
               </span>
             </div>
           </div>
