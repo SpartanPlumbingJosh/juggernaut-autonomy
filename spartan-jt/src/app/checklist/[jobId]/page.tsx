@@ -1,61 +1,38 @@
 import { query } from '@/lib/supabase';
 import { Metadata } from 'next';
 
-interface FormData {
-  customerName: string;
-  address: string;
-  phone: string;
-  stJob: string;
-  slackChannel: string;
-  dateSold: string;
-  soldBy: string;
-  hoursBid: string;
-  starPkg: string;
-  pkgAmt: string;
-  payMethod: string;
-  financingCo: string;
-  rightToCancel: string;
-  depositCollected: string;
-  workType: string;
-  equipment: string;
-  dustContain: string;
-  promises: string;
-  specialTools: string;
-  crewMsg: string;
-  picsTaken: string;
-  videoTaken: string;
-  returnVisit: string;
-  returnWhen: string;
-  excavating: string;
-  excavLocation: string;
-  excavMarked: string;
-  calledOUPS: string;
-  oupsTicket: string;
-  subcontractor: string;
-  subName: string;
-  subAgreement: string;
-  formFinished: string;
-  jobTypes: { name: string; avgTime: string; permit: string }[];
-  pricingCheck: { sale: number; hours: number; rate: number } | null;
-}
+/* eslint-disable @typescript-eslint/no-explicit-any */
 
 function formatMoney(num: number): string {
+  if (isNaN(num)) return '0.00';
   return num.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-function has(v: string | undefined | null): boolean {
-  return v !== undefined && v !== null && v.toString().trim() !== '' && v.toString().trim() !== '0';
+function has(v: any): boolean {
+  if (v === undefined || v === null) return false;
+  const s = String(v).trim();
+  return s !== '' && s !== '0';
 }
 
-function stars(s: string): string {
+function str(v: any): string {
+  if (v === undefined || v === null) return '';
+  return String(v);
+}
+
+function stars(s: any): string {
   if (!s) return '';
-  const t = s.toLowerCase();
+  const t = String(s).toLowerCase();
   if (t.includes('5')) return '⭐⭐⭐⭐⭐';
   if (t.includes('4')) return '⭐⭐⭐⭐';
   if (t.includes('3')) return '⭐⭐⭐';
   if (t.includes('2')) return '⭐⭐';
   if (t.includes('1')) return '⭐';
-  return s;
+  return String(s);
+}
+
+function parseMoney(v: any): number {
+  if (typeof v === 'number') return v;
+  return parseFloat(String(v || '0').replace(/[^0-9.]/g, '')) || 0;
 }
 
 function tierInfo(rate: number): { label: string; color: string; emoji: string } {
@@ -77,16 +54,25 @@ export default async function ChecklistPage({ params }: { params: Promise<{ jobI
     return <ErrorPage message="Invalid job ID" />;
   }
 
-  const rows = await query<{ form_data: FormData; created_at: string }>(
-    `SELECT form_data, created_at FROM spartan_ops.sales_form_checklists WHERE st_job_id = '${jobId}' LIMIT 1`
-  );
+  let d: any;
+  let createdAt: string;
 
-  if (rows.length === 0) {
-    return <ErrorPage message={`No checklist found for Job ${jobId}`} />;
+  try {
+    const rows = await query<{ form_data: any; created_at: string }>(
+      `SELECT form_data, created_at FROM spartan_ops.sales_form_checklists WHERE st_job_id = '${jobId}' LIMIT 1`
+    );
+
+    if (rows.length === 0) {
+      return <ErrorPage message={`No checklist found for Job ${jobId}`} />;
+    }
+
+    d = typeof rows[0].form_data === 'string' ? JSON.parse(rows[0].form_data) : rows[0].form_data;
+    createdAt = rows[0].created_at;
+  } catch (err: any) {
+    return <ErrorPage message={`Error loading checklist: ${err?.message || 'Unknown error'}`} />;
   }
 
-  const d = typeof rows[0].form_data === 'string' ? JSON.parse(rows[0].form_data) : rows[0].form_data;
-  const createdAt = rows[0].created_at;
+  const amt = parseMoney(d.pkgAmt);
 
   return (
     <html lang="en">
@@ -98,102 +84,87 @@ export default async function ChecklistPage({ params }: { params: Promise<{ jobI
       <body>
         <h1>💪 SALES TO INSTALL CHECKLIST 💪</h1>
 
-        {/* Job Summary */}
         <div className="section">
           <h2>😊 Job Summary</h2>
           <div className="grid">
-            <GridItem label="Customer" value={d.customerName} />
-            <GridItem label="Address" value={d.address} />
-            <GridItem label="Phone" value={d.phone} />
-            <GridItem label="ST Job #" value={d.stJob} />
-            <GridItem label="Sold By" value={d.soldBy} />
-            <GridItem label="Date Sold" value={d.dateSold} />
-            <GridItem label="Hours Bid" value={d.hoursBid} />
+            <GridItem label="Customer" value={str(d.customerName)} />
+            <GridItem label="Address" value={str(d.address)} />
+            <GridItem label="Phone" value={str(d.phone)} />
+            <GridItem label="ST Job #" value={str(d.stJob)} />
+            <GridItem label="Sold By" value={str(d.soldBy)} />
+            <GridItem label="Date Sold" value={str(d.dateSold)} />
+            <GridItem label="Hours Bid" value={str(d.hoursBid)} />
             <GridItem label="Star Package" value={stars(d.starPkg)} />
-            <GridItem label="Amount" value={has(d.pkgAmt) ? `$${formatMoney(parseFloat((d.pkgAmt || '0').replace(/[^0-9.]/g, '')))}` : ''} />
-            <GridItem label="Payment" value={d.payMethod} />
-            {has(d.financingCo) && <GridItem label="Financing" value={d.financingCo} />}
-            <GridItem label="Right to Cancel" value={d.rightToCancel} />
-            <GridItem label="40% Deposit" value={d.depositCollected} />
+            <GridItem label="Amount" value={amt > 0 ? `$${formatMoney(amt)}` : ''} />
+            <GridItem label="Payment" value={str(d.payMethod)} />
+            {has(d.financingCo) && <GridItem label="Financing" value={str(d.financingCo)} />}
+            <GridItem label="Right to Cancel" value={str(d.rightToCancel)} />
+            <GridItem label="40% Deposit" value={str(d.depositCollected)} />
           </div>
         </div>
 
-        {/* Work Details */}
         {(has(d.workType) || has(d.equipment) || has(d.dustContain) || has(d.promises) || has(d.specialTools)) && (
           <div className="section">
             <h2>🔧 Work Details</h2>
             <div className="grid">
-              {has(d.workType) && <GridItem label="Type of Work" value={d.workType} />}
-              {has(d.equipment) && <GridItem label="Equipment/Material" value={d.equipment} />}
-              {has(d.dustContain) && <GridItem label="Dust Containment" value={d.dustContain} />}
-              {has(d.promises) && <GridItem label="Promises/Expectations" value={d.promises} />}
-              {has(d.specialTools) && <GridItem label="Special Tools" value={d.specialTools} />}
-              {has(d.picsTaken) && <GridItem label="Pictures Taken" value={d.picsTaken} />}
-              {has(d.videoTaken) && <GridItem label="Video Taken" value={d.videoTaken} />}
+              {has(d.workType) && <GridItem label="Type of Work" value={str(d.workType)} />}
+              {has(d.equipment) && <GridItem label="Equipment/Material" value={str(d.equipment)} />}
+              {has(d.dustContain) && <GridItem label="Dust Containment" value={str(d.dustContain)} />}
+              {has(d.promises) && <GridItem label="Promises/Expectations" value={str(d.promises)} />}
+              {has(d.specialTools) && <GridItem label="Special Tools" value={str(d.specialTools)} />}
+              {has(d.picsTaken) && <GridItem label="Pictures Taken" value={str(d.picsTaken)} />}
+              {has(d.videoTaken) && <GridItem label="Video Taken" value={str(d.videoTaken)} />}
             </div>
           </div>
         )}
 
-        {/* Additional Details */}
         {(has(d.returnVisit) || has(d.excavating) || has(d.subcontractor)) && (
           <div className="section">
             <h2>📋 Additional Details</h2>
             <div className="grid">
-              {has(d.returnVisit) && <GridItem label="Return Visit" value={d.returnVisit} />}
-              {d.returnVisit?.toLowerCase() === 'yes' && has(d.returnWhen) && <GridItem label="When/What Part" value={d.returnWhen} />}
-              {has(d.excavating) && <GridItem label="Excavating" value={d.excavating} />}
-              {d.excavating?.toLowerCase() === 'yes' && (
+              {has(d.returnVisit) && <GridItem label="Return Visit" value={str(d.returnVisit)} />}
+              {str(d.returnVisit).toLowerCase() === 'yes' && has(d.returnWhen) && <GridItem label="When/What Part" value={str(d.returnWhen)} />}
+              {has(d.excavating) && <GridItem label="Excavating" value={str(d.excavating)} />}
+              {str(d.excavating).toLowerCase() === 'yes' && (
                 <>
-                  {has(d.excavLocation) && <GridItem label="Location" value={d.excavLocation} />}
-                  {has(d.excavMarked) && <GridItem label="Area Marked" value={d.excavMarked} />}
-                  {has(d.calledOUPS) && <GridItem label="Called OUPS" value={d.calledOUPS} />}
-                  {has(d.oupsTicket) && <GridItem label="OUPS Ticket #" value={d.oupsTicket} />}
+                  {has(d.excavLocation) && <GridItem label="Location" value={str(d.excavLocation)} />}
+                  {has(d.excavMarked) && <GridItem label="Area Marked" value={str(d.excavMarked)} />}
+                  {has(d.calledOUPS) && <GridItem label="Called OUPS" value={str(d.calledOUPS)} />}
+                  {has(d.oupsTicket) && <GridItem label="OUPS Ticket #" value={str(d.oupsTicket)} />}
                 </>
               )}
-              {has(d.subcontractor) && <GridItem label="Subcontractor Needed" value={d.subcontractor} />}
-              {d.subcontractor?.toLowerCase() === 'yes' && (
+              {has(d.subcontractor) && <GridItem label="Subcontractor Needed" value={str(d.subcontractor)} />}
+              {str(d.subcontractor).toLowerCase() === 'yes' && (
                 <>
-                  {has(d.subName) && <GridItem label="Subcontractor" value={d.subName} />}
-                  {has(d.subAgreement) && <GridItem label="Agreement Signed" value={d.subAgreement} />}
+                  {has(d.subName) && <GridItem label="Subcontractor" value={str(d.subName)} />}
+                  {has(d.subAgreement) && <GridItem label="Agreement Signed" value={str(d.subAgreement)} />}
                 </>
               )}
             </div>
           </div>
         )}
 
-        {/* Crew Message */}
         {has(d.crewMsg) && (
-          <div className="crew-msg">💪 <em>{d.crewMsg}</em></div>
+          <div className="crew-msg">💪 <em>{str(d.crewMsg)}</em></div>
         )}
 
-        {/* Job Types */}
         {d.jobTypes && d.jobTypes.length > 0 && (
           <>
-            {d.jobTypes.map((jt: { name: string; avgTime: string; permit: string }, i: number) => (
+            {d.jobTypes.map((jt: any, i: number) => (
               <div key={i} className="job-header">
-                <div className="name">{jt.name}</div>
-                <div className="meta">⏱️ {jt.avgTime} | 📝 Permit: {jt.permit}</div>
+                <div className="name">{str(jt.name)}</div>
+                <div className="meta">⏱️ {str(jt.avgTime)} | 📝 Permit: {str(jt.permit)}</div>
               </div>
             ))}
           </>
         )}
 
-        {/* Pricing Check */}
         {d.pricingCheck && d.pricingCheck.sale > 0 && d.pricingCheck.hours > 0 && (
           <div className="pricing">
             <h2 style={{ marginTop: 0 }}>📊 Pricing Check</h2>
-            <div className="row">
-              <span className="lb">Sale</span>
-              <span className="vl">${formatMoney(d.pricingCheck.sale)}</span>
-            </div>
-            <div className="row">
-              <span className="lb">Hours Bid</span>
-              <span className="vl">{d.pricingCheck.hours}</span>
-            </div>
-            <div className="row">
-              <span className="lb">Rate</span>
-              <span className="vl">${formatMoney(d.pricingCheck.rate)}/hr</span>
-            </div>
+            <div className="row"><span className="lb">Sale</span><span className="vl">${formatMoney(d.pricingCheck.sale)}</span></div>
+            <div className="row"><span className="lb">Hours Bid</span><span className="vl">{d.pricingCheck.hours}</span></div>
+            <div className="row"><span className="lb">Rate</span><span className="vl">${formatMoney(d.pricingCheck.rate)}/hr</span></div>
             <div className="row">
               <span className="lb">Tier</span>
               <span className="vl" style={{ color: tierInfo(d.pricingCheck.rate).color }}>
