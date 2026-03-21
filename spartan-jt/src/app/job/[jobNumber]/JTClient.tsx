@@ -43,7 +43,13 @@ export interface JobData {
   jobMedia: any[];
 }
 
-interface TeamMember { name: string; role: string | null; slack_member_id: string | null; }
+interface SlackUser {
+  slack_user_id: string;
+  name: string;
+  email: string;
+  avatar: string;
+  theme: 'dark' | 'light';
+}
 
 /* ── Helpers ───────────────────────────────────────── */
 
@@ -79,6 +85,12 @@ export function stripHtml(html: string): string {
 export function isInstallTrack(buName: string | null | undefined): boolean {
   const bu = (buName || '').toLowerCase();
   return bu.includes('replacement') || bu.includes('whole house');
+}
+
+function getCookie(name: string): string | null {
+  if (typeof document === 'undefined') return null;
+  const match = document.cookie.match(new RegExp('(^| )' + name + '=([^;]+)'));
+  return match ? decodeURIComponent(match[2]) : null;
 }
 
 /* ── Icons ─────────────────────────────────────────── */
@@ -126,39 +138,20 @@ const TABS = [
   { id: 'calls', icon: 'phone', label: 'Calls & Scripts', color: 'ice', num: '12' },
 ] as const;
 
-/* ── User Picker Modal ────────────────────────────── */
+/* ── Sign In with Slack ───────────────────────────── */
 
-function UserPicker({ onSelect }: { onSelect: (name: string) => void }) {
-  const [roster, setRoster] = useState<TeamMember[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    fetch('/api/user/roster')
-      .then(r => r.json())
-      .then(setRoster)
-      .catch(() => {})
-      .finally(() => setLoading(false));
-  }, []);
-
+function SlackSignIn() {
+  const currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';
   return (
     <div className="picker-overlay">
       <div className="picker-card">
         <div className="picker-logo">S</div>
         <h2 className="picker-title">Spartan Job Tracker</h2>
-        <p className="picker-desc">Select your name to continue</p>
-        {loading ? (
-          <div className="picker-loading">Loading team...</div>
-        ) : (
-          <div className="picker-list">
-            {roster.map(u => (
-              <button key={u.name} className="picker-btn" onClick={() => onSelect(u.name)}>
-                <span className="picker-avatar">{u.name.charAt(0)}</span>
-                <span className="picker-name">{u.name}</span>
-                {u.role && <span className="picker-role">{u.role.replace(/_/g, ' ')}</span>}
-              </button>
-            ))}
-          </div>
-        )}
+        <p className="picker-desc">Sign in with your Slack account to continue</p>
+        <a href={`/api/auth/slack?state=${encodeURIComponent(currentPath)}`} className="slack-btn">
+          <svg width="20" height="20" viewBox="0 0 123 123" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M25.8 77.6c0 7.1-5.8 12.9-12.9 12.9S0 84.7 0 77.6s5.8-12.9 12.9-12.9h12.9v12.9z" fill="#E01E5A"/><path d="M32.3 77.6c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9v32.3c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V77.6z" fill="#E01E5A"/><path d="M45.2 25.8c-7.1 0-12.9-5.8-12.9-12.9S38.1 0 45.2 0s12.9 5.8 12.9 12.9v12.9H45.2z" fill="#36C5F0"/><path d="M45.2 32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H12.9C5.8 58.1 0 52.3 0 45.2s5.8-12.9 12.9-12.9h32.3z" fill="#36C5F0"/><path d="M97.2 45.2c0-7.1 5.8-12.9 12.9-12.9s12.9 5.8 12.9 12.9-5.8 12.9-12.9 12.9H97.2V45.2z" fill="#2EB67D"/><path d="M90.7 45.2c0 7.1-5.8 12.9-12.9 12.9s-12.9-5.8-12.9-12.9V12.9C64.9 5.8 70.7 0 77.8 0s12.9 5.8 12.9 12.9v32.3z" fill="#2EB67D"/><path d="M77.8 97.2c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9-12.9-5.8-12.9-12.9V97.2h12.9z" fill="#ECB22E"/><path d="M77.8 90.7c-7.1 0-12.9-5.8-12.9-12.9s5.8-12.9 12.9-12.9h32.3c7.1 0 12.9 5.8 12.9 12.9s-5.8 12.9-12.9 12.9H77.8z" fill="#ECB22E"/></svg>
+          Sign in with Slack
+        </a>
       </div>
     </div>
   );
@@ -172,37 +165,26 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [user, setUser] = useState<SlackUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-  const [showPicker, setShowPicker] = useState(false);
 
-  // Load saved user from localStorage on mount
+  // Check auth on mount — read cookie
   useEffect(() => {
-    const saved = localStorage.getItem('jt_user');
-    if (saved) {
-      setCurrentUser(saved);
-    } else {
-      setShowPicker(true);
-    }
-  }, []);
-
-  // When user is set, fetch their theme preference
-  useEffect(() => {
-    if (!currentUser) return;
-    fetch(`/api/user/preferences?user=${encodeURIComponent(currentUser)}`)
-      .then(r => r.json())
-      .then(pref => {
-        const t = pref.theme === 'light' ? 'light' : 'dark';
+    const cookie = getCookie('jt_user');
+    if (cookie) {
+      try {
+        const parsed = JSON.parse(cookie);
+        setUser(parsed);
+        const t = parsed.theme === 'light' ? 'light' : 'dark';
         setTheme(t);
         document.documentElement.dataset.theme = t;
-      })
-      .catch(() => {});
-  }, [currentUser]);
+      } catch { /* invalid cookie */ }
+    }
+    setAuthChecked(true);
+  }, []);
 
-  // Apply theme to DOM whenever it changes
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-  }, [theme]);
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
 
   // Fetch job data
   useEffect(() => {
@@ -211,34 +193,23 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       .then(setData).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [jobNumber]);
 
-  const handleUserSelect = useCallback((name: string) => {
-    localStorage.setItem('jt_user', name);
-    setCurrentUser(name);
-    setShowPicker(false);
-  }, []);
-
   const toggleTheme = useCallback(() => {
     const next = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.dataset.theme = next;
-    if (currentUser) {
+    if (user) {
       fetch('/api/user/preferences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_name: currentUser, theme: next }),
+        body: JSON.stringify({ user_name: user.name, theme: next }),
       }).catch(() => {});
+      const updated = { ...user, theme: next };
+      document.cookie = `jt_user=${encodeURIComponent(JSON.stringify(updated))};path=/;max-age=${365*86400};secure;samesite=lax`;
+      setUser(updated);
     }
-  }, [theme, currentUser]);
+  }, [theme, user]);
 
-  const switchUser = useCallback(() => {
-    setShowPicker(true);
-  }, []);
-
-  // Show user picker
-  if (showPicker) {
-    return <UserPicker onSelect={handleUserSelect} />;
-  }
-
+  if (authChecked && !user) return <SlackSignIn />;
   if (loading) return <div className="loading-screen">Loading job data...</div>;
   if (error || !data?.job) return <div className="loading-screen">Error: {error || 'Job not found'} (#{jobNumber})</div>;
 
@@ -292,11 +263,17 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
             {sidebarOpen && <span className="ri-label">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
             {!sidebarOpen && <span className="tip">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
           </div>
-          <div className="ri ri-user" onClick={switchUser} title={currentUser || 'Switch User'}>
-            <Icon name="user" />
-            {sidebarOpen && <span className="ri-label">{currentUser}</span>}
-            {!sidebarOpen && <span className="tip">{currentUser}</span>}
-          </div>
+          {user && (
+            <div className="ri ri-user" title={user.name}>
+              {user.avatar ? (
+                <img src={user.avatar} alt="" style={{ width: 20, height: 20, borderRadius: 6, flexShrink: 0 }} />
+              ) : (
+                <Icon name="user" />
+              )}
+              {sidebarOpen && <span className="ri-label">{user.name}</span>}
+              {!sidebarOpen && <span className="tip">{user.name}</span>}
+            </div>
+          )}
         </div>
       </nav>
 
