@@ -262,12 +262,18 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 [data-theme="light"] .picker-btn:hover{background:rgba(220,38,38,.04);border-color:rgba(220,38,38,.12)}
 [data-theme="light"] .picker-avatar{background:var(--s3)}
 /* Sign In Screen */
-.si-screen{position:fixed;inset:0;z-index:100;background:#060a14;display:flex;align-items:center;justify-content:center;overflow:hidden}
-.si-glow{position:absolute;width:500px;height:500px;top:50%;left:50%;transform:translate(-50%,-60%);background:radial-gradient(circle,rgba(255,45,70,.12) 0%,rgba(255,45,70,.04) 40%,transparent 70%);pointer-events:none}
+.si-screen{position:fixed;inset:0;z-index:100;background:#020202;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.si-glow{position:absolute;width:600px;height:600px;top:45%;left:50%;transform:translate(-50%,-55%);background:radial-gradient(circle,rgba(255,45,70,.1) 0%,rgba(153,69,255,.04) 35%,transparent 65%);pointer-events:none;animation:si-pulse 4s ease-in-out infinite}
+.si-glow2{position:absolute;width:800px;height:400px;top:70%;left:50%;transform:translate(-50%,-50%);background:radial-gradient(ellipse,rgba(45,122,255,.04) 0%,transparent 60%);pointer-events:none}
+@keyframes si-pulse{0%,100%{opacity:.7;transform:translate(-50%,-55%) scale(1)}50%{opacity:1;transform:translate(-50%,-55%) scale(1.05)}}
 .si-content{position:relative;display:flex;flex-direction:column;align-items:center;z-index:1}
-.si-warrior{width:220px;height:220px;object-fit:contain;filter:drop-shadow(0 0 40px rgba(255,45,70,.2)) drop-shadow(0 0 80px rgba(255,45,70,.08));margin-bottom:24px}
-.si-brand{font-family:var(--disp);font-size:42px;font-weight:900;letter-spacing:8px;color:#fff;text-shadow:0 0 30px rgba(255,45,70,.3),0 0 60px rgba(255,45,70,.1);margin:0;line-height:1}
-.si-sub{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:6px;color:rgba(255,255,255,.35);margin-top:6px;margin-bottom:40px}
-.slack-btn{display:inline-flex;align-items:center;gap:10px;padding:11px 28px;border-radius:10px;background:rgba(255,255,255,.95);color:#1d1c1d;font-family:var(--sans);font-size:14px;font-weight:700;text-decoration:none;transition:all .2s;border:none;cursor:pointer}
-.slack-btn:hover{background:#fff;box-shadow:0 0 20px rgba(255,255,255,.15);transform:translateY(-1px)}
-.slack-btn svg{flex-shrink:0}
+.si-hero{width:320px;height:320px;object-fit:contain;border-radius:16px;margin-bottom:12px}
+.si-sub{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:8px;color:rgba(255,255,255,.3);margin-bottom:48px}
+.si-slack-wrap{position:relative;display:inline-flex;padding:2px;border-radius:14px;text-decoration:none;cursor:pointer;transition:transform .2s}
+.si-slack-wrap:hover{transform:translateY(-2px)}
+.si-slack-wrap:hover .si-slack-border{opacity:1}
+.si-slack-border{position:absolute;inset:0;border-radius:14px;background:conic-gradient(from 0deg,#E01E5A,#36C5F0,#2EB67D,#ECB22E,#E01E5A);opacity:.6;transition:opacity .3s;animation:si-spin 3s linear infinite}
+@keyframes si-spin{to{background:conic-gradient(from 360deg,#E01E5A,#36C5F0,#2EB67D,#ECB22E,#E01E5A)}}
+.si-slack-inner{position:relative;display:inline-flex;align-items:center;gap:12px;padding:14px 36px;border-radius:12px;background:#0d1117;color:rgba(255,255,255,.9);font-family:var(--sans);font-size:15px;font-weight:700;letter-spacing:.5px}
+.si-slack-wrap:hover .si-slack-inner{background:#141a24;color:#fff}
+.si-slack-inner svg{flex-shrink:0}
