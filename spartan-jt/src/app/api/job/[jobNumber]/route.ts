@@ -252,9 +252,9 @@ export async function GET(
     `) : [];
 
     const cardRequests = await query(`
-      SELECT requested_by, requested_at, responded_by, responded_at, response_time_seconds,
+      SELECT id, requested_by, requested_by_name, requested_at, responded_by, responded_at, response_time_seconds,
              card_issued, receipt_posted, receipt_ai_pass, receipt_ai_notes,
-             amount, mismatch_flagged, reconciled
+             amount, mismatch_flagged, reconciled, vendor_name, purchase_description
       FROM spartan_ops.job_card_requests
       WHERE st_job_id = ${jobNumber}
       ORDER BY requested_at DESC
