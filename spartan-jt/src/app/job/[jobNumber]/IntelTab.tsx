@@ -1,5 +1,7 @@
 'use client';
 
+import { useState, useCallback } from 'react';
+
 function fmt(d: string | null | undefined): string {
   if (!d) return '\u2014';
   try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d; }
@@ -22,6 +24,160 @@ function formatPhone(val: string): string {
   if (d.length === 10) return `(${d.slice(0,3)}) ${d.slice(3,6)}-${d.slice(6)}`;
   if (d.length === 11 && d[0] === '1') return `(${d.slice(1,4)}) ${d.slice(4,7)}-${d.slice(7)}`;
   return val;
+}
+
+const sentimentMeta: Record<string, { label: string; color: string; bg: string; bd: string }> = {
+  positive: { label: 'Positive', color: 'var(--mint)', bg: 'var(--mintbg)', bd: 'var(--mintbd)' },
+  neutral: { label: 'Neutral', color: 'var(--ice)', bg: 'var(--icebg)', bd: 'var(--icebd)' },
+  cautious: { label: 'Cautious', color: 'var(--amber)', bg: 'var(--amberbg)', bd: 'var(--amberbd)' },
+  negative: { label: 'Negative', color: 'var(--fire)', bg: 'var(--firebg)', bd: 'var(--firebd)' },
+};
+const priorityMeta: Record<string, { label: string; color: string; bg: string; bd: string }> = {
+  routine: { label: 'Routine', color: 'var(--mint)', bg: 'var(--mintbg)', bd: 'var(--mintbd)' },
+  attention: { label: 'Attention', color: 'var(--amber)', bg: 'var(--amberbg)', bd: 'var(--amberbd)' },
+  high_priority: { label: 'High Priority', color: 'var(--fire)', bg: 'var(--firebg)', bd: 'var(--firebd)' },
+};
+
+function AiBriefing({ jobId }: { jobId: string }) {
+  const [briefing, setBriefing] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const generate = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/job/${jobId}/intel-briefing`);
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || 'Failed to generate briefing');
+      }
+      const data = await res.json();
+      setBriefing(data);
+    } catch (e: any) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [jobId]);
+
+  if (!briefing && !loading && !error) {
+    return <div className="intel" style={{ borderColor: 'var(--grapebd)' }}>
+      <div className="intel-h">
+        <div className="intel-icon" style={{ background: 'var(--grapebg)', color: 'var(--grape)' }}>
+          <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+          </svg>
+        </div>
+        <div className="intel-title">AI Briefing</div>
+      </div>
+      <div className="intel-body" style={{ textAlign: 'center', padding: '16px 12px' }}>
+        <div style={{ fontSize: 12, color: 'var(--t3)', marginBottom: 10 }}>
+          AI-generated pre-dispatch summary &mdash; customer history, risk flags, upsell opportunities
+        </div>
+        <button onClick={generate} style={{
+          padding: '8px 20px', borderRadius: 8, border: '1px solid var(--grapebd)',
+          background: 'var(--grapebg)', color: 'var(--grape)', fontSize: 12, fontWeight: 700,
+          cursor: 'pointer', letterSpacing: 0.5
+        }}>
+          Generate Briefing
+        </button>
+      </div>
+    </div>;
+  }
+
+  if (loading) {
+    return <div className="intel" style={{ borderColor: 'var(--grapebd)' }}>
+      <div className="intel-h">
+        <div className="intel-icon" style={{ background: 'var(--grapebg)', color: 'var(--grape)' }}>
+          <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+          </svg>
+        </div>
+        <div className="intel-title">AI Briefing</div>
+      </div>
+      <div className="intel-body" style={{ textAlign: 'center', padding: 20 }}>
+        <div style={{ fontSize: 12, color: 'var(--grape)' }}>Analyzing customer data...</div>
+      </div>
+    </div>;
+  }
+
+  if (error) {
+    return <div className="intel" style={{ borderColor: 'var(--firebd)' }}>
+      <div className="intel-h">
+        <div className="intel-icon" style={{ background: 'var(--firebg)', color: 'var(--fire)' }}>
+          <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+          </svg>
+        </div>
+        <div className="intel-title">AI Briefing</div>
+      </div>
+      <div className="intel-body">
+        <div style={{ fontSize: 12, color: 'var(--fire)', marginBottom: 8 }}>{error}</div>
+        <button onClick={generate} style={{
+          padding: '6px 14px', borderRadius: 6, border: '1px solid var(--grapebd)',
+          background: 'var(--grapebg)', color: 'var(--grape)', fontSize: 11, fontWeight: 600, cursor: 'pointer'
+        }}>Retry</button>
+      </div>
+    </div>;
+  }
+
+  const b = briefing?.briefing || {};
+  const sM = sentimentMeta[b.customer_sentiment] || sentimentMeta.neutral;
+  const pM = priorityMeta[b.priority_level] || priorityMeta.routine;
+
+  return <div className="intel" style={{ borderColor: 'var(--grapebd)' }}>
+    <div className="intel-h">
+      <div className="intel-icon" style={{ background: 'var(--grapebg)', color: 'var(--grape)' }}>
+        <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2a10 10 0 1 0 0 20 10 10 0 1 0 0-20z"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
+        </svg>
+      </div>
+      <div className="intel-title">AI Briefing</div>
+      <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+        <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, fontWeight: 700, background: sM.bg, border: `1px solid ${sM.bd}`, color: sM.color }}>{sM.label}</span>
+        <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, fontWeight: 700, background: pM.bg, border: `1px solid ${pM.bd}`, color: pM.color }}>{pM.label}</span>
+      </div>
+    </div>
+    <div className="intel-body">
+      <div style={{ fontSize: 12, color: 'var(--t1)', lineHeight: 1.5, marginBottom: 10 }}>{b.summary}</div>
+
+      {(b.risk_flags || []).length > 0 && <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fire)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Risk Flags</div>
+        {(b.risk_flags as string[]).map((f: string, i: number) => (
+          <div key={i} style={{ fontSize: 11, color: 'var(--t2)', padding: '2px 0', display: 'flex', gap: 6 }}>
+            <span style={{ color: 'var(--fire)', flexShrink: 0 }}>{'\u26A0'}</span>{f}
+          </div>
+        ))}
+      </div>}
+
+      {(b.upsell_opportunities || []).length > 0 && <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--volt)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Upsell Opportunities</div>
+        {(b.upsell_opportunities as string[]).map((u: string, i: number) => (
+          <div key={i} style={{ fontSize: 11, color: 'var(--t2)', padding: '2px 0', display: 'flex', gap: 6 }}>
+            <span style={{ color: 'var(--volt)', flexShrink: 0 }}>{'\uD83D\uDCB0'}</span>{u}
+          </div>
+        ))}
+      </div>}
+
+      {(b.approach_tips || []).length > 0 && <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ice)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Approach Tips</div>
+        {(b.approach_tips as string[]).map((t: string, i: number) => (
+          <div key={i} style={{ fontSize: 11, color: 'var(--t2)', padding: '2px 0', display: 'flex', gap: 6 }}>
+            <span style={{ color: 'var(--ice)', flexShrink: 0 }}>{'\u2192'}</span>{t}
+          </div>
+        ))}
+      </div>}
+
+      <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: 9, color: 'var(--t3)' }}>Generated {briefing?.generated_at ? new Date(briefing.generated_at).toLocaleTimeString() : ''}</span>
+        <button onClick={generate} style={{
+          padding: '4px 10px', borderRadius: 4, border: '1px solid var(--b2)',
+          background: 'var(--s3)', color: 'var(--t3)', fontSize: 10, cursor: 'pointer'
+        }}>Refresh</button>
+      </div>
+    </div>
+  </div>;
 }
 
 export default function IntelTab({ job, data, amt }: { job: any; data: any; amt: number }) {
@@ -58,6 +214,9 @@ export default function IntelTab({ job, data, amt }: { job: any; data: any; amt:
         <div className="lbl">Recalls</div>
       </div>
     </div>
+
+    {/* AI Briefing */}
+    <AiBriefing jobId={String(job.st_job_id)} />
 
     {/* Contact Info + Customer Profile side by side */}
     <div className="g2">
