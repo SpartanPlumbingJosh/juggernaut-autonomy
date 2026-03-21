@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import MaterialsTab from './MaterialsTab';
 import ServiceTab from './ServiceTab';
 import SalesTab from './SalesTab';
@@ -13,7 +13,7 @@ import PermitsTab from './PermitsTab';
 import CardsTab from './CardsTab';
 import BlockersTab from './BlockersTab';
 
-/* ── Types ─────────────────────────────────────────────── */
+/* ── Types ─────────────────────────────────────────── */
 
 export interface JobData {
   job: Record<string, any>;
@@ -43,7 +43,9 @@ export interface JobData {
   jobMedia: any[];
 }
 
-/* ── Helpers ───────────────────────────────────────────── */
+interface TeamMember { name: string; role: string | null; slack_member_id: string | null; }
+
+/* ── Helpers ───────────────────────────────────────── */
 
 export function fmt(d: string | null | undefined): string {
   if (!d) return '\u2014';
@@ -79,7 +81,7 @@ export function isInstallTrack(buName: string | null | undefined): boolean {
   return bu.includes('replacement') || bu.includes('whole house');
 }
 
-/* ── Icons ─────────────────────────────────────────────── */
+/* ── Icons ─────────────────────────────────────────── */
 
 const ICONS: Record<string, string> = {
   flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
@@ -97,13 +99,16 @@ const ICONS: Record<string, string> = {
   phone: '<path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.12.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.91.34 1.85.58 2.81.7A2 2 0 0122 16.92z"/>',
   chevronRight: '<polyline points="9 18 15 12 9 6"/>',
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
+  sun: '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+  moon: '<path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>',
+  user: '<path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>',
 };
 
 export function Icon({ name, size = 17 }: { name: string; size?: number }) {
   return <svg width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
 }
 
-/* ── Tab Config ────────────────────────────────────────── */
+/* ── Tab Config ────────────────────────────────────── */
 
 const TABS = [
   { id: 'dashboard', icon: 'flag', label: 'Dashboard', color: 'fire', num: '' },
@@ -121,7 +126,45 @@ const TABS = [
   { id: 'calls', icon: 'phone', label: 'Calls & Scripts', color: 'ice', num: '12' },
 ] as const;
 
-/* ── Main Component ────────────────────────────────────── */
+/* ── User Picker Modal ────────────────────────────── */
+
+function UserPicker({ onSelect }: { onSelect: (name: string) => void }) {
+  const [roster, setRoster] = useState<TeamMember[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch('/api/user/roster')
+      .then(r => r.json())
+      .then(setRoster)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="picker-overlay">
+      <div className="picker-card">
+        <div className="picker-logo">S</div>
+        <h2 className="picker-title">Spartan Job Tracker</h2>
+        <p className="picker-desc">Select your name to continue</p>
+        {loading ? (
+          <div className="picker-loading">Loading team...</div>
+        ) : (
+          <div className="picker-list">
+            {roster.map(u => (
+              <button key={u.name} className="picker-btn" onClick={() => onSelect(u.name)}>
+                <span className="picker-avatar">{u.name.charAt(0)}</span>
+                <span className="picker-name">{u.name}</span>
+                {u.role && <span className="picker-role">{u.role.replace(/_/g, ' ')}</span>}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Main Component ────────────────────────────────── */
 
 export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const [data, setData] = useState<JobData | null>(null);
@@ -129,12 +172,72 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState<string | null>(null);
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
+  const [showPicker, setShowPicker] = useState(false);
 
+  // Load saved user from localStorage on mount
+  useEffect(() => {
+    const saved = localStorage.getItem('jt_user');
+    if (saved) {
+      setCurrentUser(saved);
+    } else {
+      setShowPicker(true);
+    }
+  }, []);
+
+  // When user is set, fetch their theme preference
+  useEffect(() => {
+    if (!currentUser) return;
+    fetch(`/api/user/preferences?user=${encodeURIComponent(currentUser)}`)
+      .then(r => r.json())
+      .then(pref => {
+        const t = pref.theme === 'light' ? 'light' : 'dark';
+        setTheme(t);
+        document.documentElement.dataset.theme = t;
+      })
+      .catch(() => {});
+  }, [currentUser]);
+
+  // Apply theme to DOM whenever it changes
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  // Fetch job data
   useEffect(() => {
     fetch(`/api/job/${jobNumber}`)
       .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
       .then(setData).catch(e => setError(e.message)).finally(() => setLoading(false));
   }, [jobNumber]);
+
+  const handleUserSelect = useCallback((name: string) => {
+    localStorage.setItem('jt_user', name);
+    setCurrentUser(name);
+    setShowPicker(false);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    const next = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    document.documentElement.dataset.theme = next;
+    if (currentUser) {
+      fetch('/api/user/preferences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_name: currentUser, theme: next }),
+      }).catch(() => {});
+    }
+  }, [theme, currentUser]);
+
+  const switchUser = useCallback(() => {
+    setShowPicker(true);
+  }, []);
+
+  // Show user picker
+  if (showPicker) {
+    return <UserPicker onSelect={handleUserSelect} />;
+  }
 
   if (loading) return <div className="loading-screen">Loading job data...</div>;
   if (error || !data?.job) return <div className="loading-screen">Error: {error || 'Job not found'} (#{jobNumber})</div>;
@@ -182,6 +285,19 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
             </div>
           ))}
         </div>
+        <div className="rail-bottom">
+          <div className="rsep" />
+          <div className="ri" onClick={toggleTheme} title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}>
+            <Icon name={theme === 'dark' ? 'sun' : 'moon'} />
+            {sidebarOpen && <span className="ri-label">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+            {!sidebarOpen && <span className="tip">{theme === 'dark' ? 'Light Mode' : 'Dark Mode'}</span>}
+          </div>
+          <div className="ri ri-user" onClick={switchUser} title={currentUser || 'Switch User'}>
+            <Icon name="user" />
+            {sidebarOpen && <span className="ri-label">{currentUser}</span>}
+            {!sidebarOpen && <span className="tip">{currentUser}</span>}
+          </div>
+        </div>
       </nav>
 
       <div className="main">
@@ -219,7 +335,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   );
 }
 
-/* ── Dashboard Sub-Component ───────────────────────────── */
+/* ── Dashboard Sub-Component ───────────────────────── */
 
 function VR({ dot, k, v, style }: { dot: string; k: string; v: string; style?: React.CSSProperties }) {
   return <div className="vr"><div className={`ai-dot ${dot}`} /><span className="k">{k}</span><span className="v" style={style}>{v}</span></div>;
