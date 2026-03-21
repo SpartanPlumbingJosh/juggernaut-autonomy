@@ -9,71 +9,18 @@ export async function GET(request: NextRequest) {
   const to = url.searchParams.get('to') || '2026-12-31';
 
   try {
-    // 1. Daily revenue per tech (install BU only)
-    const dailyRevenue = await query(`
-      WITH daily AS (
-        SELECT aa.technician_name, a.start_time::date as work_date,
-          count(DISTINCT j.st_job_id) as jobs,
-          round(sum(i.sub_total)::numeric, 2) as day_revenue
-        FROM spartan_ops.st_jobs_v2 j
-        JOIN spartan_ops.st_invoices_v2 i ON j.st_job_id = i.st_job_id
-        JOIN spartan_ops.st_appointments_v2 a ON j.st_job_id = a.st_job_id
-        JOIN (
-          SELECT DISTINCT ON (st_job_id) st_job_id, technician_name
-          FROM spartan_ops.st_appointment_assignments_v2
-          ORDER BY st_job_id, assigned_on
-        ) aa ON j.st_job_id = aa.st_job_id
-        WHERE (i.business_unit_name LIKE '%Replacement%' OR i.business_unit_name LIKE '%Whole House%')
-          AND a.start_time >= '${from}' AND a.start_time < '${to}'
-        GROUP BY aa.technician_name, a.start_time::date
-      )
-      SELECT * FROM daily ORDER BY work_date DESC, technician_name
-    `);
-
-    // 2. Tech summary stats
-    const techSummary = await query(`
-      WITH daily AS (
-        SELECT aa.technician_name, a.start_time::date as work_date,
-          round(sum(i.sub_total)::numeric, 2) as day_revenue
-        FROM spartan_ops.st_jobs_v2 j
-        JOIN spartan_ops.st_invoices_v2 i ON j.st_job_id = i.st_job_id
-        JOIN spartan_ops.st_appointments_v2 a ON j.st_job_id = a.st_job_id
-        JOIN (
-          SELECT DISTINCT ON (st_job_id) st_job_id, technician_name
-          FROM spartan_ops.st_appointment_assignments_v2
-          ORDER BY st_job_id, assigned_on
-        ) aa ON j.st_job_id = aa.st_job_id
-        WHERE (i.business_unit_name LIKE '%Replacement%' OR i.business_unit_name LIKE '%Whole House%')
-          AND a.start_time >= '${from}' AND a.start_time < '${to}'
-          AND i.sub_total > 0
-        GROUP BY aa.technician_name, a.start_time::date
-      )
-      SELECT technician_name,
-        count(*) as crew_days,
-        round(avg(day_revenue)::numeric, 0) as avg_daily,
-        round(min(day_revenue)::numeric, 0) as min_day,
-        round(max(day_revenue)::numeric, 0) as max_day,
-        round(sum(day_revenue)::numeric, 0) as total_rev,
-        count(*) FILTER (WHERE day_revenue >= 8824) as at_target,
-        count(*) FILTER (WHERE day_revenue >= 5000 AND day_revenue < 8824) as near_target,
-        count(*) FILTER (WHERE day_revenue < 5000) as critical,
-        round(100.0 * count(*) FILTER (WHERE day_revenue >= 8824) / NULLIF(count(*), 0), 1) as hit_pct,
-        round(sum(GREATEST(8824 - day_revenue, 0))::numeric, 0) as gap_to_target
-      FROM daily
-      GROUP BY technician_name
-      HAVING count(*) >= 2
-      ORDER BY total_rev DESC
-    `);
-
-    // 3. Chunking violations ($0 install jobs)
-    const chunkingViolations = await query(`
-      SELECT j.st_job_id, j.status,
+    // 1. Every individual install-BU job with all drill-down fields
+    const jobs = await query(`
+      SELECT j.st_job_id, j.job_number, j.status,
+        c.name as customer_name,
         i.business_unit_name,
+        round(sum(i.sub_total)::numeric, 2) as revenue,
         a.start_time::date as work_date,
         aa.technician_name,
         j.raw_data->>'projectId' as project_id,
-        LEFT(j.summary, 80) as summary
+        LEFT(j.summary, 120) as scope
       FROM spartan_ops.st_jobs_v2 j
+      JOIN spartan_ops.st_customers_v2 c ON j.st_customer_id = c.st_customer_id
       JOIN spartan_ops.st_invoices_v2 i ON j.st_job_id = i.st_job_id
       JOIN spartan_ops.st_appointments_v2 a ON j.st_job_id = a.st_job_id
       JOIN (
@@ -82,71 +29,13 @@ export async function GET(request: NextRequest) {
         ORDER BY st_job_id, assigned_on
       ) aa ON j.st_job_id = aa.st_job_id
       WHERE (i.business_unit_name LIKE '%Replacement%' OR i.business_unit_name LIKE '%Whole House%')
-        AND i.sub_total = 0
         AND a.start_time >= '${from}' AND a.start_time < '${to}'
-      ORDER BY a.start_time DESC
+      GROUP BY j.st_job_id, j.job_number, j.status, c.name, i.business_unit_name,
+        a.start_time::date, aa.technician_name, j.raw_data->>'projectId', j.summary
+      ORDER BY a.start_time::date DESC, aa.technician_name, j.st_job_id
     `);
 
-    // 4. Overall summary
-    const summary = await query(`
-      WITH daily AS (
-        SELECT aa.technician_name, a.start_time::date as work_date,
-          round(sum(i.sub_total)::numeric, 2) as day_revenue
-        FROM spartan_ops.st_jobs_v2 j
-        JOIN spartan_ops.st_invoices_v2 i ON j.st_job_id = i.st_job_id
-        JOIN spartan_ops.st_appointments_v2 a ON j.st_job_id = a.st_job_id
-        JOIN (
-          SELECT DISTINCT ON (st_job_id) st_job_id, technician_name
-          FROM spartan_ops.st_appointment_assignments_v2
-          ORDER BY st_job_id, assigned_on
-        ) aa ON j.st_job_id = aa.st_job_id
-        WHERE (i.business_unit_name LIKE '%Replacement%' OR i.business_unit_name LIKE '%Whole House%')
-          AND a.start_time >= '${from}' AND a.start_time < '${to}'
-        GROUP BY aa.technician_name, a.start_time::date
-      )
-      SELECT
-        count(*) as total_crew_days,
-        round(sum(day_revenue)::numeric, 0) as actual_revenue,
-        round(count(*) * 8824.0, 0) as target_revenue,
-        round(count(*) * 8824.0 - sum(day_revenue)::numeric, 0) as total_gap,
-        round(avg(day_revenue)::numeric, 0) as avg_per_day,
-        round(100.0 * sum(day_revenue)::numeric / NULLIF(count(*) * 8824.0, 0), 1) as efficiency_pct,
-        count(*) FILTER (WHERE day_revenue >= 8824) as at_target,
-        count(*) FILTER (WHERE day_revenue >= 5000 AND day_revenue < 8824) as near_target,
-        count(*) FILTER (WHERE day_revenue < 5000 AND day_revenue > 0) as under_target,
-        count(*) FILTER (WHERE day_revenue = 0) as zero_days
-      FROM daily
-    `);
-
-    // 5. Monthly trend
-    const monthlyTrend = await query(`
-      WITH daily AS (
-        SELECT aa.technician_name, a.start_time::date as work_date,
-          round(sum(i.sub_total)::numeric, 2) as day_revenue
-        FROM spartan_ops.st_jobs_v2 j
-        JOIN spartan_ops.st_invoices_v2 i ON j.st_job_id = i.st_job_id
-        JOIN spartan_ops.st_appointments_v2 a ON j.st_job_id = a.st_job_id
-        JOIN (
-          SELECT DISTINCT ON (st_job_id) st_job_id, technician_name
-          FROM spartan_ops.st_appointment_assignments_v2
-          ORDER BY st_job_id, assigned_on
-        ) aa ON j.st_job_id = aa.st_job_id
-        WHERE (i.business_unit_name LIKE '%Replacement%' OR i.business_unit_name LIKE '%Whole House%')
-          AND a.start_time >= '${from}' AND a.start_time < '${to}'
-        GROUP BY aa.technician_name, a.start_time::date
-      )
-      SELECT date_trunc('month', work_date)::date as month,
-        count(*) as crew_days,
-        round(avg(day_revenue)::numeric, 0) as avg_daily,
-        round(sum(day_revenue)::numeric, 0) as total_rev,
-        count(*) FILTER (WHERE day_revenue >= 8824) as at_target,
-        count(*) FILTER (WHERE day_revenue = 0) as zero_days,
-        round(100.0 * sum(day_revenue)::numeric / NULLIF(count(*) * 8824.0, 0), 1) as efficiency_pct
-      FROM daily
-      GROUP BY 1 ORDER BY 1
-    `);
-
-    // 6. Lead installer utilization (Kade + Isaac)
+    // 2. Lead installer utilization
     const utilization = await query(`
       WITH workdays AS (
         SELECT d::date as work_date
@@ -173,14 +62,30 @@ export async function GET(request: NextRequest) {
       GROUP BY t.tech
     `);
 
-    return NextResponse.json({
-      dailyRevenue,
-      techSummary,
-      chunkingViolations,
-      summary: summary[0] || {},
-      monthlyTrend,
-      utilization,
-    });
+    // 3. Project context for violations
+    const projectJobs = await query(`
+      SELECT j.st_job_id, j.job_number, j.status,
+        j.raw_data->>'projectId' as project_id,
+        round(i.sub_total::numeric, 2) as revenue,
+        a.start_time::date as work_date,
+        i.business_unit_name
+      FROM spartan_ops.st_jobs_v2 j
+      JOIN spartan_ops.st_invoices_v2 i ON j.st_job_id = i.st_job_id
+      JOIN spartan_ops.st_appointments_v2 a ON j.st_job_id = a.st_job_id
+      WHERE j.raw_data->>'projectId' IN (
+        SELECT DISTINCT j2.raw_data->>'projectId'
+        FROM spartan_ops.st_jobs_v2 j2
+        JOIN spartan_ops.st_invoices_v2 i2 ON j2.st_job_id = i2.st_job_id
+        JOIN spartan_ops.st_appointments_v2 a2 ON j2.st_job_id = a2.st_job_id
+        WHERE (i2.business_unit_name LIKE '%Replacement%' OR i2.business_unit_name LIKE '%Whole House%')
+          AND i2.sub_total = 0
+          AND a2.start_time >= '${from}' AND a2.start_time < '${to}'
+          AND j2.raw_data->>'projectId' IS NOT NULL
+      )
+      ORDER BY j.raw_data->>'projectId', a.start_time::date
+    `);
+
+    return NextResponse.json({ jobs, utilization, projectJobs });
   } catch (err) {
     console.error('Analytics API error:', err);
     return NextResponse.json(
