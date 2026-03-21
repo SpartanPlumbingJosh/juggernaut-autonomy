@@ -169,14 +169,13 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const [authChecked, setAuthChecked] = useState(false);
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
 
-  // Check auth on mount — read cookie
   useEffect(() => {
     const cookie = getCookie('jt_user');
     if (cookie) {
       try {
         const parsed = JSON.parse(cookie);
         setUser(parsed);
-        const t = parsed.theme === 'light' ? 'light' : 'dark';
+        const t: 'dark' | 'light' = parsed.theme === 'light' ? 'light' : 'dark';
         setTheme(t);
         document.documentElement.dataset.theme = t;
       } catch { /* invalid cookie */ }
@@ -186,7 +185,6 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
 
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
 
-  // Fetch job data
   useEffect(() => {
     fetch(`/api/job/${jobNumber}`)
       .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.json(); })
@@ -194,7 +192,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   }, [jobNumber]);
 
   const toggleTheme = useCallback(() => {
-    const next = theme === 'dark' ? 'light' : 'dark';
+    const next: 'dark' | 'light' = theme === 'dark' ? 'light' : 'dark';
     setTheme(next);
     document.documentElement.dataset.theme = next;
     if (user) {
@@ -203,7 +201,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_name: user.name, theme: next }),
       }).catch(() => {});
-      const updated = { ...user, theme: next };
+      const updated: SlackUser = { ...user, theme: next };
       document.cookie = `jt_user=${encodeURIComponent(JSON.stringify(updated))};path=/;max-age=${365*86400};secure;samesite=lax`;
       setUser(updated);
     }
