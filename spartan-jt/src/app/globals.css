@@ -220,6 +220,12 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 .rail.expanded .rail-bottom{align-items:stretch}
 .ri-user{opacity:.7}.ri-user:hover{opacity:1}
 
+/* Sign in with Slack */
+.signin-logo{width:140px;height:auto;margin-bottom:16px;border-radius:0}
+.slack-btn{display:inline-flex;align-items:center;gap:10px;padding:10px 24px;border-radius:10px;background:#fff;color:#1d1c1d;font-family:var(--sans);font-size:14px;font-weight:700;text-decoration:none;transition:all .15s;border:1px solid rgba(0,0,0,.12);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.slack-btn:hover{box-shadow:0 2px 8px rgba(0,0,0,.15);border-color:rgba(0,0,0,.2)}
+.slack-btn svg{flex-shrink:0}
+
 /* Light Mode */
 [data-theme="light"]{
   --bg:#f3f5f9;--s1:#ffffff;--s2:#ffffff;--s3:#f0f2f6;--s4:#e5e8ee;--s5:#d8dce5;
@@ -255,3 +261,5 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 [data-theme="light"] .picker-card{background:var(--s1);box-shadow:0 24px 80px rgba(0,0,0,.15);border-color:var(--b2)}
 [data-theme="light"] .picker-btn:hover{background:rgba(220,38,38,.04);border-color:rgba(220,38,38,.12)}
 [data-theme="light"] .picker-avatar{background:var(--s3)}
+[data-theme="light"] .slack-btn{background:#fff;color:#1d1c1d;border-color:rgba(0,0,0,.15)}
+[data-theme="light"] .slack-btn:hover{box-shadow:0 2px 8px rgba(0,0,0,.12)}
