@@ -13,36 +13,73 @@ import PermitsTab from './PermitsTab';
 import CardsTab from './CardsTab';
 import BlockersTab from './BlockersTab';
 
-interface JobData {
-  job: Record<string, any> | null;
-  relatedJobs: Record<string, any>[];
-  verifications: Record<string, any>[];
-  appointments: Record<string, any>[];
-  invoices: Record<string, any>[];
-  payments: Record<string, any>[];
-  estimates: Record<string, any>[];
-  assignments: Record<string, any>[];
-  contacts: Record<string, any>[];
-  unsoldEstimates: Record<string, any>[];
-  recallsAtLocation: Record<string, any>[];
-  [key: string]: any;
+/* ── Types ─────────────────────────────────────────────── */
+
+export interface JobData {
+  job: Record<string, any>;
+  relatedJobs: any[];
+  verifications: any[];
+  appointments: any[];
+  invoices: any[];
+  payments: any[];
+  estimates: any[];
+  assignments: any[];
+  contacts: any[];
+  unsoldEstimates: any[];
+  recallsAtLocation: any[];
+  calls: any[];
+  recallJobs: any[];
+  callScripts: any[];
+  materialList: any | null;
+  catalogImages: Record<string, string>;
+  purchaseOrders: any[];
+  verificationDefs: any[];
+  companyAverages: any[];
+  playbook: { serviceKey: string; salesKey: string; phoneCloseKey: string; steps: any[]; tracking: any[] };
+  permits: any[];
+  permitRules: any[];
+  cardRequests: any[];
+  blockers: any[];
+  jobMedia: any[];
 }
 
-const TABS = [
-  { id: 'dashboard', icon: 'flag', label: 'Dashboard', color: 'fire', num: '' },
-  { id: 'intel', icon: 'search', label: 'Customer Intel', color: 'ice', num: '1' },
-  { id: 'service', icon: 'play', label: 'Service Process', color: 'volt', num: '2' },
-  { id: 'sales', icon: 'dollar', label: 'Sales Process', color: 'fire', num: '3' },
-  { id: 'materials', icon: 'box', label: 'Materials', color: 'mint', num: '4' },
-  { id: 'permits', icon: 'clipboard', label: 'Permits', color: 'amber', num: '5' },
-  { id: 'cards', icon: 'creditcard', label: 'Purchasing Cards', color: 'grape', num: '6' },
-  { id: 'install', icon: 'wrench', label: 'Install', color: 'volt', num: '7' },
-  { id: 'financials', icon: 'chart', label: 'Financials', color: 'fire', num: '8' },
-  { id: 'postinstall', icon: 'star', label: 'Post-Install', color: 'mint', num: '9' },
-  { id: 'blockers', icon: 'alert', label: 'Blockers & Risk', color: 'amber', num: '10' },
-  { id: 'verify', icon: 'shield', label: 'Verification', color: 'hot', num: '11' },
-  { id: 'calls', icon: 'phone', label: 'Calls & Scripts', color: 'ice', num: '12' },
-] as const;
+/* ── Helpers ───────────────────────────────────────────── */
+
+export function fmt(d: string | null | undefined): string {
+  if (!d) return '\u2014';
+  try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d; }
+}
+
+export function fmtTime(d: string | null | undefined): string {
+  if (!d) return '\u2014';
+  try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }); } catch { return d; }
+}
+
+export function money(n: number | string | null | undefined): string {
+  const v = parseFloat(String(n || 0));
+  return v > 0 ? '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '\u2014';
+}
+
+export function moneyExact(n: number | string | null | undefined): string {
+  const v = parseFloat(String(n || 0));
+  return v > 0 ? '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '\u2014';
+}
+
+export function stripHtml(html: string): string {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, '\n').replace(/<\/li>/gi, '\n').replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&middot;/g, '\u00b7').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+export function isInstallTrack(buName: string | null | undefined): boolean {
+  const bu = (buName || '').toLowerCase();
+  return bu.includes('replacement') || bu.includes('whole house');
+}
+
+/* ── Icons ─────────────────────────────────────────────── */
 
 const ICONS: Record<string, string> = {
   flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
@@ -62,48 +99,29 @@ const ICONS: Record<string, string> = {
   chevronLeft: '<polyline points="15 18 9 12 15 6"/>',
 };
 
-function Icon({ name }: { name: string }) {
-  return <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
+export function Icon({ name, size = 17 }: { name: string; size?: number }) {
+  return <svg width={size} height={size} fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: ICONS[name] || '' }} />;
 }
 
-function fmt(d: string | null | undefined): string {
-  if (!d) return '\u2014';
-  try { return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }); } catch { return d; }
-}
-function money(n: number | string | null | undefined): string {
-  const v = parseFloat(String(n || 0));
-  return v > 0 ? '$' + v.toLocaleString(undefined, { maximumFractionDigits: 0 }) : '\u2014';
-}
+/* ── Tab Config ────────────────────────────────────────── */
 
-/** Strip HTML tags from ST summary, preserve line breaks */
-function stripHtml(html: string): string {
-  if (!html) return '';
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&middot;/g, '\u00b7')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-}
+const TABS = [
+  { id: 'dashboard', icon: 'flag', label: 'Dashboard', color: 'fire', num: '' },
+  { id: 'intel', icon: 'search', label: 'Customer Intel', color: 'ice', num: '1' },
+  { id: 'service', icon: 'play', label: 'Service Process', color: 'volt', num: '2' },
+  { id: 'sales', icon: 'dollar', label: 'Sales Process', color: 'fire', num: '3' },
+  { id: 'materials', icon: 'box', label: 'Materials', color: 'mint', num: '4' },
+  { id: 'permits', icon: 'clipboard', label: 'Permits', color: 'amber', num: '5' },
+  { id: 'cards', icon: 'creditcard', label: 'Purchasing Cards', color: 'grape', num: '6' },
+  { id: 'install', icon: 'wrench', label: 'Install', color: 'volt', num: '7' },
+  { id: 'financials', icon: 'chart', label: 'Financials', color: 'fire', num: '8' },
+  { id: 'postinstall', icon: 'star', label: 'Post-Install', color: 'mint', num: '9' },
+  { id: 'blockers', icon: 'alert', label: 'Blockers & Risk', color: 'amber', num: '10' },
+  { id: 'verify', icon: 'shield', label: 'Verification', color: 'hot', num: '11' },
+  { id: 'calls', icon: 'phone', label: 'Calls & Scripts', color: 'ice', num: '12' },
+] as const;
 
-const TAB_DESCS: Record<string, string> = {
-  service: 'Live-scored Rules of the Road checklist \u2014 auto-selects the correct playbook and tracks every step in real-time.',
-  sales: 'Sales process scoring from Q3 through Post Game Recap, including 3-day right to cancel enforcement on sales over $3K.',
-  materials: 'AI-generated material lists from Lee Supply catalog, tech verification, staging photo verification, and 18% budget tracking.',
-  permits: 'Jurisdiction-aware permit tracking with AI cold-start research for new areas and document verification.',
-  cards: 'Full purchasing card lifecycle \u2014 Slack trigger detection, response time KPIs, receipt quality AI gate.',
-  install: 'Day-of execution tracking with 13 checkpoints, code compliance verification, and hard gates on after photos + walkthrough video.',
-  postinstall: 'Happy call SLA tracking (24hr), call scorecards, review monitoring, and recall lifecycle management.',
-  blockers: 'Central blocker tracking with automated escalation (30min \u2192 1hr \u2192 2hr), AI-generated timeline risk assessment.',
-  calls: '17 preset call scripts with personalization, AI script builder, call recording playback with AI scorecards.',
-};
+/* ── Main Component ────────────────────────────────────── */
 
 export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const [data, setData] = useState<JobData | null>(null);
@@ -132,7 +150,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const payments = data.payments || [];
   const invTotal = invoices.reduce((s: number, i: any) => s + (parseFloat(i.total) || 0), 0);
   const paidTotal = payments.reduce((s: number, p: any) => s + (parseFloat(p.total) || 0), 0);
-  const isInstall = (job.business_unit_name || '').toLowerCase().includes('replacement') || (job.business_unit_name || '').toLowerCase().includes('whole house');
+  const install = isInstallTrack(job.business_unit_name);
 
   const events = [
     { dot: 'fire', title: `Job ${job.status || 'Created'}`, time: fmt(job.created_on), src: 'ServiceTitan', detail: `${job.business_unit_name || ''} \u00b7 ${job.job_type_name || ''} \u00b7 ${money(amt)}` },
@@ -150,7 +168,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
           {sidebarOpen && <span className="rail-brand">Spartan</span>}
         </div>
         <div className="rail-toggle" onClick={() => setSidebarOpen(!sidebarOpen)}>
-          <Icon name={sidebarOpen ? 'chevronLeft' : 'chevronRight'} />
+          <Icon name={sidebarOpen ? 'chevronLeft' : 'chevronRight'} size={14} />
         </div>
         <div className="rail-items">
           {TABS.map((t, i) => (
@@ -167,7 +185,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       </nav>
 
       <div className="main">
-        {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={isInstall} jobNumber={jobNumber} />}
+        {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={install} jobNumber={jobNumber} />}
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
         {activeTab === 'service' && <ServiceTab job={job} data={data} />}
         {activeTab === 'sales' && <SalesTab job={job} data={data} />}
@@ -201,6 +219,8 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   );
 }
 
+/* ── Dashboard Sub-Component ───────────────────────────── */
+
 function VR({ dot, k, v, style }: { dot: string; k: string; v: string; style?: React.CSSProperties }) {
   return <div className="vr"><div className={`ai-dot ${dot}`} /><span className="k">{k}</span><span className="v" style={style}>{v}</span></div>;
 }
@@ -230,9 +250,7 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
     </div>
     <div className="ai-sum">
       <div className="ai-ring" style={{ background: `conic-gradient(var(--mint) 0deg, var(--mint) ${okDeg}deg, var(--fire) ${okDeg}deg, var(--fire) ${failDeg}deg, var(--t4) ${failDeg}deg)` }}>
-        <div className="ai-ring-inner">
-          <span className="pct" style={{ color: scoreColor }}>{score}%</span>
-        </div>
+        <div className="ai-ring-inner"><span className="pct" style={{ color: scoreColor }}>{score}%</span></div>
       </div>
       <div className="ai-stats">
         <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--mint)' }}>{passed}</div><div className="ai-s-l" style={{ color: 'var(--mint2)' }}>Verified</div></div>
@@ -282,13 +300,4 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
       </div>
     </div></div>
   </>;
-}
-
-function EmptyTab({ tab }: { tab: typeof TABS[number] }) {
-  return <div className="empty">
-    <div className="empty-icon" style={{ background: `var(--${tab.color}bg)`, color: `var(--${tab.color})` }}><Icon name={tab.icon} /></div>
-    <div className="empty-title">{tab.label}</div>
-    <div className="empty-desc">{TAB_DESCS[tab.id] || 'This tab is under development.'}</div>
-    <div style={{ marginTop: 16, padding: '4px 12px', borderRadius: 20, background: 'var(--s3)', border: '1px solid var(--b2)', fontSize: 10, color: 'var(--t3)', fontWeight: 600 }}>Coming Soon</div>
-  </div>;
 }
