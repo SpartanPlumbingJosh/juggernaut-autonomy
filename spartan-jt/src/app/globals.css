@@ -261,5 +261,13 @@ body::before{content:'';position:fixed;inset:0;background:radial-gradient(ellips
 [data-theme="light"] .picker-card{background:var(--s1);box-shadow:0 24px 80px rgba(0,0,0,.15);border-color:var(--b2)}
 [data-theme="light"] .picker-btn:hover{background:rgba(220,38,38,.04);border-color:rgba(220,38,38,.12)}
 [data-theme="light"] .picker-avatar{background:var(--s3)}
-[data-theme="light"] .slack-btn{background:#fff;color:#1d1c1d;border-color:rgba(0,0,0,.15)}
-[data-theme="light"] .slack-btn:hover{box-shadow:0 2px 8px rgba(0,0,0,.12)}
+/* Sign In Screen */
+.si-screen{position:fixed;inset:0;z-index:100;background:#060a14;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.si-glow{position:absolute;width:500px;height:500px;top:50%;left:50%;transform:translate(-50%,-60%);background:radial-gradient(circle,rgba(255,45,70,.12) 0%,rgba(255,45,70,.04) 40%,transparent 70%);pointer-events:none}
+.si-content{position:relative;display:flex;flex-direction:column;align-items:center;z-index:1}
+.si-warrior{width:220px;height:220px;object-fit:contain;filter:drop-shadow(0 0 40px rgba(255,45,70,.2)) drop-shadow(0 0 80px rgba(255,45,70,.08));margin-bottom:24px}
+.si-brand{font-family:var(--disp);font-size:42px;font-weight:900;letter-spacing:8px;color:#fff;text-shadow:0 0 30px rgba(255,45,70,.3),0 0 60px rgba(255,45,70,.1);margin:0;line-height:1}
+.si-sub{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:6px;color:rgba(255,255,255,.35);margin-top:6px;margin-bottom:40px}
+.slack-btn{display:inline-flex;align-items:center;gap:10px;padding:11px 28px;border-radius:10px;background:rgba(255,255,255,.95);color:#1d1c1d;font-family:var(--sans);font-size:14px;font-weight:700;text-decoration:none;transition:all .2s;border:none;cursor:pointer}
+.slack-btn:hover{background:#fff;box-shadow:0 0 20px rgba(255,255,255,.15);transform:translateY(-1px)}
+.slack-btn svg{flex-shrink:0}
