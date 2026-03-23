@@ -4,6 +4,26 @@ import { query } from '@/lib/supabase';
 const OPENROUTER_KEY = process.env.OPENROUTER_API_KEY || '';
 const SLACK_BOT_TOKEN = process.env.SLACK_BOT_TOKEN || '';
 
+function stripHtml(html: string | null | undefined): string {
+  if (!html) return '';
+  return html
+    .replace(/<br\s*\/?>/gi, ' ')
+    .replace(/<\/div>/gi, ' ')
+    .replace(/<\/p>/gi, ' ')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function fmtDate(d: string | null | undefined): string {
+  if (!d) return 'N/A';
+  try {
+    return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return d; }
+}
+
 async function fetchSlackMessages(channelId: string, limit = 200): Promise<any[]> {
   if (!SLACK_BOT_TOKEN) return [];
   try {
@@ -19,8 +39,7 @@ async function fetchSlackMessages(channelId: string, limit = 200): Promise<any[]
 async function fetchSlackUserNames(userIds: string[]): Promise<Record<string, string>> {
   if (!SLACK_BOT_TOKEN || userIds.length === 0) return {};
   const names: Record<string, string> = {};
-  // Batch lookup - just grab unique IDs, max 10
-  const unique = [...new Set(userIds)].slice(0, 10);
+  const unique = [...new Set(userIds)].slice(0, 15);
   await Promise.all(unique.map(async (uid) => {
     try {
       const res = await fetch(`https://slack.com/api/users.info?user=${uid}`, {
@@ -50,7 +69,6 @@ export async function GET(
   }
 
   try {
-    // 1. Gather all ST structured data
     const [jobRows, relatedRows, estimateRows, verificationRows, callRows, recallRows, contactRows] = await Promise.all([
       query(`
         SELECT j.st_job_id, j.job_number, j.status, j.summary, j.total,
@@ -82,7 +100,7 @@ export async function GET(
         ORDER BY j.created_on DESC LIMIT 15
       `),
       query(`
-        SELECT e.st_estimate_id, e.status_name, e.summary, e.estimate_name, e.subtotal, e.created_on
+        SELECT e.st_estimate_id, e.status_name, e.summary, e.estimate_name, e.subtotal, e.created_on, e.st_job_id
         FROM spartan_ops.st_estimates_v2 e
         JOIN spartan_ops.st_jobs_v2 j ON j.st_job_id = e.st_job_id
         WHERE j.st_location_id = (
@@ -134,7 +152,7 @@ export async function GET(
     const recalls = recallRows as Record<string, any>[];
     const contacts = contactRows as Record<string, any>[];
 
-    // 2. Find ALL Slack channels for this customer's location
+    // Find Slack channels
     const channelRows = await query(`
       SELECT DISTINCT channel_id, channel_name
       FROM spartan_ops.bookmark_tracked_channels
@@ -143,24 +161,22 @@ export async function GET(
       LIMIT 5
     `) as Record<string, any>[];
 
-    // Also check jt_deployments for this specific job
     const jtChannelRows = await query(`
       SELECT channel_id, channel_name FROM spartan_ops.jt_deployments
       WHERE st_job_id = ${jobNumber}
       LIMIT 1
     `) as Record<string, any>[];
 
-    // Combine unique channel IDs
     const allChannels = new Map<string, string>();
     for (const ch of [...channelRows, ...jtChannelRows]) {
       if (ch.channel_id) allChannels.set(ch.channel_id, ch.channel_name);
     }
 
-    // 3. Pull LIVE Slack messages from all customer channels
+    // Pull LIVE Slack messages
     let allMessages: { channel: string; user: string; text: string; ts: string }[] = [];
     
     for (const [chId, chName] of allChannels) {
-      const msgs = await fetchSlackMessages(chId, 100);
+      const msgs = await fetchSlackMessages(chId, 150);
       for (const m of msgs) {
         allMessages.push({
           channel: chName,
@@ -171,7 +187,7 @@ export async function GET(
       }
     }
 
-    // 4. Also check knowledge_lake for historical messages
+    // Also check knowledge_lake
     if (allChannels.size > 0) {
       const channelIds = [...allChannels.keys()].map(id => `'${id}'`).join(',');
       const klMessages = await query(`
@@ -184,7 +200,6 @@ export async function GET(
       `) as Record<string, any>[];
       
       for (const m of klMessages) {
-        // Avoid duplicates (rough check)
         if (!allMessages.some(am => am.text === m.message_text)) {
           allMessages.push({
             channel: m.channel_name,
@@ -196,15 +211,13 @@ export async function GET(
       }
     }
 
-    // Sort by timestamp descending and limit
     allMessages.sort((a, b) => (b.ts || '').localeCompare(a.ts || ''));
     allMessages = allMessages.slice(0, 150);
 
-    // 5. Resolve user names for Slack messages
+    // Resolve user names
     const userIds = [...new Set(allMessages.filter(m => m.user && m.user.startsWith('U')).map(m => m.user))];
     const userNames = await fetchSlackUserNames(userIds);
 
-    // Format messages with real names
     const formattedMessages = allMessages.map(m => {
       const name = userNames[m.user] || m.user;
       const date = m.ts?.includes('T') ? m.ts.substring(0, 10) : 
@@ -212,71 +225,108 @@ export async function GET(
       return `[${date}] ${name}: ${m.text}`;
     }).join('\n');
 
-    // 6. Build the comprehensive context
+    // Build STRUCTURED data with clear labels and HTML stripped
     const totalSpent = related.reduce((s, r) => s + (parseFloat(r.total) || 0), 0) + (parseFloat(job.total) || 0);
     const recallCount = recalls.length;
     const passCount = verifications.filter(v => v.result === 'pass').length;
     const failCount = verifications.filter(v => v.result === 'fail').length;
     const unsoldTotal = unsold.reduce((s, e) => s + (parseFloat(e.subtotal) || 0), 0);
 
-    const relatedSummary = related.map(r => 
-      `  - Job #${r.st_job_id} (${r.job_type_name || r.business_unit_name || 'Unknown'}) — ${r.status} — $${parseFloat(r.total) || 0} — ${r.created_on?.substring(0, 10) || ''}${r.recall_for_id ? ' ⚠️ RECALL' : ''}${r.summary ? ` — "${(r.summary || '').substring(0, 100)}"` : ''}`
-    ).join('\n');
+    // Format each related job with EXPLICIT field labels
+    const relatedSummary = related.map((r, i) => 
+      `  JOB ${i + 1}:
+    Job #: ${r.st_job_id}
+    Business Unit: ${r.business_unit_name || 'Unknown'}
+    Job Type: ${r.job_type_name || 'Unknown'}
+    Status: ${r.status}
+    Amount: $${parseFloat(r.total) || 0}
+    Created: ${fmtDate(r.created_on)}
+    Completed: ${fmtDate(r.completed_on)}
+    Is Recall: ${r.recall_for_id ? 'YES — recall for job #' + r.recall_for_id : 'No'}
+    ST Notes: ${stripHtml(r.summary) || 'None'}`
+    ).join('\n\n');
 
-    const unsoldSummary = unsold.map(e =>
-      `  - Est #${e.st_estimate_id}: ${e.estimate_name || e.summary || 'No description'} — $${parseFloat(e.subtotal) || 0} (${e.status_name}) — ${e.created_on?.substring(0, 10) || ''}`
-    ).join('\n');
+    const unsoldSummary = unsold.map((e, i) =>
+      `  ESTIMATE ${i + 1}:
+    Estimate #: ${e.st_estimate_id}
+    Name: ${e.estimate_name || 'No name'}
+    Description: ${stripHtml(e.summary) || 'None'}
+    Amount: $${parseFloat(e.subtotal) || 0}
+    Status: ${e.status_name}
+    Created: ${fmtDate(e.created_on)}
+    On Job #: ${e.st_job_id}`
+    ).join('\n\n');
 
-    const contextPrompt = `You are the AI intelligence briefing system for Spartan Plumbing (Dayton, OH). Your job is to write a PERSONALIZED, SPECIFIC briefing that reads like it was written by someone who actually knows this customer and has read every conversation about them.
+    const contextPrompt = `You are the intelligence briefing system for Spartan Plumbing (Dayton, OH).
 
-DO NOT write generic plumbing advice. DO NOT write things like "confirm scope of work" or "build rapport" — those are obvious. Instead, pull out SPECIFIC details from the Slack channel conversations and job history that would actually help someone walking into this job.
+CRITICAL ACCURACY RULES — FOLLOW THESE OR THE BRIEFING IS WORTHLESS:
+1. ONLY state facts that appear in the data below. Do NOT infer, assume, or fill in gaps.
+2. When referencing a job, use its EXACT Business Unit name and Job Type — do NOT rename or paraphrase them.
+3. Use EXACT dollar amounts from the data. Do not round unless the source is rounded.
+4. Use EXACT dates from the data. "Completed: Mar 19, 2026" means it was completed March 19 — not March 18.
+5. If something was discussed in Slack but is not in the structured ST data, attribute it clearly: "Per Slack discussion, ..." or "The channel mentions..."
+6. NEVER conflate two different jobs. Each job has its own BU, type, amount, and dates. Keep them separate.
+7. If you're not sure about something, leave it out. A shorter accurate briefing beats a longer wrong one.
 
-===== THIS JOB =====
-Job #${job.st_job_id} | ${job.job_type_name || 'Unknown'} | ${job.business_unit_name || 'Unknown BU'}
-Status: ${job.status} | Amount: $${parseFloat(job.total) || 0}
-Description: ${job.summary || 'No description'}
-Customer: ${job.customer_name || 'Unknown'} at ${job.customer_address || 'Unknown'}
-Created: ${job.created_on?.substring(0, 10) || ''} | Completed: ${job.completed_on?.substring(0, 10) || 'Not yet'}
+===== TODAY'S JOB (THE ONE BEING DISPATCHED) =====
+Job #: ${job.st_job_id}
+Business Unit: ${job.business_unit_name || 'Unknown'}
+Job Type: ${job.job_type_name || 'Unknown'}
+Status: ${job.status}
+Amount: $${parseFloat(job.total) || 0}
+ST Notes: ${stripHtml(job.summary) || 'No description'}
+Customer: ${job.customer_name || 'Unknown'}
+Address: ${job.customer_address || 'Unknown'}
+Created: ${fmtDate(job.created_on)}
+Completed: ${fmtDate(job.completed_on)}
 
-===== CUSTOMER HISTORY (${related.length + 1} total jobs, $${Math.round(totalSpent)} lifetime) =====
-${relatedSummary || 'No previous jobs'}
+===== PREVIOUS JOBS AT THIS ADDRESS (${related.length} jobs, $${Math.round(totalSpent)} total lifetime revenue) =====
+${relatedSummary || 'No previous jobs at this location'}
 
 ===== RECALLS AT THIS ADDRESS: ${recallCount} =====
-${recallCount > 0 ? recalls.map(r => `  - Job #${r.st_job_id}: ${r.summary || 'No details'}`).join('\n') : 'None'}
+${recallCount > 0 ? recalls.map(r => `  Job #${r.st_job_id}: ${stripHtml(r.summary) || 'No details'} (${fmtDate(r.created_on)})`).join('\n') : 'None'}
 
-===== UNSOLD ESTIMATES ($${Math.round(unsoldTotal)} total) =====
+===== UNSOLD ESTIMATES AT THIS LOCATION (${unsold.length} estimates, $${Math.round(unsoldTotal)} total potential) =====
 ${unsoldSummary || 'None'}
 
 ===== SLACK CHANNEL CONVERSATIONS (${allMessages.length} messages from ${allChannels.size} channel(s)) =====
+These are real messages from the customer's Slack job channel(s). They contain what was actually discussed, promised, discovered on-site, and decided.
+
 ${formattedMessages || 'No Slack messages available for this customer'}
 
 ===== CONTACT INFO =====
-${contacts.map(c => `${c.type}: ${c.value}`).join(', ') || 'None on file'}
+${contacts.map(c => `${c.type}: ${c.value}`).join('\n') || 'None on file'}
 
-===== VERIFICATION: ${passCount} passed, ${failCount} failed of ${verifications.length} =====
+===== CALL HISTORY =====
+${calls.length} calls on this job${calls.filter(c => (c.duration_seconds || 0) > 60).length > 0 ? `, ${calls.filter(c => (c.duration_seconds || 0) > 60).length} substantive (>60s)` : ''}
 
-===== INSTRUCTIONS =====
-Write a briefing that a tech or manager would actually find valuable. Pull out:
-- SPECIFIC things discussed in Slack (promises made, issues raised, customer preferences, access instructions, pet info, gate codes, anything noteworthy)
-- What work was done before and how it went
-- Real upsell angles based on the actual unsold estimates and what's been discussed
-- Anything that signals this customer needs special handling (complaints, recalls, high spend, financing)
-- Equipment mentioned in conversations
-- Who sold the job and any relevant context
+===== VERIFICATION: ${passCount} passed, ${failCount} failed of ${verifications.length} checks =====
 
-Keep it 4-6 sentences for the summary. Be specific — use names, dates, dollar amounts, and real details from the conversations.
+===== WHAT TO WRITE =====
+Write a briefing for someone heading to this job. Include:
+- What this job actually is (use the EXACT BU name and job type from the data)
+- Key facts from previous jobs (using correct BU names, dates, and amounts)
+- Who the customer is and any special relationship details (from ST notes or Slack)
+- What Slack conversations reveal: scope details, promises, issues discovered, customer preferences, access info
+- Specific upsell angles tied to the real unsold estimates by name and dollar amount
+- Real risk flags based on actual data (recalls, scope creep evidence, scheduling issues from channel)
+
+DO NOT:
+- Rename business units or job types (if the BU says "Replacement Water Filtration" don't call it "bathtub repair")
+- State dates that aren't in the data
+- Make up details not present in the Slack messages or ST data
+- Give generic advice like "confirm scope" or "build rapport" — those are obvious and useless
 
 Respond with ONLY a JSON object (no markdown, no backticks):
 {
-  "summary": "4-6 sentence personalized briefing pulling real details from the channel and history",
-  "risk_flags": ["specific risks based on actual history, not generic warnings"],
-  "upsell_opportunities": ["specific angles tied to real unsold estimates and conversation context"],
-  "approach_tips": ["2-3 tips based on what you actually know about THIS customer from the conversations"],
+  "summary": "4-6 sentence briefing using ONLY facts from the data above",
+  "risk_flags": ["specific risks with evidence from the data"],
+  "upsell_opportunities": ["tied to specific unsold estimate names and amounts"],
+  "approach_tips": ["2-3 tips based on specific details from Slack conversations or ST notes"],
   "customer_sentiment": "positive | neutral | cautious | negative",
   "priority_level": "routine | attention | high_priority"
 }`;
 
-    // 7. Call AI with rich context — use a smarter model
     const aiRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -285,7 +335,7 @@ Respond with ONLY a JSON object (no markdown, no backticks):
       },
       body: JSON.stringify({
         model: 'anthropic/claude-sonnet-4',
-        max_tokens: 1200,
+        max_tokens: 1500,
         messages: [{ role: 'user', content: contextPrompt }],
       }),
     });
