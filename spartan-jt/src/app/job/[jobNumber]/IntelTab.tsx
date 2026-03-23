@@ -102,42 +102,42 @@ function AiBriefing({ jobId }: { jobId: string }) {
       </div>
       <div className="intel-title">AI Briefing</div>
       <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-        <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, fontWeight: 700, background: sM.bg, border: `1px solid ${sM.bd}`, color: sM.color }}>{sM.label}</span>
-        <span style={{ fontSize: 9, padding: '2px 8px', borderRadius: 4, fontWeight: 700, background: pM.bg, border: `1px solid ${pM.bd}`, color: pM.color }}>{pM.label}</span>
+        <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, fontWeight: 700, background: sM.bg, border: `1px solid ${sM.bd}`, color: sM.color }}>{sM.label}</span>
+        <span style={{ fontSize: 11, padding: '3px 10px', borderRadius: 4, fontWeight: 700, background: pM.bg, border: `1px solid ${pM.bd}`, color: pM.color }}>{pM.label}</span>
       </div>
     </div>
     <div className="intel-body">
-      <div style={{ fontSize: 12, color: 'var(--t1)', lineHeight: 1.5, marginBottom: 10 }}>{b.summary}</div>
+      <div style={{ fontSize: 14, color: 'var(--t1)', lineHeight: 1.6, marginBottom: 12 }}>{b.summary}</div>
 
       {(b.risk_flags || []).length > 0 && <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--fire)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Risk Flags</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--fire)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Risk Flags</div>
         {(b.risk_flags as string[]).map((f: string, i: number) => (
-          <div key={i} style={{ fontSize: 11, color: 'var(--t2)', padding: '2px 0', display: 'flex', gap: 6 }}>
+          <div key={i} style={{ fontSize: 14, color: 'var(--t2)', padding: '3px 0', display: 'flex', gap: 6 }}>
             <span style={{ color: 'var(--fire)', flexShrink: 0 }}>{'\u26A0'}</span>{f}
           </div>
         ))}
       </div>}
 
       {(b.upsell_opportunities || []).length > 0 && <div style={{ marginBottom: 10 }}>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--volt)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Upsell Opportunities</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--volt)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Upsell Opportunities</div>
         {(b.upsell_opportunities as string[]).map((u: string, i: number) => (
-          <div key={i} style={{ fontSize: 11, color: 'var(--t2)', padding: '2px 0', display: 'flex', gap: 6 }}>
+          <div key={i} style={{ fontSize: 14, color: 'var(--t2)', padding: '3px 0', display: 'flex', gap: 6 }}>
             <span style={{ color: 'var(--volt)', flexShrink: 0 }}>{'\uD83D\uDCB0'}</span>{u}
           </div>
         ))}
       </div>}
 
       {(b.approach_tips || []).length > 0 && <div>
-        <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--ice)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Approach Tips</div>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--ice)', textTransform: 'uppercase' as const, letterSpacing: 0.5, marginBottom: 4 }}>Approach Tips</div>
         {(b.approach_tips as string[]).map((t: string, i: number) => (
-          <div key={i} style={{ fontSize: 11, color: 'var(--t2)', padding: '2px 0', display: 'flex', gap: 6 }}>
+          <div key={i} style={{ fontSize: 14, color: 'var(--t2)', padding: '3px 0', display: 'flex', gap: 6 }}>
             <span style={{ color: 'var(--ice)', flexShrink: 0 }}>{'\u2192'}</span>{t}
           </div>
         ))}
       </div>}
 
       <div style={{ marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: 9, color: 'var(--t3)' }}>Generated {briefing?.generated_at ? new Date(briefing.generated_at).toLocaleTimeString() : ''}</span>
+        <span style={{ fontSize: 11, color: 'var(--t3)' }}>Generated {briefing?.generated_at ? new Date(briefing.generated_at).toLocaleTimeString() : ''}</span>
         <button onClick={generate} style={{
           padding: '4px 10px', borderRadius: 4, border: '1px solid var(--b2)',
           background: 'var(--s3)', color: 'var(--t3)', fontSize: 10, cursor: 'pointer'
@@ -182,24 +182,7 @@ export default function IntelTab({ job, data, amt }: { job: any; data: any; amt:
     {/* AI Briefing — auto-generates on load */}
     <AiBriefing jobId={String(job.st_job_id)} />
 
-    {/* Work Scope */}
-    <div className="intel" style={{ borderColor: 'var(--mintbd)' }}>
-      <div className="intel-h">
-        <div className="intel-icon" style={{ background: 'var(--mintbg)', color: 'var(--mint)' }}>
-          <svg fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/>
-          </svg>
-        </div>
-        <div className="intel-title">Work Scope</div>
-      </div>
-      <div className="intel-body">
-        {job.summary ? <><strong>Description:</strong> {job.summary}<br /></> : 'No scope available'}
-        {job.job_type_name && <><strong>Type:</strong> {job.job_type_name} &middot; </>}
-        {job.business_unit_name && <><strong>BU:</strong> {job.business_unit_name}</>}
-      </div>
-    </div>
-
-    {/* Unsold Estimates — Opportunities */}
+    {/* Open Opportunities */}
     {unsoldEstimates.length > 0 && <div className="c full">
       <div className="ch">
         <h3>Open Opportunities</h3>
