@@ -41,6 +41,8 @@ export interface JobData {
   cardRequests: any[];
   blockers: any[];
   jobMedia: any[];
+  project: any | null;
+  projectSiblings: any[];
 }
 
 interface SlackUser {
@@ -85,6 +87,21 @@ export function stripHtml(html: string): string {
 export function isInstallTrack(buName: string | null | undefined): boolean {
   const bu = (buName || '').toLowerCase();
   return bu.includes('replacement') || bu.includes('whole house');
+}
+
+type JobMode = 'SJT' | 'SPT' | 'IPT';
+interface ModeInfo { mode: JobMode; label: string; color: string; tabs: string[]; stages: string[] }
+
+function getMode(jobTypeName: string | null | undefined, buName: string | null | undefined): ModeInfo {
+  const jt = (jobTypeName || '').toUpperCase();
+  const install = isInstallTrack(buName);
+  if (jt.includes('(PRJ)')) {
+    if (install || jt.includes('INSTALL')) {
+      return { mode: 'IPT', label: 'Install Project', color: 'fire', tabs: ['dashboard','intel','service','sales','materials','permits','cards','install','financials','postinstall','blockers','verify','calls'], stages: ['Job Sold','Contact','Pre-Install','Day Before','Install','Post-Install'] };
+    }
+    return { mode: 'SPT', label: 'Service Project', color: 'volt', tabs: ['dashboard','intel','service','sales','financials','blockers','verify','calls'], stages: ['Dispatched','Diagnosed','Options Built','Sold','Scheduled','Completed'] };
+  }
+  return { mode: 'SJT', label: 'Single Job', color: 'ice', tabs: ['dashboard','intel','service','sales','verify','calls'], stages: ['Booked','Dispatched','Diagnosed','Options Presented','Sold/Closed','Follow-Up'] };
 }
 
 function getCookie(name: string): string | null {
@@ -227,6 +244,8 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const invTotal = invoices.reduce((s: number, i: any) => s + (parseFloat(i.total) || 0), 0);
   const paidTotal = payments.reduce((s: number, p: any) => s + (parseFloat(p.total) || 0), 0);
   const install = isInstallTrack(job.business_unit_name);
+  const modeInfo = getMode(job.job_type_name, job.business_unit_name);
+  const visibleTabs = TABS.filter(t => modeInfo.tabs.includes(t.id));
 
   const events = [
     { dot: 'fire', title: `Job ${job.status || 'Created'}`, time: fmt(job.created_on), src: 'ServiceTitan', detail: `${job.business_unit_name || ''} \u00b7 ${job.job_type_name || ''} \u00b7 ${money(amt)}` },
@@ -247,9 +266,9 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
           <Icon name={sidebarOpen ? 'chevronLeft' : 'chevronRight'} size={14} />
         </div>
         <div className="rail-items">
-          {TABS.map((t, i) => (
+          {visibleTabs.map((t, i) => (
             <div key={t.id}>
-              {(i === 1 || i === 5 || i === 10) && <div className="rsep" />}
+              {(t.id === 'intel' || t.id === 'permits' || t.id === 'blockers') && <div className="rsep" />}
               <div className={`ri${activeTab === t.id ? ' on' : ''}`} onClick={() => setActiveTab(t.id)} title={!sidebarOpen ? (t.num ? t.num + '. ' : '') + t.label : undefined}>
                 <Icon name={t.icon} />
                 {sidebarOpen && <span className="ri-label">{t.num ? t.num + '. ' : ''}{t.label}</span>}
@@ -280,7 +299,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       </nav>
 
       <div className="main">
-        {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={install} jobNumber={jobNumber} />}
+        {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={install} jobNumber={jobNumber} mode={modeInfo.mode} modeInfo={modeInfo} />}
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
         {activeTab === 'service' && <ServiceTab job={job} data={data} />}
         {activeTab === 'sales' && <SalesTab job={job} data={data} />}
@@ -320,13 +339,13 @@ function VR({ dot, k, v, style }: { dot: string; k: string; v: string; style?: R
   return <div className="vr"><div className={`ai-dot ${dot}`} /><span className="k">{k}</span><span className="v" style={style}>{v}</span></div>;
 }
 
-function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, paidTotal, isInstall, jobNumber }: any) {
+function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, paidTotal, isInstall, jobNumber, mode, modeInfo }: any) {
   const pending = total - passed - failed;
   const scoreColor = score >= 80 ? 'var(--mint)' : score >= 60 ? 'var(--amber)' : 'var(--fire)';
   const okDeg = total > 0 ? (passed / total) * 360 : 0;
   const failDeg = total > 0 ? okDeg + (failed / total) * 360 : 0;
-  const stages = ['Job Sold', 'Contact', 'Pre-Install', 'Day Before', 'Install', 'Post-Install'];
-  const stageIdx = job.status === 'Completed' ? 5 : job.status === 'InProgress' ? 4 : 0;
+  const stages = modeInfo?.stages || ['Job Sold', 'Contact', 'Pre-Install', 'Day Before', 'Install', 'Post-Install'];
+  const stageIdx = job.status === 'Completed' ? stages.length - 1 : job.status === 'InProgress' ? Math.max(0, stages.length - 2) : 0;
 
   return <>
     <div className="top">
@@ -336,6 +355,7 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
         <div className="sub">{job.job_type_name || ''} &middot; {job.business_unit_name || ''} &middot; {fmt(job.created_on)}</div>
       </div>
       <div className="pills">
+        {mode && <div className={`pill p-${modeInfo?.color || 'ice'}`}>{mode}</div>}
         {job.status === 'Completed' && <div className="pill p-sold">Completed</div>}
         {job.status === 'Scheduled' && <div className="pill p-svc">Scheduled</div>}
         {job.status === 'InProgress' && <div className="pill p-svc">In Progress</div>}
@@ -360,7 +380,7 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
       <div className="st sg"><div className="num" style={{ fontSize: 18 }}>{job.status || '\u2014'}</div><div className="lbl">Status</div></div>
     </div>
     <div className="pipe-wrap">
-      <div className="pipe-top"><h2>Job Lifecycle</h2><div className="step">Stage {stageIdx + 1} / 6</div></div>
+      <div className="pipe-top"><h2>Job Lifecycle</h2><div className="step">Stage {stageIdx + 1} / {stages.length}</div></div>
       <div className="pipe">
         {stages.map((s, i) => {
           const cls = i < stageIdx ? 'done' : i === stageIdx ? 'now' : 'w';
