@@ -149,11 +149,19 @@ export async function GET(
 
     const calls = await query(`
       SELECT st_call_id, created_on, duration_seconds, from_number, to_number,
-             direction, status, call_type, recording_url, customer_name
+             direction, call_type, recording_url, customer_name, agent_name
       FROM spartan_ops.st_calls
       WHERE st_job_id IN ('${projectJobIds.join("','")}')
       ORDER BY created_on DESC
       LIMIT 50
+    `);
+
+    // Call scores for AI scorecards (keyed by st_call_id)
+    const callScores = await query(`
+      SELECT st_call_id, call_role, score_total, score_duration, score_booking,
+             score_response, score_outcome, scoring_method, ai_feedback
+      FROM spartan_ops.call_scores
+      WHERE st_job_id IN ('${projectJobIds.join("','")}')
     `);
 
     const recallJobs = await query(`
@@ -350,7 +358,7 @@ export async function GET(
             query(`SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes FROM spartan_ops.playbook_step_tracking WHERE st_job_id = ${sjJob.st_job_id}`),
             query(`SELECT st_appointment_id, appointment_number, status, start_time, end_time, arrival_window_start, arrival_window_end, special_instructions FROM spartan_ops.st_appointments_v2 WHERE st_job_id = ${sjJob.st_job_id} ORDER BY start_time DESC LIMIT 10`),
             query(`SELECT st_assignment_id, st_appointment_id, st_tech_id, technician_name, status, is_paused, assigned_on FROM spartan_ops.st_appointment_assignments_v2 WHERE st_job_id = ${sjJob.st_job_id} ORDER BY assigned_on DESC LIMIT 20`),
-            query(`SELECT st_call_id, created_on, duration_seconds, direction, status, call_type, recording_url FROM spartan_ops.st_calls WHERE st_job_id = ${sjJob.st_job_id} ORDER BY created_on DESC LIMIT 20`),
+            query(`SELECT st_call_id, created_on, duration_seconds, direction, call_type, recording_url, agent_name FROM spartan_ops.st_calls WHERE st_job_id = '${sjJob.st_job_id}' ORDER BY created_on DESC LIMIT 20`),
             query(`SELECT verification_code, verification_name, result, checked_at FROM spartan_ops.job_verifications WHERE job_id = ${sjJob.st_job_id} ORDER BY checked_at DESC LIMIT 30`),
           ]);
         }
@@ -395,7 +403,7 @@ export async function GET(
     return NextResponse.json({
       job, relatedJobs, verifications, appointments, invoices, payments,
       estimates, assignments, contacts, unsoldEstimates, recallsAtLocation,
-      calls, recallJobs, callScripts, materialList, catalogImages,
+      calls, callScores, recallJobs, callScripts, materialList, catalogImages,
       purchaseOrders, verificationDefs, companyAverages,
       playbook: { serviceKey: playbookKey, salesKey: salesPlaybookKey, phoneCloseKey, steps: playbookSteps, tracking: stepTracking },
       permits, permitRules, cardRequests, blockers, jobMedia,
