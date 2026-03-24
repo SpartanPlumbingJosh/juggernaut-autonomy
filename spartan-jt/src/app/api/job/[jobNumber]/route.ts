@@ -35,6 +35,18 @@ export async function GET(
 
     const job = jobs[0] as Record<string, unknown>;
 
+    // Detect project early so downstream queries can include sibling jobs
+    const projectRows = await query(`
+      SELECT st_project_id, name, status, job_ids, contract_value,
+             start_date, target_completion_date, actual_completion_date
+      FROM spartan_ops.st_projects_v2
+      WHERE job_ids::text LIKE '%${jobNumber}%'
+      LIMIT 1
+    `);
+    const project = projectRows.length > 0 ? projectRows[0] : null;
+    const projectJobIds: number[] = project ? ((project as any).job_ids as number[]) : [Number(jobNumber)];
+    const projectJobIdList = projectJobIds.join(',');
+
     const relatedJobs = await query(`
       SELECT j.st_job_id, j.job_number, j.status, j.summary,
              j.total, COALESCE(j.business_unit_name, bu.name) as business_unit_name,
@@ -139,7 +151,7 @@ export async function GET(
       SELECT st_call_id, created_on, duration_seconds, from_number, to_number,
              direction, status, call_type, recording_url, customer_name
       FROM spartan_ops.st_calls
-      WHERE st_job_id = ${jobNumber}
+      WHERE st_job_id IN ('${projectJobIds.join("','")}')
       ORDER BY created_on DESC
       LIMIT 50
     `);
@@ -207,15 +219,15 @@ export async function GET(
     const stepTracking = await query(`
       SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes
       FROM spartan_ops.playbook_step_tracking
-      WHERE st_job_id = ${jobNumber}
+      WHERE st_job_id IN (${projectJobIdList})
     `);
 
     const purchaseOrders = await query(`
-      SELECT st_po_id, po_number, vendor_id, status, total, tax, po_date, items, summary, received_on
+      SELECT st_po_id, po_number, vendor_id, status, total, tax, po_date, items, summary, received_on, job_id
       FROM spartan_ops.st_purchase_orders_v2
-      WHERE job_id = ${jobNumber}
+      WHERE job_id IN (${projectJobIdList})
       ORDER BY po_date DESC
-      LIMIT 20
+      LIMIT 30
     `);
 
     const verificationDefs = await query(`
@@ -234,9 +246,9 @@ export async function GET(
 
     const permits = await query(`
       SELECT permit_type, status, filed_date, approved_date, expires_date,
-             ai_verified, ai_notes, document_url, jurisdiction
+             ai_verified, ai_notes, document_url, jurisdiction, st_job_id
       FROM spartan_ops.permit_documents
-      WHERE st_job_id = ${jobNumber}
+      WHERE st_job_id IN (${projectJobIdList})
       ORDER BY created_at DESC
     `);
 
@@ -254,37 +266,28 @@ export async function GET(
     const cardRequests = await query(`
       SELECT id, requested_by, requested_by_name, requested_at, responded_by, responded_at, response_time_seconds,
              card_issued, receipt_posted, receipt_ai_pass, receipt_ai_notes,
-             amount, mismatch_flagged, reconciled, vendor_name, purchase_description
+             amount, mismatch_flagged, reconciled, vendor_name, purchase_description, st_job_id
       FROM spartan_ops.job_card_requests
-      WHERE st_job_id = ${jobNumber}
+      WHERE st_job_id IN (${projectJobIdList})
       ORDER BY requested_at DESC
     `);
 
     const blockers = await query(`
       SELECT category, escalation_level, description, owner, auto_detected,
-             source, impact_assessment, resolved_at, resolution_notes, created_at
+             source, impact_assessment, resolved_at, resolution_notes, created_at, st_job_id
       FROM spartan_ops.job_blockers
-      WHERE st_job_id = ${jobNumber}
+      WHERE st_job_id IN (${projectJobIdList})
       ORDER BY resolved_at NULLS FIRST, created_at DESC
     `);
 
     const jobMedia = await query(`
       SELECT media_type, file_name, thumb_url, media_url as full_url, ai_classification,
-             ai_confidence, matched_step_id, matched_playbook, posted_by, posted_at as created_at
+             ai_confidence, matched_step_id, matched_playbook, posted_by, posted_at as created_at, st_job_id
       FROM spartan_ops.job_media
-      WHERE st_job_id = ${jobNumber}
+      WHERE st_job_id IN (${projectJobIdList})
       ORDER BY posted_at DESC NULLS LAST
-      LIMIT 50
+      LIMIT 100
     `);
-
-    const projectRows = await query(`
-      SELECT st_project_id, name, status, job_ids, contract_value,
-             start_date, target_completion_date, actual_completion_date
-      FROM spartan_ops.st_projects_v2
-      WHERE job_ids::text LIKE '%${jobNumber}%'
-      LIMIT 1
-    `);
-    const project = projectRows.length > 0 ? projectRows[0] : null;
 
     let projectSiblings: unknown[] = [];
     let projectContext: any = null;
