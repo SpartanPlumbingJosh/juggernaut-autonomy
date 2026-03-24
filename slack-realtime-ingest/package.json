@@ -1,0 +1,15 @@
+{
+  "name": "slack-realtime-ingest",
+  "version": "1.0.0",
+  "description": "Real-time Slack message ingest via Events API → Supabase",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
