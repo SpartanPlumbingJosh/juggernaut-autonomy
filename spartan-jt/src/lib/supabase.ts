@@ -3,7 +3,7 @@ const SUPABASE_KEY = process.env.SUPABASE_SERVICE_KEY || '';
 const CF_CLIENT_ID = process.env.CF_ACCESS_CLIENT_ID || '';
 const CF_CLIENT_SECRET = process.env.CF_ACCESS_CLIENT_SECRET || '';
 
-export async function query<T = Record<string, unknown>>(sql: string): Promise<T[]> {
+export async function query<T = Record<string, unknown>>(sql: string, schema = 'spartan_ops'): Promise<T[]> {
   const res = await fetch(SUPABASE_URL, {
     method: 'POST',
     headers: {
@@ -11,7 +11,7 @@ export async function query<T = Record<string, unknown>>(sql: string): Promise<T
       'Authorization': `Bearer ${SUPABASE_KEY}`,
       'CF-Access-Client-Id': CF_CLIENT_ID,
       'CF-Access-Client-Secret': CF_CLIENT_SECRET,
-      'Content-Profile': 'spartan_ops',
+      'Content-Profile': schema,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({ query: sql }),

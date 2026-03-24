@@ -277,6 +277,33 @@ export async function GET(
       LIMIT 50
     `);
 
+    const projectRows = await query(`
+      SELECT st_project_id, name, status, job_ids, contract_value,
+             start_date, target_completion_date, actual_completion_date
+      FROM spartan_ops.st_projects_v2
+      WHERE job_ids::text LIKE '%${jobNumber}%'
+      LIMIT 1
+    `);
+    const project = projectRows.length > 0 ? projectRows[0] : null;
+
+    let projectSiblings: unknown[] = [];
+    if (project && (project as any).job_ids) {
+      const sibIds = ((project as any).job_ids as number[]).filter((id: number) => String(id) !== jobNumber);
+      if (sibIds.length > 0) {
+        projectSiblings = await query(`
+          SELECT j.st_job_id, j.job_number, j.status, j.total,
+                 COALESCE(j.job_type_name, jt.name) as job_type_name,
+                 COALESCE(j.business_unit_name, bu.name) as business_unit_name,
+                 j.created_on, j.completed_on
+          FROM spartan_ops.st_jobs_v2 j
+          LEFT JOIN spartan_ops.st_business_units bu ON bu.st_bu_id = j.st_business_unit_id
+          LEFT JOIN spartan_ops.st_job_types jt ON jt.st_job_type_id = j.st_job_type_id
+          WHERE j.st_job_id IN (${sibIds.join(',')})
+          ORDER BY j.created_on
+        `);
+      }
+    }
+
     return NextResponse.json({
       job, relatedJobs, verifications, appointments, invoices, payments,
       estimates, assignments, contacts, unsoldEstimates, recallsAtLocation,
@@ -284,6 +311,7 @@ export async function GET(
       purchaseOrders, verificationDefs, companyAverages,
       playbook: { serviceKey: playbookKey, salesKey: salesPlaybookKey, phoneCloseKey, steps: playbookSteps, tracking: stepTracking },
       permits, permitRules, cardRequests, blockers, jobMedia,
+      project, projectSiblings,
     });
   } catch (err) {
     console.error('Job API error:', err);
