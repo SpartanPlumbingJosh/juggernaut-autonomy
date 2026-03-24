@@ -15,15 +15,24 @@ const quarterMeta: Record<string, { label: string; color: string; bg: string; bd
   PostGame: { label: 'POST GAME RECAP', color: 'var(--grape)', bg: 'var(--grapebg)', bd: 'var(--grapebd)' },
 };
 
-export default function SalesTab({ job, data }: { job: any; data: any }) {
+export default function SalesTab({ job, data, projectContext }: { job: any; data: any; projectContext?: any }) {
+  const pc = projectContext;
+  const hasToSibling = pc?.toJob && String(pc.toJob.st_job_id) !== String(job.st_job_id);
+
   const playbook = data.playbook || { steps: [], tracking: [], salesKey: 'plsales' };
-  const estimates = (data.estimates || []) as any[];
-  const payments = (data.payments || []) as any[];
-  const amt = parseFloat(job.total) || 0;
+  // Use TO job's tracking and estimates when available
+  const tracking = hasToSibling ? (pc.toTracking || []) : (playbook.tracking || []);
+  const estimates = hasToSibling ? (pc.toEstimates || []) : (data.estimates || []);
+  const payments = hasToSibling ? [...(pc.toPayments || []), ...(data.payments || [])] : (data.payments || []);
+  const toJobId = hasToSibling ? pc.toJob.st_job_id : null;
+
+  // For install projects, use project total revenue
+  const amt = pc?.isInstallProject ? (pc.totalProjectRevenue || parseFloat(job.total) || 0) : (parseFloat(job.total) || 0);
+
   const salesKey = playbook.salesKey || 'plsales';
   const salesSteps = (playbook.steps || []).filter((s: any) => s.playbook_key === salesKey);
   const trackingMap: Record<string, any> = {};
-  (playbook.tracking || []).forEach((t: any) => { trackingMap[`${t.playbook_key}-${t.step_number}`] = t; });
+  tracking.forEach((t: any) => { trackingMap[`${t.playbook_key}-${t.step_number}`] = t; });
   const quarters: string[] = [];
   const stepsByQuarter: Record<string, any[]> = {};
   salesSteps.forEach((s: any) => { if (!stepsByQuarter[s.quarter]) { stepsByQuarter[s.quarter] = []; quarters.push(s.quarter); } stepsByQuarter[s.quarter].push(s); });
@@ -38,13 +47,15 @@ export default function SalesTab({ job, data }: { job: any; data: any }) {
   const soldEstimates = estimates.filter((e: any) => e.status_name === 'Sold');
 
   return <>
-    {/* Header */}
     <div style={{ marginBottom: 24 }}>
       <div style={{ fontFamily: 'var(--mono)', fontSize: 13, color: 'var(--t4)', marginBottom: 6 }}>Sales Process</div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-.5px' }}>Close the Deal</h1>
-          <div style={{ fontSize: 14, color: 'var(--t3)', marginTop: 4 }}>{salesKey} &middot; {totalSteps} steps</div>
+          <div style={{ fontSize: 14, color: 'var(--t3)', marginTop: 4 }}>
+            {salesKey} &middot; {totalSteps} steps
+            {hasToSibling && <span style={{ marginLeft: 8, color: 'var(--ice)' }}>&middot; from TO #{toJobId}</span>}
+          </div>
         </div>
         <div style={{ background: passedSteps > 0 ? 'var(--mintbg)' : 'var(--s3)', border: `1px solid ${passedSteps > 0 ? 'var(--mintbd)' : 'var(--b2)'}`, color: passedSteps > 0 ? 'var(--mint)' : 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, padding: '6px 14px', borderRadius: 10 }}>
           {passedSteps}/{totalSteps} VERIFIED
@@ -52,11 +63,17 @@ export default function SalesTab({ job, data }: { job: any; data: any }) {
       </div>
     </div>
 
+    {/* Project context banner */}
+    {hasToSibling && <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderRadius: 'var(--rs)', background: 'var(--icebg)', border: '1px solid var(--icebd)', marginBottom: 20, fontSize: 14, color: 'var(--ice)' }}>
+      <span style={{ fontWeight: 700 }}>Project View</span>
+      <span style={{ color: 'var(--t2)' }}>Sale ran on TO #{toJobId} &mdash; showing that job&apos;s estimates and playbook</span>
+    </div>}
+
     {/* Hero Stats */}
     <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
       <div className="st sf"><div className="num">{totalSteps}</div><div className="lbl">Steps</div></div>
       <div className="st sm"><div className="num">{passedSteps}</div><div className="lbl">Verified</div></div>
-      <div className="st" style={{ background: 'linear-gradient(150deg,rgba(239,68,68,.08),transparent 60%)', border: '1px solid rgba(239,68,68,.12)', borderRadius: 'var(--r)', padding: 22, position: 'relative', overflow: 'hidden' }}><div className="num" style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700, letterSpacing: -1, lineHeight: 1, marginBottom: 6, color: 'var(--red)' }}>{money(amt)}</div><div className="lbl" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.8px', textTransform: 'uppercase' as const, color: '#f87171' }}>Sale</div></div>
+      <div className="st" style={{ background: 'linear-gradient(150deg,rgba(239,68,68,.08),transparent 60%)', border: '1px solid rgba(239,68,68,.12)', borderRadius: 'var(--r)', padding: 22, position: 'relative', overflow: 'hidden' }}><div className="num" style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700, letterSpacing: -1, lineHeight: 1, marginBottom: 6, color: 'var(--red)' }}>{money(amt)}</div><div className="lbl" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.8px', textTransform: 'uppercase' as const, color: '#f87171' }}>{pc?.isInstallProject ? 'Project' : 'Sale'}</div></div>
       <div className="st" style={{ background: depositMet ? 'linear-gradient(150deg,rgba(34,197,94,.07),transparent 60%)' : 'linear-gradient(150deg,rgba(239,68,68,.08),transparent 60%)', border: `1px solid ${depositMet ? 'rgba(34,197,94,.12)' : 'rgba(239,68,68,.12)'}`, borderRadius: 'var(--r)', padding: 22, position: 'relative', overflow: 'hidden' }}>
         <div className="num" style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700, letterSpacing: -1, lineHeight: 1, marginBottom: 6, color: depositMet ? 'var(--grn)' : 'var(--red)' }}>{depositMet ? '\u2713' : '\u2717'}</div>
         <div className="lbl" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.8px', textTransform: 'uppercase' as const, color: depositMet ? '#4ade80' : '#f87171' }}>40% Deposit</div>
@@ -80,7 +97,7 @@ export default function SalesTab({ job, data }: { job: any; data: any }) {
       <div className="c"><div className="ch"><h3>Deposit</h3></div><div className="cb">
         <div className="vr"><div className={`ai-dot ${depositMet ? 'ai-ok' : 'ai-fail'}`} /><span className="k">Required (40%)</span><span className="v">{money(deposit40)}</span></div>
         <div className="vr"><div className={`ai-dot ${depositMet ? 'ai-ok' : 'ai-fail'}`} /><span className="k">Collected</span><span className="v" style={{ color: depositMet ? 'var(--mint)' : 'var(--fire)' }}>{money(paidTotal)}</span></div>
-        <div className="vr"><div className="ai-dot ai-ok" /><span className="k">Sale</span><span className="v">{money(amt)}</span></div>
+        <div className="vr"><div className="ai-dot ai-ok" /><span className="k">{pc?.isInstallProject ? 'Project Total' : 'Sale'}</span><span className="v">{money(amt)}</span></div>
       </div></div>
       <div className="c"><div className="ch"><h3>Estimates</h3><div className="tg" style={{ background: 'var(--mintbg)', border: '1px solid var(--mintbd)', color: 'var(--mint)' }}>{estimates.length}</div></div><div className="cb">
         {estimates.length === 0 && <div style={{ color: 'var(--t3)', fontSize: 14 }}>No estimates on this job.</div>}

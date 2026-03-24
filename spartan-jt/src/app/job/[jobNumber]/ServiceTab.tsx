@@ -14,10 +14,16 @@ const quarterMeta: Record<string, { label: string; color: string; bg: string; bd
   Halftime: { label: 'HALFTIME SHOW', color: 'var(--hot)', bg: 'var(--hotbg)', bd: 'var(--hotbd)' },
 };
 
-export default function ServiceTab({ job, data }: { job: any; data: any }) {
-  const appointments = (data.appointments || []) as any[];
-  const assignments = (data.assignments || []) as any[];
+export default function ServiceTab({ job, data, projectContext }: { job: any; data: any; projectContext?: any }) {
+  const pc = projectContext;
+  const hasSjSibling = pc?.sjJob && String(pc.sjJob.st_job_id) !== String(job.st_job_id);
+
+  // If this is an install job in a project, use the SJ job's data
+  const appointments = hasSjSibling ? (pc.sjAppointments || []) : (data.appointments || []);
+  const assignments = hasSjSibling ? (pc.sjAssignments || []) : (data.assignments || []);
+  const tracking = hasSjSibling ? (pc.sjTracking || []) : (data.playbook?.tracking || []);
   const playbook = data.playbook || { steps: [], tracking: [], serviceKey: 'plservice' };
+  const sjJobId = hasSjSibling ? pc.sjJob.st_job_id : null;
 
   const assignMap: Record<string, any[]> = {};
   assignments.forEach((a: any) => {
@@ -34,7 +40,7 @@ export default function ServiceTab({ job, data }: { job: any; data: any }) {
 
   const serviceSteps = (playbook.steps || []).filter((s: any) => s.playbook_key === playbook.serviceKey);
   const trackingMap: Record<string, any> = {};
-  (playbook.tracking || []).forEach((t: any) => {
+  tracking.forEach((t: any) => {
     trackingMap[`${t.playbook_key}-${t.step_number}`] = t;
   });
 
@@ -60,13 +66,22 @@ export default function ServiceTab({ job, data }: { job: any; data: any }) {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 800, letterSpacing: '-.5px' }}>Rules of the Road</h1>
-          <div style={{ fontSize: 14, color: 'var(--t3)', marginTop: 4 }}>{playbook.serviceKey} &middot; {totalSteps} steps</div>
+          <div style={{ fontSize: 14, color: 'var(--t3)', marginTop: 4 }}>
+            {playbook.serviceKey} &middot; {totalSteps} steps
+            {hasSjSibling && <span style={{ marginLeft: 8, color: 'var(--ice)' }}>&middot; from SJ #{sjJobId}</span>}
+          </div>
         </div>
         <div style={{ background: passedSteps > 0 ? 'var(--mintbg)' : 'var(--s3)', border: `1px solid ${passedSteps > 0 ? 'var(--mintbd)' : 'var(--b2)'}`, color: passedSteps > 0 ? 'var(--mint)' : 'var(--t3)', fontFamily: 'var(--mono)', fontSize: 14, fontWeight: 700, padding: '6px 14px', borderRadius: 10 }}>
           {passedSteps}/{totalSteps} VERIFIED
         </div>
       </div>
     </div>
+
+    {/* Project context banner */}
+    {hasSjSibling && <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderRadius: 'var(--rs)', background: 'var(--icebg)', border: '1px solid var(--icebd)', marginBottom: 20, fontSize: 14, color: 'var(--ice)' }}>
+      <span style={{ fontWeight: 700 }}>Project View</span>
+      <span style={{ color: 'var(--t2)' }}>Service ran on SJ #{sjJobId} &mdash; showing that job&apos;s playbook data</span>
+    </div>}
 
     <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
       <div className="st sf"><div className="num">{totalSteps}</div><div className="lbl">Steps</div></div>

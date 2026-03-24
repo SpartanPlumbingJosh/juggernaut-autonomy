@@ -301,8 +301,8 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       <div className="main">
         {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={install} jobNumber={jobNumber} mode={modeInfo.mode} modeInfo={modeInfo} />}
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
-        {activeTab === 'service' && <ServiceTab job={job} data={data} />}
-        {activeTab === 'sales' && <SalesTab job={job} data={data} />}
+        {activeTab === 'service' && <ServiceTab job={job} data={data} projectContext={data.projectContext} />}
+        {activeTab === 'sales' && <SalesTab job={job} data={data} projectContext={data.projectContext} />}
         {activeTab === 'materials' && <MaterialsTab job={job} data={data} amt={amt} />}
         {activeTab === 'permits' && <PermitsTab job={job} data={data} />}
         {activeTab === 'cards' && <CardsTab job={job} data={data} />}

@@ -287,6 +287,24 @@ export async function GET(
     const project = projectRows.length > 0 ? projectRows[0] : null;
 
     let projectSiblings: unknown[] = [];
+    let projectContext: any = null;
+
+    // Classify job role from BU/job type
+    function classifyJobRole(bu: string, jt: string): string {
+      const b = (bu || '').toLowerCase();
+      const j = (jt || '').toLowerCase();
+      if (b.includes('service sj') || j.includes('service (sj)') || j.includes('demand/service')) return 'sj';
+      if (b.includes('sales') || j.includes('turnover') || j.includes('(to)')) return 'to';
+      if (b.includes('replacement') || b.includes('whole house') || j.includes('install (prj)') || j.includes('install')) return 'install';
+      if (b.includes('admin')) return 'admin';
+      return 'service';
+    }
+
+    const currentJobRole = classifyJobRole(
+      String(job.business_unit_name || ''),
+      String(job.job_type_name || '')
+    );
+
     if (project && (project as any).job_ids) {
       const sibIds = ((project as any).job_ids as number[]).filter((id: number) => String(id) !== jobNumber);
       if (sibIds.length > 0) {
@@ -301,6 +319,70 @@ export async function GET(
           WHERE j.st_job_id IN (${sibIds.join(',')})
           ORDER BY j.created_on
         `);
+
+        // Classify all project jobs
+        const allProjectJobs = [
+          { st_job_id: (job as any).st_job_id, business_unit_name: String(job.business_unit_name || ''), job_type_name: String(job.job_type_name || ''), total: (job as any).total, status: (job as any).status, created_on: (job as any).created_on },
+          ...(projectSiblings as any[])
+        ].map((j: any) => ({ ...j, role: classifyJobRole(j.business_unit_name || '', j.job_type_name || '') }));
+
+        const sjJobs = allProjectJobs.filter(j => j.role === 'sj');
+        const toJobs = allProjectJobs.filter(j => j.role === 'to');
+        const installJobs = allProjectJobs.filter(j => j.role === 'install');
+        const sjJob = sjJobs[0] || null;
+        const toJob = toJobs[0] || null;
+        const isInstallProject = installJobs.length > 0;
+        const totalProjectRevenue = allProjectJobs.reduce((s, j) => s + (parseFloat(j.total) || 0), 0);
+
+        // Pull cross-job data from SJ and TO siblings
+        let sjTracking: unknown[] = [];
+        let sjAppointments: unknown[] = [];
+        let sjAssignments: unknown[] = [];
+        let sjCalls: unknown[] = [];
+
+        if (sjJob && String(sjJob.st_job_id) !== jobNumber) {
+          [sjTracking, sjAppointments, sjAssignments, sjCalls] = await Promise.all([
+            query(`SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes FROM spartan_ops.playbook_step_tracking WHERE st_job_id = ${sjJob.st_job_id}`),
+            query(`SELECT st_appointment_id, appointment_number, status, start_time, end_time, arrival_window_start, arrival_window_end, special_instructions FROM spartan_ops.st_appointments_v2 WHERE st_job_id = ${sjJob.st_job_id} ORDER BY start_time DESC LIMIT 10`),
+            query(`SELECT st_assignment_id, st_appointment_id, st_tech_id, technician_name, status, is_paused, assigned_on FROM spartan_ops.st_appointment_assignments_v2 WHERE st_job_id = ${sjJob.st_job_id} ORDER BY assigned_on DESC LIMIT 20`),
+            query(`SELECT st_call_id, created_on, duration_seconds, direction, status, call_type, recording_url FROM spartan_ops.st_calls WHERE st_job_id = ${sjJob.st_job_id} ORDER BY created_on DESC LIMIT 20`),
+          ]);
+        }
+
+        let toTracking: unknown[] = [];
+        let toEstimates: unknown[] = [];
+        let toPayments: unknown[] = [];
+
+        if (toJob && String(toJob.st_job_id) !== jobNumber) {
+          [toTracking, toEstimates, toPayments] = await Promise.all([
+            query(`SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes FROM spartan_ops.playbook_step_tracking WHERE st_job_id = ${toJob.st_job_id}`),
+            query(`SELECT st_estimate_id, estimate_name, status_name, review_status, summary, sold_on, sold_by_name, subtotal, tax, items, is_active, created_on FROM spartan_ops.st_estimates_v2 WHERE st_job_id = ${toJob.st_job_id} ORDER BY created_on DESC LIMIT 10`),
+            query(`SELECT st_payment_id, payment_date, total, payment_type, memo FROM spartan_ops.st_payments_v2 WHERE applied_to::text LIKE '%${toJob.st_job_id}%' ORDER BY payment_date DESC LIMIT 10`),
+          ]);
+        }
+
+        // Aggregate invoices/payments across all project jobs
+        const allIds = allProjectJobs.map(j => j.st_job_id).join(',');
+        const projectInvoices = await query(`
+          SELECT st_invoice_id, st_job_id, reference_number, summary, sub_total, sales_tax, total, balance, invoice_date
+          FROM spartan_ops.st_invoices_v2
+          WHERE st_job_id IN (${allIds})
+          ORDER BY created_on DESC LIMIT 30
+        `);
+
+        projectContext = {
+          projectId: (project as any).st_project_id,
+          currentJobRole,
+          isInstallProject,
+          allJobs: allProjectJobs,
+          sjJob, toJob,
+          sjTracking, sjAppointments, sjAssignments, sjCalls,
+          toTracking, toEstimates, toPayments,
+          projectInvoices,
+          totalProjectRevenue,
+          installCount: installJobs.length,
+          jobCount: allProjectJobs.length,
+        };
       }
     }
 
@@ -311,7 +393,7 @@ export async function GET(
       purchaseOrders, verificationDefs, companyAverages,
       playbook: { serviceKey: playbookKey, salesKey: salesPlaybookKey, phoneCloseKey, steps: playbookSteps, tracking: stepTracking },
       permits, permitRules, cardRequests, blockers, jobMedia,
-      project, projectSiblings,
+      project, projectSiblings, projectContext,
     });
   } catch (err) {
     console.error('Job API error:', err);
