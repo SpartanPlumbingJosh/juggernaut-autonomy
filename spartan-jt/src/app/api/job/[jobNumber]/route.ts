@@ -340,12 +340,15 @@ export async function GET(
         let sjAssignments: unknown[] = [];
         let sjCalls: unknown[] = [];
 
+        let sjVerifications: unknown[] = [];
+
         if (sjJob && String(sjJob.st_job_id) !== jobNumber) {
-          [sjTracking, sjAppointments, sjAssignments, sjCalls] = await Promise.all([
+          [sjTracking, sjAppointments, sjAssignments, sjCalls, sjVerifications] = await Promise.all([
             query(`SELECT playbook_key, step_number, status, evidence_type, evidence_ref, verified_at, score, notes FROM spartan_ops.playbook_step_tracking WHERE st_job_id = ${sjJob.st_job_id}`),
             query(`SELECT st_appointment_id, appointment_number, status, start_time, end_time, arrival_window_start, arrival_window_end, special_instructions FROM spartan_ops.st_appointments_v2 WHERE st_job_id = ${sjJob.st_job_id} ORDER BY start_time DESC LIMIT 10`),
             query(`SELECT st_assignment_id, st_appointment_id, st_tech_id, technician_name, status, is_paused, assigned_on FROM spartan_ops.st_appointment_assignments_v2 WHERE st_job_id = ${sjJob.st_job_id} ORDER BY assigned_on DESC LIMIT 20`),
             query(`SELECT st_call_id, created_on, duration_seconds, direction, status, call_type, recording_url FROM spartan_ops.st_calls WHERE st_job_id = ${sjJob.st_job_id} ORDER BY created_on DESC LIMIT 20`),
+            query(`SELECT verification_code, verification_name, result, checked_at FROM spartan_ops.job_verifications WHERE job_id = ${sjJob.st_job_id} ORDER BY checked_at DESC LIMIT 30`),
           ]);
         }
 
@@ -376,7 +379,7 @@ export async function GET(
           isInstallProject,
           allJobs: allProjectJobs,
           sjJob, toJob,
-          sjTracking, sjAppointments, sjAssignments, sjCalls,
+          sjTracking, sjAppointments, sjAssignments, sjCalls, sjVerifications,
           toTracking, toEstimates, toPayments,
           projectInvoices,
           totalProjectRevenue,

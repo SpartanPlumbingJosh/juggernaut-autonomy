@@ -18,12 +18,16 @@ export default function ServiceTab({ job, data, projectContext }: { job: any; da
   const pc = projectContext;
   const hasSjSibling = pc?.sjJob && String(pc.sjJob.st_job_id) !== String(job.st_job_id);
 
-  // If this is an install job in a project, use the SJ job's data
   const appointments = hasSjSibling ? (pc.sjAppointments || []) : (data.appointments || []);
   const assignments = hasSjSibling ? (pc.sjAssignments || []) : (data.assignments || []);
   const tracking = hasSjSibling ? (pc.sjTracking || []) : (data.playbook?.tracking || []);
   const playbook = data.playbook || { steps: [], tracking: [], serviceKey: 'plservice' };
   const sjJobId = hasSjSibling ? pc.sjJob.st_job_id : null;
+
+  // Verification results (from Data Validator) - use SJ's if project, otherwise current job's
+  const verifications = hasSjSibling ? (pc.sjVerifications || []) : (data.verifications || []);
+  const vPassed = verifications.filter((v: any) => v.result === 'pass');
+  const vFailed = verifications.filter((v: any) => v.result === 'fail');
 
   const assignMap: Record<string, any[]> = {};
   assignments.forEach((a: any) => {
@@ -77,18 +81,41 @@ export default function ServiceTab({ job, data, projectContext }: { job: any; da
       </div>
     </div>
 
-    {/* Project context banner */}
     {hasSjSibling && <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 16px', borderRadius: 'var(--rs)', background: 'var(--icebg)', border: '1px solid var(--icebd)', marginBottom: 20, fontSize: 14, color: 'var(--ice)' }}>
       <span style={{ fontWeight: 700 }}>Project View</span>
-      <span style={{ color: 'var(--t2)' }}>Service ran on SJ #{sjJobId} &mdash; showing that job&apos;s playbook data</span>
+      <span style={{ color: 'var(--t2)' }}>Service ran on SJ #{sjJobId}</span>
     </div>}
 
     <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
       <div className="st sf"><div className="num">{totalSteps}</div><div className="lbl">Steps</div></div>
-      <div className="st sm"><div className="num">{passedSteps}</div><div className="lbl">Verified</div></div>
-      <div className="st sv"><div className="num">{appointments.length}</div><div className="lbl">Appts</div></div>
+      <div className="st sm"><div className="num">{vPassed.length}</div><div className="lbl">Passed</div></div>
+      <div className="st" style={{ background: vFailed.length > 0 ? 'linear-gradient(150deg,rgba(239,68,68,.08),transparent 60%)' : 'var(--glass-bg)', border: vFailed.length > 0 ? '1px solid rgba(239,68,68,.12)' : 'var(--glass-border)', borderRadius: 'var(--r)', padding: 22, position: 'relative', overflow: 'hidden' }}><div className="num" style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700, letterSpacing: -1, lineHeight: 1, marginBottom: 6, color: vFailed.length > 0 ? 'var(--red)' : 'var(--t3)' }}>{vFailed.length}</div><div className="lbl" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.8px', textTransform: 'uppercase' as const, color: vFailed.length > 0 ? '#f87171' : 'var(--t3)' }}>Failed</div></div>
       <div className="st sg"><div className="num">{uniqueTechs.length}</div><div className="lbl">Techs</div></div>
     </div>
+
+    {/* Verification Results - Needs Attention / Passed */}
+    {verifications.length > 0 && <>
+      {vFailed.length > 0 && <div className="attn">
+        <div className="attn-h"><h3>Needs Attention</h3><span className="attn-count">{vFailed.length}</span></div>
+        <div className="attn-grid">
+          {vFailed.map((v: any, i: number) => (
+            <div className="attn-item" key={i}>
+              <span className="attn-icon">{'\u2717'}</span>
+              <span className="attn-name">{v.verification_name}</span>
+            </div>
+          ))}
+        </div>
+      </div>}
+
+      {vPassed.length > 0 && <div className="passed-section">
+        <div className="passed-h"><h3>Passed</h3><span className="passed-count">{vPassed.length}</span></div>
+        <div className="passed-grid">
+          {vPassed.map((v: any, i: number) => (
+            <span className="passed-chip" key={i}><span className="pc-dot" />{v.verification_name}</span>
+          ))}
+        </div>
+      </div>}
+    </>}
 
     {uniqueTechs.length > 0 && <div className="c full">
       <div className="ch"><h3>Assigned Technicians</h3><div className="tg" style={{ background: 'var(--icebg)', border: '1px solid var(--icebd)', color: 'var(--ice)' }}>{uniqueTechs.length}</div></div>
