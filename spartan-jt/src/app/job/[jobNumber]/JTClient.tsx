@@ -12,6 +12,7 @@ import VerifyTab from './VerifyTab';
 import PermitsTab from './PermitsTab';
 import CardsTab from './CardsTab';
 import BlockersTab from './BlockersTab';
+import DashboardTab from './DashboardTab';
 
 /* ── Types ─────────────────────────────────────────── */
 
@@ -300,7 +301,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       </nav>
 
       <div className="main">
-        {activeTab === 'dashboard' && <Dashboard job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={install} jobNumber={jobNumber} mode={modeInfo.mode} modeInfo={modeInfo} />}
+        {activeTab === 'dashboard' && <DashboardTab job={job} data={data} amt={amt} score={score} passed={passed} failed={failed} total={total} invTotal={invTotal} paidTotal={paidTotal} isInstall={install} jobNumber={jobNumber} mode={modeInfo.mode} modeInfo={modeInfo} />}
         {activeTab === 'intel' && <IntelTab job={job} data={data} amt={amt} />}
         {activeTab === 'service' && <ServiceTab job={job} data={data} projectContext={data.projectContext} />}
         {activeTab === 'sales' && <SalesTab job={job} data={data} projectContext={data.projectContext} />}
@@ -334,86 +335,4 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   );
 }
 
-/* ── Dashboard Sub-Component ───────────────────────── */
-
-function VR({ dot, k, v, style }: { dot: string; k: string; v: string; style?: React.CSSProperties }) {
-  return <div className="vr"><div className={`ai-dot ${dot}`} /><span className="k">{k}</span><span className="v" style={style}>{v}</span></div>;
-}
-
-function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, paidTotal, isInstall, jobNumber, mode, modeInfo }: any) {
-  const pending = total - passed - failed;
-  const scoreColor = score >= 80 ? 'var(--mint)' : score >= 60 ? 'var(--amber)' : 'var(--fire)';
-  const okDeg = total > 0 ? (passed / total) * 360 : 0;
-  const failDeg = total > 0 ? okDeg + (failed / total) * 360 : 0;
-  const stages: string[] = modeInfo?.stages || ['Job Sold', 'Contact', 'Pre-Install', 'Day Before', 'Install', 'Post-Install'];
-  const stageIdx = job.status === 'Completed' ? stages.length - 1 : job.status === 'InProgress' ? Math.max(0, stages.length - 2) : 0;
-
-  return <>
-    <div className="top">
-      <div className="top-l">
-        <div className="crumb">Jobs / #{jobNumber} / Tracker</div>
-        <h1><span className="n">#{jobNumber}</span> {job.customer_name || 'Unknown'}</h1>
-        <div className="sub">{job.job_type_name || ''} &middot; {job.business_unit_name || ''} &middot; {fmt(job.created_on)}</div>
-      </div>
-      <div className="pills">
-        {mode && <div className={`pill p-${modeInfo?.color || 'ice'}`}>{mode}</div>}
-        {job.status === 'Completed' && <div className="pill p-sold">Completed</div>}
-        {job.status === 'Scheduled' && <div className="pill p-svc">Scheduled</div>}
-        {job.status === 'InProgress' && <div className="pill p-svc">In Progress</div>}
-        {job.status === 'Canceled' && <div className="pill p-cancel">Canceled</div>}
-        {isInstall ? <div className="pill p-inst">Install</div> : <div className="pill p-svc">Service</div>}
-      </div>
-    </div>
-    <div className="ai-sum">
-      <div className="ai-ring" style={{ background: `conic-gradient(var(--mint) 0deg, var(--mint) ${okDeg}deg, var(--fire) ${okDeg}deg, var(--fire) ${failDeg}deg, var(--t4) ${failDeg}deg)` }}>
-        <div className="ai-ring-inner"><span className="pct" style={{ color: scoreColor }}>{score}%</span></div>
-      </div>
-      <div className="ai-stats">
-        <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--mint)' }}>{passed}</div><div className="ai-s-l" style={{ color: 'var(--mint2)' }}>Verified</div></div>
-        <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--fire)' }}>{failed}</div><div className="ai-s-l" style={{ color: 'var(--fire2)' }}>Failed</div></div>
-        {pending > 0 && <div className="ai-s"><div className="ai-s-n" style={{ color: 'var(--t3)' }}>{pending}</div><div className="ai-s-l" style={{ color: 'var(--t3)' }}>Pending</div></div>}
-      </div>
-    </div>
-    <div className="hero">
-      <div className="st sf"><div className="ai ai-ok" /><div className="num">{money(amt)}</div><div className="lbl">Sale Amount</div></div>
-      <div className="st sv"><div className="ai ai-ok" /><div className="num">{money(invTotal)}</div><div className="lbl">Invoiced</div></div>
-      <div className="st sm"><div className="ai ai-ok" /><div className="num">{money(paidTotal)}</div><div className="lbl">Paid</div></div>
-      <div className="st sg"><div className="num" style={{ fontSize: 18 }}>{job.status || '\u2014'}</div><div className="lbl">Status</div></div>
-    </div>
-    <div className="pipe-wrap">
-      <div className="pipe-top"><h2>Job Lifecycle</h2><div className="step">Stage {stageIdx + 1} / {stages.length}</div></div>
-      <div className="pipe">
-        {stages.map((s: string, i: number) => {
-          const cls = i < stageIdx ? 'done' : i === stageIdx ? 'now' : 'w';
-          return <div className={`pn ${cls}`} key={s}><div className={`pb ${cls}`} /><div className="pt">{s}</div></div>;
-        })}
-      </div>
-    </div>
-    <div className="g2">
-      <div className="c"><div className="ch"><h3>Customer</h3></div><div className="cb">
-        <VR dot="ai-ok" k="Name" v={job.customer_name || '\u2014'} />
-        <VR dot="ai-ok" k="Job #" v={`#${jobNumber}`} style={{ fontFamily: 'var(--mono)', color: 'var(--ice)' }} />
-        <VR dot="ai-ok" k="Address" v={job.customer_address || '\u2014'} />
-        <VR dot="ai-ok" k="Created" v={fmt(job.created_on)} />
-        <VR dot={job.completed_on ? 'ai-ok' : 'ai-wait'} k="Completed" v={fmt(job.completed_on)} />
-      </div></div>
-      <div className="c"><div className="ch"><h3>Verification Checks</h3></div><div className="cb">
-        {(data.verifications || []).slice(0, 8).map((v: any, i: number) => {
-          const dot = v.result === 'pass' ? 'ai-ok' : v.result === 'fail' ? 'ai-fail' : 'ai-wait';
-          const chip = v.result === 'pass' ? 'c-ok' : v.result === 'fail' ? 'c-fail' : 'c-info';
-          const label = v.result === 'pass' ? '\u2713 Verified' : v.result === 'fail' ? '\u2717 Failed' : 'Pending';
-          return <div className="vr" key={i}><div className={`ai-dot ${dot}`} /><span className="k">{v.verification_name}</span><span className={`chip ${chip}`}>{label}</span></div>;
-        })}
-        {(data.verifications || []).length === 0 && <div style={{ color: 'var(--t3)', fontSize: 12 }}>No verifications yet.</div>}
-      </div></div>
-    </div>
-    <div className="c full"><div className="ch"><h3>Work Scope</h3></div><div className="cb">
-      <div className="slbl"><div className="ai-dot ai-ok" />Description</div>
-      <div className="stxt cv scope-text">{stripHtml(job.summary || 'No scope summary available')}</div>
-      <div className="g2" style={{ marginTop: 8, marginBottom: 0 }}>
-        <div><div className="slbl"><div className="ai-dot ai-ok" />Job Type</div><div className="stxt cg">{job.job_type_name || '\u2014'}</div></div>
-        <div><div className="slbl"><div className="ai-dot ai-ok" />Business Unit</div><div className="stxt ca">{job.business_unit_name || '\u2014'}</div></div>
-      </div>
-    </div></div>
-  </>;
-}
+/* Dashboard is now in DashboardTab.tsx */
