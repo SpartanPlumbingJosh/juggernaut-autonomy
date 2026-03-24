@@ -24,7 +24,7 @@ export default function ServiceTab({ job, data, projectContext }: { job: any; da
   const playbook = data.playbook || { steps: [], tracking: [], serviceKey: 'plservice' };
   const sjJobId = hasSjSibling ? pc.sjJob.st_job_id : null;
 
-  // Verification results (from Data Validator) - use SJ's if project, otherwise current job's
+  // Verification results (from Data Validator) - shown in Needs Attention / Passed sections below
   const verifications = hasSjSibling ? (pc.sjVerifications || []) : (data.verifications || []);
   const vPassed = verifications.filter((v: any) => v.result === 'pass');
   const vFailed = verifications.filter((v: any) => v.result === 'fail');
@@ -63,6 +63,10 @@ export default function ServiceTab({ job, data, projectContext }: { job: any; da
     const t = trackingMap[`${s.playbook_key}-${s.step_number}`];
     return t && t.status === 'pass';
   }).length;
+  const failedSteps = serviceSteps.filter((s: any) => {
+    const t = trackingMap[`${s.playbook_key}-${s.step_number}`];
+    return t && t.status === 'fail';
+  }).length;
 
   return <>
     <div style={{ marginBottom: 24 }}>
@@ -88,12 +92,12 @@ export default function ServiceTab({ job, data, projectContext }: { job: any; da
 
     <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
       <div className="st sf"><div className="num">{totalSteps}</div><div className="lbl">Steps</div></div>
-      <div className="st sm"><div className="num">{vPassed.length}</div><div className="lbl">Passed</div></div>
-      <div className="st" style={{ background: vFailed.length > 0 ? 'linear-gradient(150deg,rgba(239,68,68,.08),transparent 60%)' : 'var(--glass-bg)', border: vFailed.length > 0 ? '1px solid rgba(239,68,68,.12)' : 'var(--glass-border)', borderRadius: 'var(--r)', padding: 22, position: 'relative', overflow: 'hidden' }}><div className="num" style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700, letterSpacing: -1, lineHeight: 1, marginBottom: 6, color: vFailed.length > 0 ? 'var(--red)' : 'var(--t3)' }}>{vFailed.length}</div><div className="lbl" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.8px', textTransform: 'uppercase' as const, color: vFailed.length > 0 ? '#f87171' : 'var(--t3)' }}>Failed</div></div>
+      <div className="st sm"><div className="num">{passedSteps}</div><div className="lbl">Passed</div></div>
+      <div className="st" style={{ background: failedSteps > 0 ? 'linear-gradient(150deg,rgba(239,68,68,.08),transparent 60%)' : 'var(--glass-bg)', border: failedSteps > 0 ? '1px solid rgba(239,68,68,.12)' : 'var(--glass-border)', borderRadius: 'var(--r)', padding: 22, position: 'relative', overflow: 'hidden' }}><div className="num" style={{ fontFamily: 'var(--mono)', fontSize: 34, fontWeight: 700, letterSpacing: -1, lineHeight: 1, marginBottom: 6, color: failedSteps > 0 ? 'var(--red)' : 'var(--t3)' }}>{failedSteps}</div><div className="lbl" style={{ fontSize: 13, fontWeight: 600, letterSpacing: '.8px', textTransform: 'uppercase' as const, color: failedSteps > 0 ? '#f87171' : 'var(--t3)' }}>Failed</div></div>
       <div className="st sg"><div className="num">{uniqueTechs.length}</div><div className="lbl">Techs</div></div>
     </div>
 
-    {/* Verification Results - Needs Attention / Passed */}
+    {/* Data Validator Results - Needs Attention / Passed (only shown when verifications exist) */}
     {verifications.length > 0 && <>
       {vFailed.length > 0 && <div className="attn">
         <div className="attn-h"><h3>Needs Attention</h3><span className="attn-count">{vFailed.length}</span></div>
