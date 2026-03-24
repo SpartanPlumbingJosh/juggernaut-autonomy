@@ -43,6 +43,7 @@ export interface JobData {
   jobMedia: any[];
   project: any | null;
   projectSiblings: any[];
+  projectContext: any | null;
 }
 
 interface SlackUser {
