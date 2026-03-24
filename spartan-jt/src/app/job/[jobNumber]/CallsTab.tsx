@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, Fragment } from 'react';
 
 function fmtDateTime(d: string | null | undefined): string {
   if (!d) return '\u2014';
@@ -25,9 +25,23 @@ const CATEGORY_META: Record<string, { color: string; bg: string; bd: string }> =
   retention: { color: 'var(--amber)', bg: 'var(--amberbg)', bd: 'var(--amberbd)' },
 };
 
+const ROLE_META: Record<string, { label: string; color: string; bg: string; bd: string }> = {
+  csr: { label: 'CSR', color: 'var(--ice)', bg: 'var(--icebg)', bd: 'var(--icebd)' },
+  closer: { label: 'Closer', color: 'var(--volt)', bg: 'var(--voltbg)', bd: 'var(--voltbd)' },
+  tech: { label: 'Tech', color: 'var(--mint)', bg: 'var(--mintbg)', bd: 'var(--mintbd)' },
+  system: { label: 'System', color: 'var(--t3)', bg: 'var(--s3)', bd: 'var(--b2)' },
+  missed: { label: 'Missed', color: 'var(--fire)', bg: 'var(--firebg)', bd: 'var(--firebd)' },
+};
+
 function getCategoryStyle(cat: string) {
   const key = (cat || '').toLowerCase().replace(/[- ]/g, '_');
   return CATEGORY_META[key] || CATEGORY_META.service;
+}
+
+function scoreColor(score: number): string {
+  if (score >= 80) return 'var(--mint)';
+  if (score >= 60) return 'var(--amber)';
+  return 'var(--fire)';
 }
 
 function personalize(template: string, job: any, data: any): string {
@@ -60,13 +74,23 @@ function personalize(template: string, job: any, data: any): string {
 export default function CallsTab({ job, data }: { job: any; data: any }) {
   const calls = (data.calls || []) as any[];
   const callScripts = (data.callScripts || []) as any[];
+  const callScores = (data.callScores || []) as any[];
   const [selectedScript, setSelectedScript] = useState<any | null>(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [expandedCall, setExpandedCall] = useState<string | null>(null);
+
+  // Build lookup: st_call_id -> score
+  const scoreMap: Record<string, any> = {};
+  callScores.forEach((s: any) => { scoreMap[s.st_call_id] = s; });
 
   const inbound = calls.filter((c: any) => c.direction === 'Inbound').length;
   const outbound = calls.filter((c: any) => c.direction === 'Outbound').length;
   const totalDuration = calls.reduce((s: number, c: any) => s + (c.duration_seconds || 0), 0);
   const avgDuration = calls.length > 0 ? Math.round(totalDuration / calls.length) : 0;
+  const scoredCalls = calls.filter((c: any) => scoreMap[c.st_call_id]);
+  const avgScore = scoredCalls.length > 0
+    ? Math.round(scoredCalls.reduce((s: number, c: any) => s + (parseFloat(scoreMap[c.st_call_id].score_total) || 0), 0) / scoredCalls.length)
+    : null;
 
   const scriptsByCategory: Record<string, any[]> = {};
   callScripts.forEach((s: any) => {
@@ -84,7 +108,7 @@ export default function CallsTab({ job, data }: { job: any; data: any }) {
       </div>
       <div className="tab-info">
         <div className="tab-title">Calls &amp; Scripts</div>
-        <div className="tab-desc">{callScripts.length} preset scripts &middot; Call history &middot; AI scorecards</div>
+        <div className="tab-desc">{callScripts.length} preset scripts &middot; {calls.length} calls &middot; {scoredCalls.length} scored</div>
       </div>
       <div style={{ display: 'flex', gap: 8 }}>
         <button
@@ -106,7 +130,7 @@ export default function CallsTab({ job, data }: { job: any; data: any }) {
       </div>
     </div>
 
-    <div className="hero" style={{ gridTemplateColumns: 'repeat(4,1fr)' }}>
+    <div className="hero" style={{ gridTemplateColumns: avgScore !== null ? 'repeat(5,1fr)' : 'repeat(4,1fr)' }}>
       <div className="st" style={{ background: 'var(--icebg)', border: '1px solid var(--icebd)' }}>
         <div className="num" style={{ fontSize: 28, color: 'var(--ice)' }}>{calls.length}</div>
         <div className="lbl" style={{ color: 'var(--ice)' }}>Total Calls</div>
@@ -123,6 +147,10 @@ export default function CallsTab({ job, data }: { job: any; data: any }) {
         <div className="num" style={{ fontSize: 28, color: 'var(--t2)' }}>{durFmt(avgDuration)}</div>
         <div className="lbl">Avg Duration</div>
       </div>
+      {avgScore !== null && <div className="st" style={{ background: 'var(--s3)', border: '1px solid var(--b2)' }}>
+        <div className="num" style={{ fontSize: 28, color: scoreColor(avgScore) }}>{avgScore}</div>
+        <div className="lbl">Avg Score</div>
+      </div>}
     </div>
 
     {!showHistory && !selectedScript && <>
@@ -205,17 +233,40 @@ export default function CallsTab({ job, data }: { job: any; data: any }) {
         <div className="tg" style={{ background: 'var(--icebg)', border: '1px solid var(--icebd)', color: 'var(--ice)' }}>{calls.length}</div>
       </div>
       {calls.length > 0 ? <div className="cb" style={{ padding: 0 }}>
-        <table className="mt"><thead><tr><th>Date</th><th>Direction</th><th>Type</th><th>Duration</th><th>From</th><th>To</th><th>Status</th><th>Recording</th></tr></thead><tbody>
-          {calls.map((c: any, i: number) => <tr key={i}>
-            <td>{fmtDateTime(c.created_on)}</td>
-            <td style={{ color: c.direction === 'Inbound' ? 'var(--mint)' : 'var(--ice)' }}>{c.direction || '\u2014'}</td>
-            <td>{c.call_type || '\u2014'}</td>
-            <td>{durFmt(c.duration_seconds)}</td>
-            <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{c.from_number || '\u2014'}</td>
-            <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{c.to_number || '\u2014'}</td>
-            <td>{c.status || '\u2014'}</td>
-            <td>{c.recording_url ? <a href={c.recording_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ice)', fontSize: 11 }}>Play</a> : '\u2014'}</td>
-          </tr>)}
+        <table className="mt"><thead><tr><th>Date</th><th>Direction</th><th>Type</th><th>Duration</th><th>Agent</th><th>From</th><th>To</th><th>Score</th><th>Recording</th></tr></thead><tbody>
+          {calls.map((c: any, i: number) => {
+            const cs = scoreMap[c.st_call_id];
+            const roleMeta = cs ? (ROLE_META[cs.call_role] || ROLE_META.system) : null;
+            const isExpanded = expandedCall === c.st_call_id;
+            return <Fragment key={i}><tr onClick={() => cs && setExpandedCall(isExpanded ? null : c.st_call_id)} style={{ cursor: cs ? 'pointer' : undefined }}>
+              <td>{fmtDateTime(c.created_on)}</td>
+              <td style={{ color: c.direction === 'Inbound' ? 'var(--mint)' : 'var(--ice)' }}>{c.direction || '\u2014'}</td>
+              <td>{c.call_type || '\u2014'}</td>
+              <td>{durFmt(c.duration_seconds)}</td>
+              <td style={{ fontSize: 11 }}>{c.agent_name || '\u2014'}</td>
+              <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{c.from_number || '\u2014'}</td>
+              <td style={{ fontFamily: 'var(--mono)', fontSize: 11 }}>{c.to_number || '\u2014'}</td>
+              <td>{cs ? <span style={{
+                padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 700,
+                background: 'var(--s3)', border: '1px solid var(--b2)',
+                color: scoreColor(parseFloat(cs.score_total)),
+              }}>{cs.score_total}</span> : '\u2014'}</td>
+              <td>{c.recording_url ? <a href={c.recording_url} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--ice)', fontSize: 11 }}>Play</a> : '\u2014'}</td>
+            </tr>
+            {isExpanded && cs && <tr key={`${i}-detail`}><td colSpan={9} style={{ padding: 0 }}>
+              <div style={{ padding: '10px 16px', background: 'var(--s2)', borderTop: '1px solid var(--b1)', display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+                {roleMeta && <span style={{ padding: '2px 8px', borderRadius: 4, fontSize: 10, fontWeight: 600, background: roleMeta.bg, border: `1px solid ${roleMeta.bd}`, color: roleMeta.color }}>{roleMeta.label}</span>}
+                <div style={{ display: 'flex', gap: 12, fontSize: 11 }}>
+                  <span style={{ color: 'var(--t3)' }}>Duration <span style={{ color: 'var(--t1)', fontWeight: 600 }}>{cs.score_duration}</span></span>
+                  <span style={{ color: 'var(--t3)' }}>Booking <span style={{ color: 'var(--t1)', fontWeight: 600 }}>{cs.score_booking}</span></span>
+                  <span style={{ color: 'var(--t3)' }}>Response <span style={{ color: 'var(--t1)', fontWeight: 600 }}>{cs.score_response}</span></span>
+                  <span style={{ color: 'var(--t3)' }}>Outcome <span style={{ color: 'var(--t1)', fontWeight: 600 }}>{cs.score_outcome}</span></span>
+                </div>
+                {cs.ai_feedback && <div style={{ fontSize: 11, color: 'var(--t2)', fontStyle: 'italic' }}>{cs.ai_feedback}</div>}
+              </div>
+            </td></tr>}
+            </Fragment>;
+          })}
         </tbody></table>
       </div> : <div className="cb" style={{ color: 'var(--t3)', fontSize: 12, textAlign: 'center', padding: 30 }}>No calls linked to this job.</div>}
     </div>}
