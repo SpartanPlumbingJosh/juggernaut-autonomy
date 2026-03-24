@@ -235,8 +235,8 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const job = data.job;
   const amt = parseFloat(job.total) || 0;
   const verifs = data.verifications || [];
-  const passed = verifs.filter(v => v.result === 'pass').length;
-  const failed = verifs.filter(v => v.result === 'fail').length;
+  const passed = verifs.filter((v: any) => v.result === 'pass').length;
+  const failed = verifs.filter((v: any) => v.result === 'fail').length;
   const total = verifs.length;
   const score = total > 0 ? Math.round((passed / total) * 100) : 0;
   const invoices = data.invoices || [];
@@ -317,7 +317,7 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
       <aside className="panel">
         <div className="panel-h"><h2>Activity</h2><div className="live">Live</div></div>
         <div className="panel-f">
-          {events.map((e, i) => (
+          {events.map((e: any, i: number) => (
             <div className="act" key={i}>
               <div className={`act-d ${e.dot}`} />
               <div className="act-b">
@@ -344,7 +344,7 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
   const scoreColor = score >= 80 ? 'var(--mint)' : score >= 60 ? 'var(--amber)' : 'var(--fire)';
   const okDeg = total > 0 ? (passed / total) * 360 : 0;
   const failDeg = total > 0 ? okDeg + (failed / total) * 360 : 0;
-  const stages = modeInfo?.stages || ['Job Sold', 'Contact', 'Pre-Install', 'Day Before', 'Install', 'Post-Install'];
+  const stages: string[] = modeInfo?.stages || ['Job Sold', 'Contact', 'Pre-Install', 'Day Before', 'Install', 'Post-Install'];
   const stageIdx = job.status === 'Completed' ? stages.length - 1 : job.status === 'InProgress' ? Math.max(0, stages.length - 2) : 0;
 
   return <>
@@ -382,7 +382,7 @@ function Dashboard({ job, data, amt, score, passed, failed, total, invTotal, pai
     <div className="pipe-wrap">
       <div className="pipe-top"><h2>Job Lifecycle</h2><div className="step">Stage {stageIdx + 1} / {stages.length}</div></div>
       <div className="pipe">
-        {stages.map((s, i) => {
+        {stages.map((s: string, i: number) => {
           const cls = i < stageIdx ? 'done' : i === stageIdx ? 'now' : 'w';
           return <div className={`pn ${cls}`} key={s}><div className={`pb ${cls}`} /><div className="pt">{s}</div></div>;
         })}
