@@ -245,7 +245,8 @@ export default function JTClient({ jobNumber }: { jobNumber: string }) {
   const paidTotal = payments.reduce((s: number, p: any) => s + (parseFloat(p.total) || 0), 0);
   const install = isInstallTrack(job.business_unit_name);
   const modeInfo = getMode(job.job_type_name, job.business_unit_name);
-  const visibleTabs = TABS.filter(t => modeInfo.tabs.includes(t.id));
+  const hasSoldEstimate = (data.estimates || []).some((e: any) => e.status_name === 'Sold');
+  const visibleTabs = hasSoldEstimate ? [...TABS] : TABS.filter(t => modeInfo.tabs.includes(t.id));
 
   const events = [
     { dot: 'fire', title: `Job ${job.status || 'Created'}`, time: fmt(job.created_on), src: 'ServiceTitan', detail: `${job.business_unit_name || ''} \u00b7 ${job.job_type_name || ''} \u00b7 ${money(amt)}` },
