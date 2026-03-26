@@ -1,0 +1,31 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE properties SYSTEM 'http://java.sun.com/dtd/properties.dtd'>
+<properties>
+
+    <!-- Web/API server -->
+    <entry key='web.port'>8082</entry>
+
+    <!-- Embedded H2 database -->
+    <entry key='database.driver'>org.h2.Driver</entry>
+    <entry key='database.url'>jdbc:h2:/opt/traccar/data/traccar</entry>
+    <entry key='database.user'>sa</entry>
+    <entry key='database.password'></entry>
+
+    <!-- Logging -->
+    <entry key='logger.enable'>true</entry>
+    <entry key='logger.level'>info</entry>
+    <entry key='logger.file'>/opt/traccar/logs/tracker-server.log</entry>
+
+    <!-- Teltonika protocol (FMM130) -->
+    <entry key='teltonika.port'>5027</entry>
+
+    <!-- Timezone -->
+    <entry key='server.timezone'>America/New_York</entry>
+
+    <!-- Registration (create admin account on first visit) -->
+    <entry key='server.registration'>true</entry>
+
+    <!-- API access -->
+    <entry key='web.origin'>*</entry>
+
+</properties>
