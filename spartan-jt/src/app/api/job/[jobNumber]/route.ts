@@ -199,16 +199,38 @@ export async function GET(
         }
       }
       if (leeNums.length > 0) {
-        const inList = leeNums.map(n => `'${n}'`).join(',');
+        // AI outputs manufacturer part numbers as lee_number (e.g. RE250T6-284, QS-U-C)
+        // but catalog uses Lee Supply SKUs as item_number. The manufacturer part number
+        // appears at the start of the description field (e.g. "RE250T6-284 - BRADFORD WHITE...")
+        // Match on both item_number (in case AI ever outputs correct SKU) and description prefix
+        const uniqueNums = [...new Set(leeNums)];
+        const inList = uniqueNums.map(n => `'${n.replace(/'/g, "''")}'`).join(',');
+        const likeConditions = uniqueNums.map(n => {
+          const escaped = n.replace(/'/g, "''");
+          return `description LIKE '${escaped} - %' OR description LIKE '${escaped} %'`;
+        }).join(' OR ');
         const imgRows = await query(`
-          SELECT item_number, image_base64
+          SELECT item_number, description, image_base64
           FROM spartan_ops.lee_supply_catalog
-          WHERE item_number IN (${inList}) AND image_base64 IS NOT NULL AND image_base64 != ''
+          WHERE (item_number IN (${inList}) OR ${likeConditions})
+          AND image_base64 IS NOT NULL AND image_base64 != ''
         `);
         for (const row of imgRows) {
           const b64 = (row as any).image_base64;
           const prefix = b64.startsWith('/9j/') ? 'data:image/jpeg;base64,' : 'data:image/png;base64,';
-          catalogImages[(row as any).item_number] = prefix + b64;
+          const imgData = prefix + b64;
+          const itemNum = (row as any).item_number as string;
+          const desc = ((row as any).description || '') as string;
+          // If item_number directly matches a lee_number, key by item_number
+          if (uniqueNums.includes(itemNum)) {
+            catalogImages[itemNum] = imgData;
+          }
+          // Also check if description prefix matches a lee_number (manufacturer part number)
+          for (const ln of uniqueNums) {
+            if (desc.startsWith(ln + ' - ') || desc.startsWith(ln + ' ')) {
+              catalogImages[ln] = imgData;
+            }
+          }
         }
       }
     }
