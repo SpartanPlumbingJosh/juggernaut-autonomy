@@ -201,12 +201,14 @@ export async function GET(
       if (leeNums.length > 0) {
         const inList = leeNums.map(n => `'${n}'`).join(',');
         const imgRows = await query(`
-          SELECT item_number, image_url
+          SELECT item_number, image_base64
           FROM spartan_ops.lee_supply_catalog
-          WHERE item_number IN (${inList}) AND image_url IS NOT NULL AND image_url != ''
+          WHERE item_number IN (${inList}) AND image_base64 IS NOT NULL AND image_base64 != ''
         `);
         for (const row of imgRows) {
-          catalogImages[(row as any).item_number] = (row as any).image_url;
+          const b64 = (row as any).image_base64;
+          const prefix = b64.startsWith('/9j/') ? 'data:image/jpeg;base64,' : 'data:image/png;base64,';
+          catalogImages[(row as any).item_number] = prefix + b64;
         }
       }
     }
