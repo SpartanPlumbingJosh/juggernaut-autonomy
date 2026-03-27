@@ -190,7 +190,7 @@ export async function GET(
 
     const contextPrompt = `You are the intelligence briefing system for Spartan Plumbing (Dayton, OH).
 
-RULES: Only state facts from the data below. Use exact BU names, job types, dates, amounts. Never infer or make up details. Shorter accurate > longer wrong.
+RULES: Only state facts from the data below. Never infer or make up details. The dashboard already shows job count, lifetime value, this job value, and recalls. Do NOT repeat those numbers in the summary. Be concise. Every word must earn its place.
 
 ===== TODAY'S JOB =====
 Job #${job.st_job_id} | ${job.business_unit_name || 'Unknown'} | ${job.job_type_name || 'Unknown'} | ${job.status} | $${parseFloat(job.total) || 0}
@@ -217,10 +217,10 @@ ${contacts.map(c => `${c.type}: ${c.value}`).join('\n') || 'None'}
 
 Write a dispatch briefing. Respond ONLY with JSON (no markdown):
 {
-  "summary": "4-6 sentences, facts only from above data",
-  "risk_flags": ["specific risks with evidence"],
-  "upsell_opportunities": ["tied to specific unsold estimates by name and $"],
-  "approach_tips": ["2-3 tips from Slack/ST data, not generic advice"],
+  "summary": "2 short sentences max. What does the tech need to know? Skip address, dollar amounts, and stats already on screen.",
+  "risk_flags": ["8 words max each, only real risks not obvious facts"],
+  "upsell_opportunities": ["Estimate #ID for Description valued at $X remains open from Date"],
+  "approach_tips": ["Start with verb, 10 words max, from Slack/ST data only"],
   "customer_sentiment": "positive | neutral | cautious | negative",
   "priority_level": "routine | attention | high_priority"
 }`;
