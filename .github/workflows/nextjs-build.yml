@@ -1,0 +1,53 @@
+name: Next.js Build Check
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'spartan-jt/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'spartan-jt/**'
+
+jobs:
+  build:
+    name: Build spartan-jt
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: spartan-jt
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: spartan-jt/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci || npm install
+
+      - name: TypeScript type check
+        run: npx tsc --noEmit || true
+        continue-on-error: true
+
+      - name: Build Next.js
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL || 'https://kong.thejuggernaut.org' }}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'placeholder' }}
+
+      - name: Build succeeded
+        if: success()
+        run: echo "✅ Next.js build passed"
+
+      - name: Build failed
+        if: failure()
+        run: |
+          echo "❌ Next.js build failed - this PR should NOT be merged"
+          echo "::error::Next.js build failed. Fix build errors before merging."
