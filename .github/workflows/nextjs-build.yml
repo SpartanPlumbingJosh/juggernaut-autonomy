@@ -25,12 +25,10 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
-          cache: 'npm'
-          cache-dependency-path: spartan-jt/package-lock.json
+          node-version: '20'
 
       - name: Install dependencies
-        run: npm ci || npm install
+        run: npm install
 
       - name: TypeScript type check
         run: npx tsc --noEmit || true
@@ -44,10 +42,10 @@ jobs:
 
       - name: Build succeeded
         if: success()
-        run: echo "✅ Next.js build passed"
+        run: echo "Next.js build passed"
 
       - name: Build failed
         if: failure()
         run: |
-          echo "❌ Next.js build failed - this PR should NOT be merged"
+          echo "Next.js build failed - this PR should NOT be merged"
           echo "::error::Next.js build failed. Fix build errors before merging."
