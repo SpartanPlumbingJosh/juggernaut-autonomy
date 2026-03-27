@@ -182,7 +182,8 @@ export async function GET(
       SELECT material_list_json, sold_amount, form_confirmed, confirmed_at,
              generated_at, ai_model, sold_by, track_type
       FROM spartan_ops.auto_sales_forms
-      WHERE st_job_id = '${jobNumber}'
+      WHERE st_job_id IN ('${projectJobIds.join("','")}')
+      AND material_list_json IS NOT NULL
       ORDER BY generated_at DESC
       LIMIT 1
     `);
@@ -199,10 +200,6 @@ export async function GET(
         }
       }
       if (leeNums.length > 0) {
-        // AI outputs manufacturer part numbers as lee_number (e.g. RE250T6-284, QS-U-C)
-        // but catalog uses Lee Supply SKUs as item_number. The manufacturer part number
-        // appears at the start of the description field (e.g. "RE250T6-284 - BRADFORD WHITE...")
-        // Match on both item_number (in case AI ever outputs correct SKU) and description prefix
         const uniqueNums = [...new Set(leeNums)];
         const inList = uniqueNums.map(n => `'${n.replace(/'/g, "''")}'`).join(',');
         const likeConditions = uniqueNums.map(n => {
@@ -221,11 +218,9 @@ export async function GET(
           const imgData = prefix + b64;
           const itemNum = (row as any).item_number as string;
           const desc = ((row as any).description || '') as string;
-          // If item_number directly matches a lee_number, key by item_number
           if (uniqueNums.includes(itemNum)) {
             catalogImages[itemNum] = imgData;
           }
-          // Also check if description prefix matches a lee_number (manufacturer part number)
           for (const ln of uniqueNums) {
             if (desc.startsWith(ln + ' - ') || desc.startsWith(ln + ' ')) {
               catalogImages[ln] = imgData;
@@ -324,7 +319,6 @@ export async function GET(
     let projectSiblings: unknown[] = [];
     let projectContext: any = null;
 
-    // Classify job role from BU/job type
     function classifyJobRole(bu: string, jt: string): string {
       const b = (bu || '').toLowerCase();
       const j = (jt || '').toLowerCase();
@@ -355,7 +349,6 @@ export async function GET(
           ORDER BY j.created_on
         `);
 
-        // Classify all project jobs
         const allProjectJobs = [
           { st_job_id: (job as any).st_job_id, business_unit_name: String(job.business_unit_name || ''), job_type_name: String(job.job_type_name || ''), total: (job as any).total, status: (job as any).status, created_on: (job as any).created_on },
           ...(projectSiblings as any[])
@@ -369,12 +362,10 @@ export async function GET(
         const isInstallProject = installJobs.length > 0;
         const totalProjectRevenue = allProjectJobs.reduce((s, j) => s + (parseFloat(j.total) || 0), 0);
 
-        // Pull cross-job data from SJ and TO siblings
         let sjTracking: unknown[] = [];
         let sjAppointments: unknown[] = [];
         let sjAssignments: unknown[] = [];
         let sjCalls: unknown[] = [];
-
         let sjVerifications: unknown[] = [];
 
         if (sjJob && String(sjJob.st_job_id) !== jobNumber) {
@@ -399,7 +390,6 @@ export async function GET(
           ]);
         }
 
-        // Aggregate invoices/payments across all project jobs
         const allIds = allProjectJobs.map(j => j.st_job_id).join(',');
         const projectInvoices = await query(`
           SELECT st_invoice_id, st_job_id, reference_number, summary, sub_total, sales_tax, total, balance, invoice_date
