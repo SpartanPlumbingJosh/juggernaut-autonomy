@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "juggernaut": {
+      "type": "url",
+      "url": "https://juggernaut-mcp-production.up.railway.app/mcp/sse?token=jug-mcp-v9-2024-spartan"
+    }
+  }
+}
